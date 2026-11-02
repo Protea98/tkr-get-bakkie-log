@@ -75,7 +75,7 @@ function gateOrApp() {
   $("gate").hidden = true; app.hidden = false; $("signBtn").hidden = false; $("who").textContent = showName(email) + (isAdmin() ? " · admin" : " · manager");
   if (subs.length === 1) {
     const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => netNote("Couldn't load. Check the signal.")));
-    live("fcMetres", v => { metres = v; if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
+    live("fcMetres", v => { metres = v; if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await seedRegister(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
     const liveQ = (name, set) => subs.push(onSnapshot(query(collection(db, name), where("store", "==", "drill")), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => console.warn(e)));
     liveQ("stMoves", v => stMoves = v); liveQ("stCounts", v => stCounts = v);
     subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { stPrice = {}; (s.exists() ? s.data().list || [] : []).forEach(i => { if (i.getKey && num(i.price) > 0) stPrice[i.getKey] = num(i.price); }); settings = mergeSettings(rawSettings); render(); }, () => {}));
@@ -591,6 +591,87 @@ async function seedOct31() {
     await setDoc(flag, { done: now, by: email, lines: n });
     toast("31/10 loaded: 157.4 m. October total 4 969.7 m (chat reports and tally sheets)");
   } catch (e) { console.warn(e); } finally { seeding31 = false; }
+}
+/* October 2026 as per Muneer's shift register (handwritten, corrected 02/11/2026): every day and night shift per rig, 6 294.1 m to 31/10.
+   Replaces all earlier October metres in the app. */
+const OCT_REGISTER = [
+  ["2026-10-01", "Day", "Bongani", 0.0, 83.9],
+  ["2026-10-01", "Night", "Zandile", 108.6, 50.6],
+  ["2026-10-02", "Day", "Bongani", 87.9, 49.6],
+  ["2026-10-02", "Night", "Zandile", 82.1, 80.4],
+  ["2026-10-03", "Day", "Bongani", 46.2, 173.0],
+  ["2026-10-03", "Night", "Zandile", 135.0, 207.1],
+  ["2026-10-04", "Day", "Katlego", 80.4, 38.1],
+  ["2026-10-04", "Night", "Bongani", 86.5, 55.5],
+  ["2026-10-05", "Day", "Tsholo", 44.9, 94.4],
+  ["2026-10-05", "Night", "Bongani", 97.6, 98.3],
+  ["2026-10-06", "Day", "Tsholo", 88.4, 87.3],
+  ["2026-10-06", "Night", "Bongani", 91.7, 140.7],
+  ["2026-10-07", "Day", "Zandile", 0.0, 10.8],
+  ["2026-10-07", "Night", "Tsholo", 80.0, 0.0],
+  ["2026-10-08", "Day", "Zandile", 96.7, 65.3],
+  ["2026-10-08", "Night", "Moses", 72.7, 0.0],
+  ["2026-10-09", "Day", "Zandile", 85.3, 31.4],
+  ["2026-10-09", "Night", "Moses", 157.1, 31.4],
+  ["2026-10-10", "Day", "Bongani", 0.0, 89.6],
+  ["2026-10-10", "Night", "Zandile", 0.0, 54.4],
+  ["2026-10-11", "Day", "Bongani", 0.0, 144.0],
+  ["2026-10-11", "Night", "Zandile", 50.4, 137.4],
+  ["2026-10-12", "Day", "", 42.0, 47.8],
+  ["2026-10-12", "Night", "Zandile", 0.0, 49.5],
+  ["2026-10-13", "Day", "", 200.0, 99.5],
+  ["2026-10-13", "Night", "Zandile", 69.5, 99.5],
+  ["2026-10-14", "Day", "Katlego", 70.1, 99.9],
+  ["2026-10-14", "Night", "", 94.3, 118.2],
+  ["2026-10-15", "Day", "", 59.4, 95.4],
+  ["2026-10-15", "Night", "", 87.7, 125.7],
+  ["2026-10-16", "Day", "", 42.0, 53.0],
+  ["2026-10-16", "Night", "", 33.7, 16.9],
+  ["2026-10-17", "Day", "", 32.5, 83.4],
+  ["2026-10-17", "Night", "", 0.0, 99.5],
+  ["2026-10-18", "Day", "Zandile", 55.5, 0.0],
+  ["2026-10-18", "Night", "", 0.0, 104.7],
+  ["2026-10-19", "Day", "Zandile", 28.5, 0.0],
+  ["2026-10-19", "Night", "", 43.3, 24.9],
+  ["2026-10-20", "Day", "Tsholo", 27.9, 0.0],
+  ["2026-10-20", "Night", "Zandile", 31.5, 76.2],
+  ["2026-10-21", "Day", "Tsholo", 0.0, 0.0],
+  ["2026-10-21", "Night", "Zandile", 34.8, 72.9],
+  ["2026-10-22", "Day", "Katlego", 0.0, 58.8],
+  ["2026-10-22", "Night", "", 0.0, 139.2],
+  ["2026-10-23", "Day", "Katlego", 0.0, 10.9],
+  ["2026-10-23", "Night", "Tsholo", 0.0, 21.7],
+  ["2026-10-24", "Day", "", 0.0, 0.0],
+  ["2026-10-24", "Night", "Katlego", 0.0, 0.0],
+  ["2026-10-25", "Day", "Zandile", 0.0, 0.0],
+  ["2026-10-25", "Night", "", 0.0, 0.0],
+  ["2026-10-26", "Day", "", 0.0, 0.0],
+  ["2026-10-26", "Night", "", 0.0, 45.9],
+  ["2026-10-27", "Day", "Zandile", 0.0, 95.9],
+  ["2026-10-27", "Night", "Moses", 0.0, 84.3],
+  ["2026-10-28", "Day", "", 0.0, 50.3],
+  ["2026-10-28", "Night", "", 0.0, 64.8],
+  ["2026-10-29", "Day", "", 0.0, 0.0],
+  ["2026-10-29", "Night", "", 0.0, 55.3],
+  ["2026-10-30", "Day", "", 0.0, 64.9],
+  ["2026-10-30", "Night", "", 0.0, 10.3],
+  ["2026-10-31", "Day", "", 0.0, 85.3],
+  ["2026-10-31", "Night", "", 0.0, 72.1]];
+let seedingReg = false;
+async function seedRegister() {
+  if (seedingReg || !isAdmin() || !navigator.onLine) return; seedingReg = true;
+  try {
+    const flag = doc(db, "fcSettings", "seed-2026-10-register"); if ((await getDoc(flag)).exists()) return;
+    const old = await getDocs(collection(db, "fcMetres"));
+    for (const d of old.docs) if (String(d.data().date || "").startsWith("2026-10")) await deleteDoc(d.ref);
+    const now = Date.now(); let n = 0;
+    for (const [date, shift, sup, a, b] of OCT_REGISTER) for (const [rig, m] of [["TDR 013", a], ["TDR 015", b]]) {
+      await setDoc(doc(db, "fcMetres", `reg-${date}-${shift}-${normK(rig)}`), { date, shift, rig, block: "", metres: m, supervisor: sup, src: "register", note: "As per the shift register", createdAt: now + n }); n++; }
+    for (const f of ["seed-2026-10-metres", "seed-2026-10-24-25-metres", "adj-2026-10-25-5200-removed", "seed-2026-10-26-30-metres-v3", "seed-2026-10-evidence-metres", "seed-2026-10-31-metres"])
+      await setDoc(doc(db, "fcSettings", f), { done: now, by: email, replacedBy: "seed-2026-10-register" }, { merge: true });
+    await setDoc(flag, { done: now, by: email, lines: n });
+    toast("October metres as per the shift register: 6 294.1 m to 31/10");
+  } catch (e) { console.warn(e); } finally { seedingReg = false; }
 }
 let seeding = false;
 async function seedOctober() {
