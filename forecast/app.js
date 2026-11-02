@@ -105,7 +105,7 @@ addEventListener("online", () => netNote(""));
 /* ---------- the forecast (same method as the tracker) ---------- */
 function calc(rd) {
   const issues = allIssues(), counts = allCounts();
-  const upToCal = addDays(rd, -1);                                    // actuals up to yesterday
+  const upToCal = rd < today() ? rd : addDays(rd, -1);                // a past date counts in full; today counts up to yesterday
   const lastProd = metres.reduce((m, x) => x.date > m ? x.date : m, "");
   const upTo = lastProd && lastProd < upToCal ? lastProd : upToCal;  // average taken up to the last day captured
   const d = parse(rd), wd = (d.getDay() + 6) % 7;                     // Monday = 0
