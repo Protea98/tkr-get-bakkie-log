@@ -661,7 +661,12 @@ let seedingReg = false;
 async function seedRegister() {
   if (seedingReg || !isAdmin() || !navigator.onLine) return; seedingReg = true;
   try {
-    const flag = doc(db, "fcSettings", "seed-2026-10-register-v2"); if ((await getDoc(flag)).exists()) return;
+    const flag = doc(db, "fcSettings", "seed-2026-10-register-v2");
+    const want = Math.round(OCT_REGISTER.reduce((n, x) => n + x[3] + x[5], 0) * 10), oct = metres.filter(x => String(x.date || "").startsWith("2026-10"));
+    const have = Math.round(oct.reduce((n, x) => n + num(x.metres), 0) * 10);
+    // October is closed: if the app's October lines don't add up to the register (6 294.1 m, 186 lines), load them again
+    if ((await getDoc(flag)).exists() && have === want && oct.length === OCT_REGISTER.length * 3) return;
+    toast("Loading the October machine performance. Keep the app open for a minute.");
     const old = await getDocs(collection(db, "fcMetres"));
     for (const d of old.docs) if (String(d.data().date || "").startsWith("2026-10")) await deleteDoc(d.ref);
     const now = Date.now(); let n = 0;
