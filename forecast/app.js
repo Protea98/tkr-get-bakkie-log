@@ -75,7 +75,7 @@ function gateOrApp() {
   $("gate").hidden = true; app.hidden = false; $("signBtn").hidden = false; $("who").textContent = showName(email) + (isAdmin() ? " · admin" : " · manager");
   if (subs.length === 1) {
     const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => netNote("Couldn't load. Check the signal.")));
-    live("fcMetres", v => { metres = v; if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
+    live("fcMetres", v => { metres = v; if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
     const liveQ = (name, set) => subs.push(onSnapshot(query(collection(db, name), where("store", "==", "drill")), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => console.warn(e)));
     liveQ("stMoves", v => stMoves = v); liveQ("stCounts", v => stCounts = v);
     subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { stPrice = {}; (s.exists() ? s.data().list || [] : []).forEach(i => { if (i.getKey && num(i.price) > 0) stPrice[i.getKey] = num(i.price); }); settings = mergeSettings(rawSettings); render(); }, () => {}));
@@ -576,6 +576,21 @@ async function seedEvidenceMetres() {
     await setDoc(flag, { done: Date.now(), by: email, lines: n });
     toast("October metres as per the chat reports and tally sheets: 4 812.3 m to 30/10");
   } catch (e) { console.warn(e); } finally { seedingEv = false; }
+}
+/* 31/10 from Muneer's shift register (02/11/2026): TDR 015 day 85.3 m, night 72.1 m; TDR 013 drifter out for service. */
+const OCT_31 = [["2026-10-31", "Day", "TDR 013", 0, "0323", "", "Drifter out for service"], ["2026-10-31", "Day", "TDR 015", 85.3, "0323", "", "As per the shift register · shank broken and replaced"],
+  ["2026-10-31", "Night", "TDR 013", 0, "0323", "", "Drifter out for service"], ["2026-10-31", "Night", "TDR 015", 72.1, "0323", "", "As per the shift register"]];
+let seeding31 = false;
+async function seedOct31() {
+  if (seeding31 || !isAdmin() || !navigator.onLine) return; seeding31 = true;
+  try {
+    const flag = doc(db, "fcSettings", "seed-2026-10-31-metres"); if ((await getDoc(flag)).exists()) return;
+    const now = Date.now(); let n = 0;
+    for (const [date, shift, rig, m, block, sup, note] of OCT_31) {
+      await setDoc(doc(db, "fcMetres", `rep-${date}-${shift}-${normK(rig)}`), { date, shift, rig, block, metres: m, supervisor: sup, src: "report", note, createdAt: now + n }); n++; }
+    await setDoc(flag, { done: now, by: email, lines: n });
+    toast("31/10 loaded: 157.4 m. October total 4 969.7 m (chat reports and tally sheets)");
+  } catch (e) { console.warn(e); } finally { seeding31 = false; }
 }
 let seeding = false;
 async function seedOctober() {
