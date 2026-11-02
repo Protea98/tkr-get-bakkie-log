@@ -5,6 +5,7 @@ import {
   initializeApp, getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where,
 } from "../lib/firebase.js";
+import { withOct2026 } from "../lib/oct2026.js";
 const showName = e => /@mgr\.tkroperations\.app$/.test(e || "") ? (e[0].toUpperCase() + e.slice(1, e.indexOf("@"))) : e;
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };  // managers can sign in with a username
 
@@ -19,6 +20,7 @@ let db; try { db = initializeFirestore(fbApp, { localCache: persistentLocalCache
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
+let rawMetres = [];
 /* Private link for loading the tally sheets: …/forecast/#evkey=… The key is never in the code; the photos on the site are encrypted. */
 const EV_HASH = (location.hash.match(/evkey=([\w-]+)/) || [])[1] || "";
 if (EV_HASH) history.replaceState(null, "", location.pathname + location.search);
@@ -75,7 +77,7 @@ function gateOrApp() {
   $("gate").hidden = true; app.hidden = false; $("signBtn").hidden = false; $("who").textContent = showName(email) + (isAdmin() ? " · admin" : " · manager");
   if (subs.length === 1) {
     const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => netNote("Couldn't load. Check the signal.")));
-    live("fcMetres", v => { metres = v; if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await seedRegister(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
+    live("fcMetres", v => { rawMetres = v; metres = withOct2026(v); if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await seedRegister(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
     const liveQ = (name, set) => subs.push(onSnapshot(query(collection(db, name), where("store", "==", "drill")), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => console.warn(e)));
     liveQ("stMoves", v => stMoves = v); liveQ("stCounts", v => stCounts = v);
     subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { stPrice = {}; (s.exists() ? s.data().list || [] : []).forEach(i => { if (i.getKey && num(i.price) > 0) stPrice[i.getKey] = num(i.price); }); settings = mergeSettings(rawSettings); render(); }, () => {}));
@@ -422,7 +424,7 @@ function metresView() {
       <label style="grid-column:1/-1">Status / delays <input name="note" placeholder="For example Drifter out for service, No drill bit, Waiting for engine"></label>
       <div style="display:flex;align-items:flex-end"><button class="primary" style="width:100%">Add</button></div>
     </form></section>
-    <section class="card"><h2>Latest metres</h2>${listOf(metres.map(x => ({ ...x, _c: "fcMetres" })), x => `${fmt(x.date)} ${esc(x.shift)} · <b>${esc(x.rig)}</b> · ${M1(num(x.metres))} m ${x.block ? "· " + esc(x.block) : ""} ${x.supervisor ? "· " + esc(x.supervisor) : ""}${x.note ? ` <span class="muted">· ${esc(x.note)}</span>` : ""}${evDays && evDays[x.date] ? ` <button data-evsee="${x.date}" style="min-height:34px;padding:2px 10px">See tally sheet</button>` : ""}`)}</section>`;
+    <section class="card"><h2>Latest metres</h2>${listOf(metres.map(x => ({ ...x, _c: x.builtin ? "" : "fcMetres" })), x => `${fmt(x.date)} ${esc(x.shift)} · <b>${esc(x.rig)}</b> · ${M1(num(x.metres))} m ${x.block ? "· " + esc(x.block) : ""} ${x.supervisor ? "· " + esc(x.supervisor) : ""}${x.note ? ` <span class="muted">· ${esc(x.note)}</span>` : ""}${evDays && evDays[x.date] ? ` <button data-evsee="${x.date}" style="min-height:34px;padding:2px 10px">See tally sheet</button>` : ""}`)}</section>`;
 }
 function issuesView() {
   const list = allIssues();
@@ -662,7 +664,7 @@ async function seedRegister() {
   if (seedingReg || !isAdmin() || !navigator.onLine) return; seedingReg = true;
   try {
     const flag = doc(db, "fcSettings", "seed-2026-10-register-v2");
-    const want = Math.round(OCT_REGISTER.reduce((n, x) => n + x[3] + x[5], 0) * 10), oct = metres.filter(x => String(x.date || "").startsWith("2026-10"));
+    const want = Math.round(OCT_REGISTER.reduce((n, x) => n + x[3] + x[5], 0) * 10), oct = rawMetres.filter(x => String(x.date || "").startsWith("2026-10"));
     const have = Math.round(oct.reduce((n, x) => n + num(x.metres), 0) * 10);
     // October is closed: if the app's October lines don't add up to the register (6 294.1 m, 186 lines), load them again
     if ((await getDoc(flag)).exists() && have === want && oct.length === OCT_REGISTER.length * 3) return;

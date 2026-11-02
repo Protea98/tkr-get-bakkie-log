@@ -5,6 +5,7 @@ import {
   initializeApp, getAuth, signInAnonymously, sendPasswordResetEmail, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where,
 } from "../lib/firebase.js";
+import { withOct2026 } from "../lib/oct2026.js";
 const showName = e => /@mgr\.tkroperations\.app$/.test(e || "") ? (e[0].toUpperCase() + e.slice(1, e.indexOf("@"))) : e;
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };  // managers can sign in with a username
 
@@ -386,7 +387,7 @@ function startApp() {
   subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { itemsSaved = s.exists(); items = itemsSaved ? (s.data().list || []) : DEFAULT_ITEMS.slice(); render(); }, () => {}));
   subs.push(onSnapshot(doc(db, "stConfig", "status"), s => { status = s.exists() ? (s.data().machines || {}) : {}; render(); }, () => {}));
   subs.push(onSnapshot(doc(db, "stConfig", "settings"), s => { if (s.exists()) settings = Object.assign({ supervisor: "" }, s.data()); render(); }, () => {}));
-  if (boss) subs.push(onSnapshot(collection(db, "fcMetres"), s => { fcMetres = s.docs.map(d => d.data()); render(); }, () => {}));
+  if (boss) subs.push(onSnapshot(collection(db, "fcMetres"), s => { fcMetres = withOct2026(s.docs.map(d => d.data())); render(); }, () => {}));
   if (isBoss()) subs.push(onSnapshot(collection(db, "stUsers"), s => { staff = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)); render(); }, () => {}));
   render();
 }
