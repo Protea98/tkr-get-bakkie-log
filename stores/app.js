@@ -929,14 +929,15 @@ function stockView() {
         <td class="num ${low ? "low" : ""}">${nq(s.onHand)}</td><td class="num">${i.min ? nq(i.min) : ""}</td></tr>`; }).join("")}
     </tbody></table></div><p class="muted">Items typed as "Other item" are not in this list; admin adds them under Items & prices to track their stock.</p></section>`;
 }
-let repFrom = today().slice(0, 8) + "01", repTo = today();
+let repFrom = today().slice(0, 8) + "01", repTo = today(), repStore = "all", repTag = "";
 function reportView() {
   const last = new Date(); last.setDate(0); const lf = ymd(new Date(last.getFullYear(), last.getMonth(), 1)), lt = ymd(last);
   return `<section class="card" style="max-width:680px"><h2>Consumption report</h2>
     <p style="margin-top:0">A TKR-branded Excel for the dates you choose: charts of what each machine used, totals per machine and everything issued for the Drill rigs and the Rompad rockbreakers, every issue, PPE, and everything received.</p>
     <div class="row" style="margin-bottom:10px"><button type="button" data-rq="${today()}|${today()}">Today</button><button type="button" data-rq="${ymd(new Date(Date.now() - 864e5))}|${ymd(new Date(Date.now() - 864e5))}">Yesterday</button>
-      <button type="button" data-rq="${ymd(new Date(Date.now() - 6 * 864e5))}|${today()}">Last 7 days</button><button type="button" data-rq="${today().slice(0, 8)}01|${today()}">This month</button><button type="button" data-rq="${lf}|${lt}">Last month</button></div>
+      <button type="button" data-rq="${ymd(new Date(Date.now() - 6 * 864e5))}|${today()}">Last 7 days</button><button type="button" data-rq="${today().slice(0, 8)}01|${today()}">This month</button><button type="button" data-rq="${lf}|${lt}">Last month</button><button type="button" data-rq="2026-10-01|2026-10-31">October 2026</button></div>
     <div class="grid"><label>From <input type="date" id="repFrom" value="${repFrom}" max="${today()}"></label><label>To <input type="date" id="repTo" value="${repTo}" max="${today()}"></label><label>Stores controller <input id="repCtl" value="${esc(myName())}"></label><label>Supervisor <input id="repSup" value="${esc(settings.supervisor || "")}"></label></div>
+    <label style="display:block;margin-top:10px">Store <select id="repStore">${[["all", "Both stores"], ["drill", "Drill Stores"], ["rompad", "Rompad Stores"]].map(([v, t]) => `<option value="${v}"${repStore === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
     <p style="margin:12px 0 0;font-size:18px"><b>${fmt(repFrom)}</b> to <b>${fmt(repTo)}</b></p>
     <button class="primary" data-report="1" style="margin-top:10px;min-height:52px;font-size:17px">Download consumption report</button></section>`;
 }
@@ -968,7 +969,7 @@ app.addEventListener("click", async e => {
   if (b.dataset.tab) { tab = b.dataset.tab; lsSet("tkr-st-tab", tab); render(); return; }
   if (b.dataset.pickitem) { const [kind, id] = b.dataset.pickitem.split(":"); form[kind].itemId = id; render(); return; }
   if (b.dataset.rq) { [repFrom, repTo] = b.dataset.rq.split("|"); render(true); return; }
-  if (b.dataset.report) { const ctl = $("repCtl")?.value || myName(), sup = $("repSup")?.value ?? settings.supervisor;
+  if (b.dataset.report) { repStore = $("repStore")?.value || repStore; const ctl = $("repCtl")?.value || myName(), sup = $("repSup")?.value ?? settings.supervisor;
     let P = tab === "report" ? { from: $("repFrom")?.value || repFrom, to: $("repTo")?.value || repTo } : { from: month + "-01", to: ymd(new Date(+month.slice(0, 4), +month.slice(5, 7), 0)) };
     if (P.from > P.to) { toast("Choose a From date before the To date."); return; } exportReport(P, ctl, sup); return; }
   if (b.dataset.del) { const x = moves.find(m => m.id === b.dataset.del); if (x && confirm(`Remove this line?\n${x.qty} × ${x.item}`)) deleteDoc(doc(db, "stMoves", x.id)).then(() => toast("Removed")).catch(fail); return; }
@@ -1295,7 +1296,14 @@ function columnPng({ title, labels, values, color = "#d4a12a", money = false, w 
 }
 
 /* ---------- branded consumption report (ExcelJS, TKR logo, black and gold) ---------- */
+/* One store or both: the same report, with the other store's lines left out. */
 async function exportReport(m, ctl, sup) {
+  if (tab !== "report" || repStore === "all") return exportReportAll(m, ctl, sup);
+  const keep = moves, keepC = counts, fm = moves.filter(x => x.store === repStore), fc = counts.filter(x => x.store === repStore);
+  moves = fm; counts = fc; repTag = repStore;
+  try { await exportReportAll(m, ctl, sup); } finally { if (moves === fm) moves = keep; if (counts === fc) counts = keepC; repTag = ""; }
+}
+async function exportReportAll(m, ctl, sup) {
   toast("Making the consumption report…");
   try { await loadLib("../lib/exceljs.min.js"); } catch { toast("Open the app once with signal, then try again."); return; }
   const X = new ExcelJS.Workbook(); X.creator = "TKR Operations"; X.created = new Date();
@@ -1308,7 +1316,7 @@ async function exportReport(m, ctl, sup) {
   const mcFill = mc => { const i = mcList.indexOf(mc); return i < 0 ? "FFF2F2F2" : MC_FILLS[i % MC_FILLS.length]; };
   const OIL_C = { "Hydraulic oil": "FF1F5FA8", "Engine oil": "FF8A4B08", "Grease": "FF5B5B5B", "Rockdrill / compressor oil": "FF2E7D4F", "Other oils & lubricants": "FF6B3FA0" };
   const period = m.from === m.to ? fmt(m.from) : `${fmt(m.from)}  to  ${fmt(m.to)}`;
-  const title = "TKR OPERATIONS – STORES CONSUMPTION REPORT";
+  const title = repTag ? `TKR OPERATIONS – ${repTag === "drill" ? "DRILL" : "ROMPAD"} STORES CONSUMPTION REPORT` : "TKR OPERATIONS – STORES CONSUMPTION REPORT";
   const people = `Stores Controller: ${ctl || ""}   |   Supervisor: ${sup || ""}`;
   function sheet(name, sub, widths) {
     const ws = X.addWorksheet(name, { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
@@ -1410,7 +1418,7 @@ async function exportReport(m, ctl, sup) {
   rec.forEach((x, i) => line(S, [dt(x.date), x.store === "drill" ? "Drill" : "Rompad", x.cat, x.item, num(x.qty), x.unit || "", x.from || "", x.ref || "", x.byName || "", x.note || ""], i, { date: [0] }));
   const buf = await X.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const name = `TKR_Stores_Consumption_${fmt(m.from).replace(/\//g, "-")}${m.from === m.to ? "" : "_to_" + fmt(m.to).replace(/\//g, "-")}.xlsx`;
+  const name = `TKR_${repTag === "drill" ? "Drill_Stores" : repTag === "rompad" ? "Rompad_Stores" : "Stores"}_Consumption_${fmt(m.from).replace(/\//g, "-")}${m.from === m.to ? "" : "_to_" + fmt(m.to).replace(/\//g, "-")}.xlsx`;
   const { deliver } = await import("../lib/deliver.js");
   deliver(blob, name, { doneLabel: "Done – clear this phone's copy", onDone: async () => { const fb = await import("../lib/firebase.js"); const { clearPhoneCopy } = await import("../lib/deliver.js"); await clearPhoneCopy(fb, [db], toast); } });
 }
