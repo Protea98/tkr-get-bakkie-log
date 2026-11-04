@@ -605,6 +605,124 @@ async function seedRompadLog() {
   await setDoc(flag, { done: Date.now(), by: email, lines: n, skipped: skip });
   toast(`Rompad issuing log for October loaded: ${n} lines${skip ? ` (${skip} already in the app)` : ""}`);
 }
+/* Rompad Stores receiving log, October 2026 (the handwritten pages), consolidated into the app.
+   Replaces the 22/10 to 24/10 receipts taken from the shift reports; lines already in the app are not added twice.
+   GET received (bits, rods, shanks) belongs to Drill Stores and is not booked to Rompad. */
+const ROMPAD_RECV_2026_10 = [
+  ["2026-10-02", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 2, "", "Sawara", "Olerato", "For TKRH017"],
+  ["2026-10-02", "receive", "rompad", "PPE", "ppe-gloves", "", "", 20, "", "Edwin", "Olerato", ""],
+  ["2026-10-02", "receive", "rompad", "Other oils & lubricants", "", "Multi-surface cleaner", "ea", 1, "", "Edwin", "Olerato", ""],
+  ["2026-10-02", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 4, "", "Kudzi", "Olerato", ""],
+  ["2026-10-05", "receive", "rompad", "Fasteners", "", "M24 nyloc nuts", "ea", 10, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-05", "receive", "rompad", "Fasteners", "", "M24 nuts", "ea", 10, "", "Edwin", "Bothumelo", "24 mm hex nuts"],
+  ["2026-10-05", "receive", "rompad", "Fasteners", "", "M24 washers", "ea", 10, "", "Edwin", "Bothumelo", "Flat washers 24 mm"],
+  ["2026-10-05", "receive", "rompad", "Spares", "", "Rotating light", "ea", 2, "", "Phumzile", "Bothumelo", ""],
+  ["2026-10-05", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 5, "", "Yvonne", "Bothumelo", "Hydraulic oil (Lube Force)"],
+  ["2026-10-05", "receive", "rompad", "Engine oil", "oil-eng", "", "", 2, "", "Yvonne", "Bothumelo", ""],
+  ["2026-10-05", "receive", "rompad", "PPE", "ppe-boots", "", "", 1, "", "Zandile", "Bothumelo", "Bova Neoflex boots size 8"],
+  ["2026-10-07", "receive", "rompad", "PPE", "", "Anti-acid pants", "ea", 1, "", "Zandile", "Bothumelo", "Ref 36"],
+  ["2026-10-07", "receive", "rompad", "PPE", "", "Conti jacket", "ea", 1, "", "Zandile", "Bothumelo", ""],
+  ["2026-10-07", "receive", "rompad", "PPE", "", "Anti-acid pants", "ea", 1, "", "Zandile", "Bothumelo", "Flame and acid pants"],
+  ["2026-10-07", "receive", "rompad", "PPE", "", "Anti-acid flame jacket", "ea", 1, "", "Zandile", "Bothumelo", ""],
+  ["2026-10-07", "receive", "rompad", "Other oils & lubricants", "", "Pine gel 5 kg", "ea", 1, "", "Refilwe Foko", "Refilwe Foko", ""],
+  ["2026-10-08", "receive", "rompad", "Spares", "", "Service kit TKRH011", "kit", 1, "", "Refilwe Foko", "Refilwe Foko", ""],
+  ["2026-10-08", "receive", "rompad", "Spares", "", "Service kit TKRH015", "kit", 1, "", "Refilwe Foko", "Refilwe Foko", ""],
+  ["2026-10-08", "receive", "rompad", "PPE", "ppe-gloves", "", "", 5, "", "Edwin K", "Refilwe Foko", ""],
+  ["2026-10-09", "receive", "rompad", "Spares", "", "Eye washer", "ea", 5, "", "Edwin K", "Refilwe Foko", ""],
+  ["2026-10-09", "receive", "rompad", "Engine oil", "oil-eng", "", "", 2, "", "Thomas", "Refilwe Foko", ""],
+  ["2026-10-10", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 2, "", "Martin K", "Refilwe Foko", ""],
+  ["2026-10-10", "receive", "rompad", "Spares", "", "Coogar gas", "ea", 1, "", "Martin K", "Refilwe Foko", ""],
+  ["2026-10-10", "receive", "rompad", "Spares", "", "Oxygen gas", "ea", 1, "", "Martin K", "Refilwe Foko", ""],
+  ["2026-10-11", "receive", "rompad", "Spares", "", "Fan belt (bus)", "ea", 1, "", "Olebogeng", "Olerato", ""],
+  ["2026-10-12", "receive", "rompad", "Spares", "", "Service kit TKRH019", "kit", 1, "", "Godfrey", "Olerato", ""],
+  ["2026-10-12", "receive", "rompad", "Spares", "", "EDG wire (25 m x 5 m)", "ea", 1, "", "Olebogeng", "Olerato", ""],
+  ["2026-10-12", "receive", "rompad", "Moil locks", "", "Moil point", "ea", 2, "", "Kudzi", "Olerato", "Moil tool point"],
+  ["2026-10-12", "receive", "rompad", "Fasteners", "", "M24 washers", "ea", 20, "", "Godfrey", "Olerato", ""],
+  ["2026-10-12", "receive", "rompad", "Fasteners", "", "M24 nuts", "ea", 10, "", "Godfrey", "Olerato", ""],
+  ["2026-10-12", "receive", "rompad", "Grease", "", "Grease 20 L", "ea", 1, "", "Onwabo", "Olerato", ""],
+  ["2026-10-13", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 4, "", "Katlego", "Olerato", ""],
+  ["2026-10-14", "receive", "rompad", "Grease", "", "Grease 20 L", "ea", 1, "", "Khonkhobe", "Bothumelo", ""],
+  ["2026-10-14", "receive", "rompad", "Fasteners", "rp-m24x140", "", "", 28, "", "Khonkhobe", "Bothumelo", ""],
+  ["2026-10-14", "receive", "rompad", "Fasteners", "", "M36 nuts", "ea", 30, "", "Khonkhobe", "Bothumelo", ""],
+  ["2026-10-14", "receive", "rompad", "Fasteners", "", "M27 x 120 bolts", "ea", 3, "", "Khonkhobe", "Bothumelo", ""],
+  ["2026-10-14", "receive", "rompad", "Engine oil", "oil-eng", "", "", 3, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-15", "receive", "rompad", "Grease", "", "Grease 20 L", "ea", 1, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-15", "receive", "rompad", "Spares", "", "Service kit TKRH020", "kit", 1, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-15", "receive", "rompad", "Other oils & lubricants", "", "Transmission oil", "ea", 1, "", "Kudzi", "Bothumelo", ""],
+  ["2026-10-15", "receive", "rompad", "Spares", "", "3-core wire", "ea", 1, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-15", "receive", "rompad", "Spares", "", "500 hr service kit TKRH017", "kit", 2, "", "Jeff", "Phumzile", ""],
+  ["2026-10-16", "receive", "rompad", "Engine oil", "oil-eng", "", "", 3, "", "Martin", "Phumzile", ""],
+  ["2026-10-16", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 1, "", "Jeff", "Refilwe Foko", ""],
+  ["2026-10-18", "receive", "rompad", "Moil locks", "", "Moil bush", "ea", 1, "", "Jeff", "Lebogang", ""],
+  ["2026-10-21", "receive", "rompad", "Spares", "", "Key – TKR09 water truck", "ea", 1, "", "Moraka", "Olerato", ""],
+  ["2026-10-21", "receive", "rompad", "Other oils & lubricants", "", "Antifreeze", "5L", 1, "", "Jeff", "Olerato", ""],
+  ["2026-10-21", "receive", "rompad", "Spares", "", "Book (Sahar 23)", "ea", 1, "", "Jeff", "Olerato", ""],
+  ["2026-10-21", "receive", "rompad", "Engine oil", "oil-eng", "", "", 2, "", "Jeff", "Olerato", ""],
+  ["2026-10-21", "receive", "rompad", "PPE", "ppe-gloves", "", "", 12, "", "Edwin", "Olerato", "Safety gloves"],
+  ["2026-10-21", "receive", "rompad", "PPE", "ppe-glasses", "", "", 12, "", "Edwin", "Olerato", "Safety goggles"],
+  ["2026-10-22", "receive", "rompad", "Spares", "", "Circlip 30", "ea", 4, "", "SA Support", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Spares", "", "Rubber plug 30", "ea", 4, "", "SA Support", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Moil locks", "moil-pin", "", "", 4, "", "SA Support", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Other oils & lubricants", "", "Degreaser", "5L", 2, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Engine oil", "oil-eng", "", "", 3, "", "Katlego", "Phumzile", "Diesel engine oil"],
+  ["2026-10-22", "receive", "rompad", "Rockdrill / compressor oil", "", "Compressor oil 68", "20L", 5, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Other oils & lubricants", "", "Antifreeze", "5L", 1, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Rockdrill / compressor oil", "oil-comp", "", "", 2, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Rockdrill / compressor oil", "", "Rockdrill oil 220", "20L", 1, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Other oils & lubricants", "", "Engine gearlube 80W-90", "ea", 4, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Other oils & lubricants", "", "Getran gear oil 80W-90", "ea", 3, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Grease", "", "Lithium complex EP2 grease", "ea", 1, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Other oils & lubricants", "", "Transmission fluid", "ea", 1, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Other oils & lubricants", "", "Spirax axle oil", "ea", 2, "", "Katlego", "Phumzile", ""],
+  ["2026-10-22", "receive", "rompad", "Spares", "", "Rod catcher", "ea", 3, "", "Simon", "Phumzile", ""],
+  ["2026-10-23", "receive", "rompad", "Moil locks", "moil-lock", "", "", 4, "", "Simon", "Phumzile", ""],
+  ["2026-10-23", "receive", "rompad", "Moil locks", "", "Moil stopper", "ea", 2, "", "Simon", "Phumzile", ""],
+  ["2026-10-24", "receive", "rompad", "Spares", "", "Service kit TDR015", "kit", 1, "", "Jeff", "Phumzile", ""],
+  ["2026-10-26", "receive", "rompad", "Spares", "", "Top roller", "ea", 2, "", "Tshepang", "Bothumelo", ""],
+  ["2026-10-27", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 3, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-28", "receive", "rompad", "Spares", "", "Track box", "ea", 1, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-28", "receive", "rompad", "Spares", "", "Track pins", "ea", 3, "", "Jeff", "Bothumelo", ""],
+  ["2026-10-30", "receive", "rompad", "PPE", "ppe-gloves", "", "", 12, "", "Naledi", "Olerato", "Safety gloves"],
+  ["2026-10-30", "receive", "rompad", "Grease", "", "Grease 20 L", "ea", 1, "", "Jeff", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "rp-m16x200", "", "", 5, "", "Geoffrey", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "rp-m16n", "", "", 5, "", "Geoffrey", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "", "M16 washers", "ea", 10, "", "Geoffrey", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "PPE", "", "Rain coats", "ea", 31, "", "Thomas", "Olerato", "Sizes 17 and 14"],
+  ["2026-10-30", "receive", "rompad", "PPE", "", "T-shirts", "ea", 8, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "PPE", "", "Pants", "ea", 8, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "PPE", "", "Jacket", "ea", 1, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "PPE", "", "Welding mask / face shield", "ea", 2, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "PPE", "", "Shield mask", "ea", 1, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Spares", "", "EDG LED lights", "ea", 6, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Spares", "", "Measuring tape", "ea", 2, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Spares", "", "Rotating light", "ea", 30, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "rp-m16n", "", "", 2, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "", "M18 x 40 bolts", "ea", 13, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "", "M18 nuts", "ea", 30, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "", "Split pins", "ea", 12, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Spares", "", "Feed chain full link", "ea", 6, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Spares", "", "Feed chain half link", "ea", 16, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "", "M12 x 65 bolts", "ea", 30, "", "Thomas", "Olerato", ""],
+  ["2026-10-30", "receive", "rompad", "Fasteners", "", "M12 x 30 bolts", "ea", 5, "", "Thomas", "Olerato", ""]];
+async function seedRompadReceipts() {
+  const flag = doc(db, "stConfig", "seed-2026-10-rompad-receiving"); if ((await getDoc(flag)).exists()) return;
+  const S = REPORT_SEEDS.find(x => x.id === "seed-2026-10-22-24-rompad");
+  const old = new Set();
+  if (S) for (const [i, r] of S.m.entries()) if (r[1] === "receive") { old.add(`${S.id}-m${i}`); await deleteDoc(doc(db, "stMoves", `${S.id}-m${i}`)); }
+  const have = new Set((await getDocs(query(collection(db, "stMoves"), where("store", "==", "rompad")))).docs
+    .filter(d => !old.has(d.id) && !d.id.startsWith("rprecv-")).map(d => dupKey(d.data())));
+  const at = (d, i) => Date.parse(d + "T00:00:00+02:00") + 8 * 3600e3 + i * 1000;
+  let n = 0, skip = 0;
+  for (const [i, [date, kind, st, cat, itemId, name, unit, qty, machine, who, by, note]] of ROMPAD_RECV_2026_10.entries()) {
+    const it = items.find(x => x.id === itemId) || DEFAULT_ITEMS.find(x => x.id === itemId);
+    const rec = { kind, store: st, cat, itemId: it?.id || "", item: it?.name || name, getKey: "", unit: it ? (it.unit || "") : unit, price: it?.price ? num(it.price) : 0,
+      qty, date, from: who, ref: "", note: note || "Rompad receiving log", byName: by, byUid: user.uid, src: "receiving-log", createdAt: at(date, i) };
+    if (have.has(dupKey(rec))) { skip++; continue; }
+    await setDoc(doc(db, "stMoves", `rprecv-${i}`), rec); n++;
+  }
+  await setDoc(flag, { done: Date.now(), by: email, lines: n, skipped: skip });
+  toast(`Rompad receiving log for October loaded: ${n} lines${skip ? ` (${skip} already in the app)` : ""}`);
+}
 async function seedSetList() {
   const flag = doc(db, "stConfig", "seed-2026-10-28-setlist"); if ((await getDoc(flag)).exists()) return;
   const cur = (await getDoc(doc(db, "stConfig", "items"))); const list = cur.exists() ? (cur.data().list || []).slice() : DEFAULT_ITEMS.slice();
@@ -627,7 +745,7 @@ function startApp() {
   $("who").textContent = (me ? me.name + " · store controller" : showName(email) + (isAdmin() ? " · admin" : isSup() ? " · supervisor" : " · manager"));
   const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => { console.warn(e); netNote("Couldn't load everything. Check the signal."); }));
   live("stMoves", v => moves = v); live("stCounts", v => counts = v); live("stReports", v => reports = v);
-  if (boss && isAdmin()) setTimeout(async () => { await seedOctoberGet(); await seedReports(); try { await seedSetList(); } catch (e) { console.warn(e); } try { await seedRompadLog(); } catch (e) { console.warn(e); } }, 1500);
+  if (boss && isAdmin()) setTimeout(async () => { await seedOctoberGet(); await seedReports(); try { await seedSetList(); } catch (e) { console.warn(e); } try { await seedRompadLog(); } catch (e) { console.warn(e); } try { await seedRompadReceipts(); } catch (e) { console.warn(e); } }, 1500);
   subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { itemsSaved = s.exists(); items = itemsSaved ? (s.data().list || []) : DEFAULT_ITEMS.slice(); render(); }, () => {}));
   subs.push(onSnapshot(doc(db, "stConfig", "status"), s => { status = s.exists() ? (s.data().machines || {}) : {}; render(); }, () => {}));
   subs.push(onSnapshot(doc(db, "stConfig", "settings"), s => { if (s.exists()) settings = Object.assign({ supervisor: "" }, s.data()); render(); }, () => {}));
