@@ -428,13 +428,14 @@ document.addEventListener("keydown",ev=>{if(ev.key==="Escape")$("sheetHost").inn
 
 // ---------- flags ----------
 const FLAG_AT=3;const FLAG_CODES=[["AWOP","AWOP"],["FAMILY RESPONSIBILITY","Family responsibility"]];
-const CHECK_CODES=[["AWOP","AWOP"],["SICK","Sick"],["FAMILY RESPONSIBILITY","Family responsibility"]];
+const CHECK_CODES=[["AWOP","AWOP"],["SICK","Sick"],["FAMILY RESPONSIBILITY","Family responsibility"],["ANNUAL LEAVE","Annual leave"]];
+const HOT_CODES=["AWOP","SICK","FAMILY RESPONSIBILITY"];
 const isFlagged=f=>FLAG_CODES.some(([c])=>f[c].length>=FLAG_AT);
 function flagCounts(e,dates){const out={};CHECK_CODES.forEach(([c])=>{out[c]=dates.filter(d=>markOf(e,d)===c)});return out}
 function flagBadges(e,dates){const f=flagCounts(e,dates);return FLAG_CODES.filter(([c])=>f[c].length>=FLAG_AT).map(([c,l])=>'<span class="flag" title="'+f[c].length+' '+esc(l)+' days this cycle">'+f[c].length+'× '+(c==="AWOP"?"AWOP":"FAM. RESP.")+'</span>').join("")}
-const FLAG_KINDS=[["all","All types"],["AWOP","AWOP"],["SICK","Sick"],["FAMILY RESPONSIBILITY","Family responsibility"],["3plus","3 or more only"]];
-function byKind(rows,kind){if(kind==="all")return rows;if(kind==="3plus")return rows.filter(r=>CHECK_CODES.some(([c])=>r.f[c].length>=FLAG_AT));return rows.filter(r=>r.f[kind].length)}
-const kindCols=kind=>CHECK_CODES.filter(([c])=>kind==="all"||kind==="3plus"||kind===c);
+const FLAG_KINDS=[["all","All types"],["AWOP","AWOP"],["SICK","Sick"],["FAMILY RESPONSIBILITY","Family responsibility"],["ANNUAL LEAVE","Annual leave"],["3plus","3 or more only"]];
+function byKind(rows,kind){if(kind==="all")return rows;if(kind==="3plus")return rows.filter(r=>HOT_CODES.some(c=>r.f[c].length>=FLAG_AT));return rows.filter(r=>r.f[kind].length)}
+const kindCols=kind=>CHECK_CODES.filter(([c])=>kind==="all"||kind===c||(kind==="3plus"&&HOT_CODES.includes(c)));
 function flagText(f){return FLAG_CODES.filter(([c])=>f[c].length>=FLAG_AT).map(([c])=>f[c].length+'× '+(c==='AWOP'?'AWOP':'FAM. RESP.'))}
 function flagged(from,to){const dates=rangeDates(from,to);return inPeriod(from).sort((a,b)=>SHEETS.indexOf(a.sheet)-SHEETS.indexOf(b.sheet)||a.order-b.order)
   .map(e=>({e,f:flagCounts(e,dates)})).filter(r=>CHECK_CODES.some(([c])=>r.f[c].length)).sort((a,b)=>isFlagged(b.f)-isFlagged(a.f))}
@@ -444,16 +445,16 @@ function viewFlags(){const F=S.flg;if(!F.from){[F.from,F.to]=F.type==="custom"?[
   h+='<div class="form"><label>From<input type="date" id="flg-from" value="'+F.from+'"></label><label>To<input type="date" id="flg-to" value="'+F.to+'"></label>'+
     '<div style="display:flex;align-items:end"><button class="btn gold" id="xlsFlags"'+(F.loading?" disabled":"")+'>Download Excel</button></div></div>';
   h+='<div class="bar" role="group" aria-label="Flag type"><span class="lbl" style="margin:0">Flag type</span>'+FLAG_KINDS.map(([k,l])=>'<button class="chip" data-kind="'+esc(k)+'" aria-pressed="'+(F.kind===k)+'">'+l+'</button>').join("")+'</div>';
-  h+='<h2 class="sheet-h">AWOP, sick and flags <small>'+periodText(F.from,F.to)+'</small></h2>';
+  h+='<h2 class="sheet-h">AWOP, sick, annual leave and flags <small>'+periodText(F.from,F.to)+'</small></h2>';
   if(F.loading){main.innerHTML=h+'<div class="empty"><b>Loading these dates</b>Fetching marks for the period.</div>';return}
   const allRows=flagged(F.from,F.to);const rows=allRows;const shown=byKind(allRows,F.kind);const cols=kindCols(F.kind);
   h+='<div class="summary">'+stat("Flagged: "+FLAG_AT+"+ AWOP",rows.filter(r=>r.f.AWOP.length>=FLAG_AT).length)+stat("Flagged: "+FLAG_AT+"+ family resp.",rows.filter(r=>r.f["FAMILY RESPONSIBILITY"].length>=FLAG_AT).length)+
-    stat("Employees with AWOP",rows.filter(r=>r.f.AWOP.length).length)+stat("AWOP days",rows.reduce((a,r)=>a+r.f.AWOP.length,0))+stat("Employees sick",rows.filter(r=>r.f.SICK.length).length)+stat("Sick days",rows.reduce((a,r)=>a+r.f.SICK.length,0))+stat("Employees with family resp.",rows.filter(r=>r.f["FAMILY RESPONSIBILITY"].length).length)+stat("Family resp. days",rows.reduce((a,r)=>a+r.f["FAMILY RESPONSIBILITY"].length,0))+'</div>';
-  h+='<p class="note">Lists every AWOP, sick and family responsibility day in the chosen period. Counts of '+FLAG_AT+' or more show in red. An employee is flagged at '+FLAG_AT+' or more AWOP days, or '+FLAG_AT+' or more family responsibility days, and flagged employees are listed first.</p>';
-  if(!shown.length){main.innerHTML=h+'<div class="empty"><b>Nothing to report</b>'+(F.kind==="all"?"No AWOP, sick or family responsibility days in this period.":F.kind==="3plus"?"No employee has "+FLAG_AT+" or more AWOP, sick or family responsibility days in this period.":"No "+esc(FLAG_KINDS.find(k=>k[0]===F.kind)[1].toLowerCase())+" days in this period.")+'</div>';return}
-  h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th style="text-align:left">Flag</th>'+cols.map(([c,l])=>'<th>'+(c==="FAMILY RESPONSIBILITY"?"Family resp.":l)+'</th><th style="text-align:left">Dates</th>').join("")+'</tr></thead><tbody>'+
+    stat("Employees with AWOP",rows.filter(r=>r.f.AWOP.length).length)+stat("AWOP days",rows.reduce((a,r)=>a+r.f.AWOP.length,0))+stat("Employees sick",rows.filter(r=>r.f.SICK.length).length)+stat("Sick days",rows.reduce((a,r)=>a+r.f.SICK.length,0))+stat("Employees with family resp.",rows.filter(r=>r.f["FAMILY RESPONSIBILITY"].length).length)+stat("Family resp. days",rows.reduce((a,r)=>a+r.f["FAMILY RESPONSIBILITY"].length,0))+stat("Employees on annual leave",rows.filter(r=>r.f["ANNUAL LEAVE"].length).length)+stat("Annual leave days",rows.reduce((a,r)=>a+r.f["ANNUAL LEAVE"].length,0))+'</div>';
+  h+='<p class="note">Lists every AWOP, sick, family responsibility and annual leave day in the chosen period. Annual leave is shown for planning and never counts towards a flag. Counts of '+FLAG_AT+' or more show in red. An employee is flagged at '+FLAG_AT+' or more AWOP days, or '+FLAG_AT+' or more family responsibility days, and flagged employees are listed first.</p>';
+  if(!shown.length){main.innerHTML=h+'<div class="empty"><b>Nothing to report</b>'+(F.kind==="all"?"No AWOP, sick, family responsibility or annual leave days in this period.":F.kind==="3plus"?"No employee has "+FLAG_AT+" or more AWOP, sick or family responsibility days in this period.":"No "+esc(FLAG_KINDS.find(k=>k[0]===F.kind)[1].toLowerCase())+" days in this period.")+'</div>';return}
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th style="text-align:left">Flag</th>'+cols.map(([c,l])=>'<th>'+(c==="FAMILY RESPONSIBILITY"?"Family resp.":c==="ANNUAL LEAVE"?"Annual leave":l)+'</th><th style="text-align:left">Dates</th>').join("")+'</tr></thead><tbody>'+
    shown.map(r=>'<tr><td>'+esc(r.e.name)+'<br><span class="note">'+esc([r.e.number,r.e.sheet,groupLabel(r.e)].filter(Boolean).join(" · "))+'</span></td><td style="text-align:left">'+flagText(r.f).map(t=>'<span class="flag">'+esc(t)+'</span>').join(" ")+'</td>'+
-     cols.map(([c])=>{const n=r.f[c].length;const hot=n>=FLAG_AT;return '<td class="'+(hot?"lowpc":"")+'">'+n+'</td><td style="text-align:left;white-space:normal;min-width:110px">'+r.f[c].map(short).join(", ")+'</td>'}).join("")+'</tr>').join("")+'</tbody></table></div>';
+     cols.map(([c])=>{const n=r.f[c].length;const hot=n>=FLAG_AT&&HOT_CODES.includes(c);return '<td class="'+(hot?"lowpc":"")+'">'+n+'</td><td style="text-align:left;white-space:normal;min-width:110px">'+r.f[c].map(short).join(", ")+'</td>'}).join("")+'</tr>').join("")+'</tbody></table></div>';
   main.innerHTML=h}
 async function xlsFlags(from,to){try{await loadRange(from,to)}catch(e){toast("Could not load those dates: "+(e.message||"try again"));return}
   const kind=S.flg.kind;const rows=byKind(flagged(from,to),kind);const cols=kindCols(kind);const kl=FLAG_KINDS.find(k=>k[0]===kind)[1];
