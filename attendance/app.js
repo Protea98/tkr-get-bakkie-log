@@ -29,8 +29,8 @@ const SHEET_ID={"Rompad":"rompad","Support Fleet":"support-fleet","Drilling":"dr
 const KIND={P:"present",MEDICAL:"present","SITE OFFICE":"present","HEAD OFFICE":"present",TRAINING:"present","SOOSAN TRAINING":"present","PIT LICENCE":"present",LATE:"present",INDUCTION:"present",
   AWOP:"absent",
   "ANNUAL LEAVE":"leave",SICK:"leave","MATERNITY LEAVE":"leave","STUDY LEAVE":"leave","FAMILY RESPONSIBILITY":"leave","FAMILY EMERGENCY":"leave",
-  OFF:"off",RESIGNED:"out",ABSCONDED:"out",SUSPENDED:"out"};
-const CODE_ORDER=["P","LATE","MEDICAL","SITE OFFICE","HEAD OFFICE","TRAINING","SOOSAN TRAINING","PIT LICENCE","INDUCTION","AWOP","SICK","ANNUAL LEAVE","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE","MATERNITY LEAVE","OFF","SUSPENDED","RESIGNED","ABSCONDED"];
+  OFF:"off",RESIGNED:"out",ABSCONDED:"out",DECEASED:"out",SUSPENDED:"out"};
+const CODE_ORDER=["P","LATE","MEDICAL","SITE OFFICE","HEAD OFFICE","TRAINING","SOOSAN TRAINING","PIT LICENCE","INDUCTION","AWOP","SICK","ANNUAL LEAVE","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE","MATERNITY LEAVE","OFF","SUSPENDED","RESIGNED","ABSCONDED","DECEASED"];
 const isTime=v=>/^\d{2}:\d{2}$/.test(v||"");
 const kindOf=v=>!v?"blank":isTime(v)?"present":(KIND[v]||"present");
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -176,7 +176,7 @@ function viewDaily(){const D=dailyData();
    (S.dshift!=="all"?'<p class="note" style="margin:0 0 10px">'+SHIFT_LBL[S.dshift]+' on '+nice(S.date)+': people whose group rota shows '+(S.dshift==="day"?"DAY":"NIGHT")+' that day'+(S.dshift==="day"?", plus groups with no rota (office and Monday to Friday)":"")+'. Groups on OFF are left out.</p>':"")+
    '<div class="bar"><button class="btn gold" id="copyDaily">Copy report for WhatsApp</button><button class="btn" id="xlsDaily">Download Excel</button></div>';
   h+='<div class="summary">'+stat("Employees",D.n)+stat("Present",D.all.present)+stat("AWOP",D.all.absent)+stat("Leave",D.all.leave)+stat("Off",D.all.off)+stat("Not marked",D.all.blank)+stat("Overtime",fmtH(D.all.ot)+" h")+stat("Attendance",fmtPct(pct(D.all.present,D.all.exc)),"pct")+'</div>';
-  h+='<h2 class="sheet-h">Daily report'+(S.dshift!=="all"?" – "+SHIFT_LBL[S.dshift]:"")+' <small>'+nice(S.date)+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
+  h+='<h2 class="sheet-h">Daily report'+(S.dshift!=="all"?" – "+SHIFT_LBL[S.dshift]:"")+' <small>'+nice(S.date)+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
   D.rows.forEach(r=>{h+=trow(r.sheet,r.n,r.t)});h+=trow("Total",D.n,D.all,"tot")+'</tbody></table></div>';
   const li=(arr,f)=>arr.length?'<ul>'+arr.map(e=>'<li>'+esc(e.name)+' <span class="note">'+esc(e.sheet)+(f?" · "+esc(f(e)):"")+'</span></li>').join("")+'</ul>':'<p class="none">None</p>';
   h+='<div class="lists"><div class="list"><h3>AWOP ('+D.awop.length+')</h3>'+li(D.awop)+'</div><div class="list"><h3>On leave ('+D.leave.length+')</h3>'+li(D.leave,e=>markOf(e,S.date))+'</div><div class="list"><h3>Not marked ('+D.blank.length+')</h3>'+li(D.blank)+'</div><div class="list"><h3>Overtime ('+fmtH(D.all.ot)+' h)</h3>'+li(D.ot,e=>fmtH(otOf(e,S.date))+' h')+'</div></div>';
@@ -292,8 +292,8 @@ function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-
   h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Number</th><th>Group</th><th>Job title</th><th></th></tr></thead><tbody>'+
    list.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.number)+'</td><td>'+esc(x.sheet+" · "+groupLabel(x))+'</td><td>'+esc(x.title)+'</td><td><button class="btn sm" data-edit="'+esc(x.id)+'">Edit</button> <button class="btn sm" data-remove="'+esc(x.id)+'">Remove</button></td></tr>').join("")+'</tbody></table></div>';
   h+='<p class="note">Removing takes the person off the register after their last working day. Their days up to then stay in the reports and Excel downloads.</p>';
-  const c=cycleOf(S.date);const flagged=activeEmps().map(x=>{const d=c.dates.find(d=>["RESIGNED","ABSCONDED"].includes(rawMark(x,d)));return d?{x,d,code:rawMark(x,d)}:null}).filter(Boolean);
-  if(flagged.length)h='<div class="list" style="margin-bottom:14px"><h3>Marked resigned or absconded this cycle ('+flagged.length+')</h3><p class="note" style="margin:0 0 8px">These people are still on the register. Remove them to take them off the marking list.</p><ul>'+
+  const c=cycleOf(S.date);const flagged=activeEmps().map(x=>{const d=c.dates.find(d=>["RESIGNED","ABSCONDED","DECEASED"].includes(rawMark(x,d)));return d?{x,d,code:rawMark(x,d)}:null}).filter(Boolean);
+  if(flagged.length)h='<div class="list" style="margin-bottom:14px"><h3>Marked resigned, absconded or deceased this cycle ('+flagged.length+')</h3><p class="note" style="margin:0 0 8px">These people are still on the register. Remove them to take them off the marking list.</p><ul>'+
     flagged.map(f=>'<li>'+esc(f.x.name)+' <span class="note">'+esc(f.x.sheet)+' · '+esc(f.code)+' from '+short(f.d)+'</span> <button class="btn sm" data-remove="'+esc(f.x.id)+'" data-reason="'+esc(f.code)+'" data-last="'+addDays(f.d,-1)+'">Remove</button></li>').join("")+'</ul></div>'+h;
   const gone=(S.emps||[]).filter(x=>x.active===false);
   if(gone.length)h+='<h2 class="sheet-h">Removed employees <small>'+gone.length+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Sheet</th><th>Reason</th><th>Last working day</th><th></th></tr></thead><tbody>'+
@@ -415,7 +415,7 @@ function openPanel(e){const v=markOf(e,S.date);const now=new Date();const tm=isT
 }
 function openRemove(x,reason,last){let why=reason||"RESIGNED";
   $("sheetHost").innerHTML='<div class="scrim" id="scrim"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="rt"><h2 id="rt">Remove '+esc(x.name)+'</h2><div class="sub">'+esc([x.number,x.title,x.sheet].filter(Boolean).join(" · "))+'</div>'+
-   '<div class="lbl">Reason</div><div class="codes"><button data-why="RESIGNED">Resigned</button><button data-why="ABSCONDED">Absconded</button></div>'+
+   '<div class="lbl">Reason</div><div class="codes"><button data-why="RESIGNED">Resigned</button><button data-why="ABSCONDED">Absconded</button><button data-why="DECEASED">Deceased</button></div>'+
    '<div class="lbl">Last working day</div><div class="clock"><input type="date" id="lastDay" value="'+(last||S.date)+'"></div>'+
    '<p class="note">From the day after, the person is off the register and their days show as '+'<span id="whyTxt"></span>.</p>'+
    '<div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><button class="btn gold" id="doRemove">Remove from register</button><button class="btn" id="closeP">Cancel</button></div></div></div>';
@@ -518,7 +518,7 @@ async function brandedSave(name,wbIn){toast("Preparing the Excel…");await load
             if(BAD_CODES.includes(u)){cell.fill=fill(XB.REDF);cell.font={name:"Arial",size:10,bold:true,color:{argb:XB.RED}}}
             else if(LEAVE_CODES.includes(u)){cell.fill=fill(XB.BLUEF);cell.font={name:"Arial",size:10,color:{argb:XB.BLUE}}}
             else if(u==="OFF")cell.font={name:"Arial",size:10,color:{argb:XB.GREY}};
-            else if(["RESIGNED","ABSCONDED","SUSPENDED"].includes(u))cell.font={name:"Arial",size:10,italic:true,color:{argb:XB.MUTED}}}}
+            else if(["RESIGNED","ABSCONDED","DECEASED","SUSPENDED"].includes(u))cell.font={name:"Arial",size:10,italic:true,color:{argb:XB.MUTED}}}}
         const z=fmt[i+"|"+c];if(z&&typeof v==="number"){cell.numFmt=z;if(v<0.9&&!isGroup)cell.font=Object.assign({},cell.font,{color:{argb:XB.RED},bold:true})}}
       if(!isGroup&&!isTot)k++;out++}
     freezeAt(ws,headRowNo)}
@@ -558,14 +558,14 @@ function viewExport(){const E=S.exp;if(!E.from){[E.from,E.to]=preset(E.type,S.da
   if(E.loading){main.innerHTML=h+'<div class="empty"><b>Loading these dates</b>Fetching marks for the period.</div>';return}
   const all=tally(es,dates);
   h+='<div class="summary">'+stat("Employees",es.length)+stat("Present days",all.present)+stat("AWOP days",all.absent)+stat("Leave & sick days",all.leave)+stat("Off days",all.off)+stat("Not marked",all.blank)+stat("Overtime",fmtH(all.ot)+" h")+stat("Attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
-  h+='<div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
   SHEETS.forEach(sh=>{const l=es.filter(e=>e.sheet===sh);if(l.length)h+=trow(sh,l.length,tally(l,dates))});
   h+=trow("Total",es.length,all,"tot")+'</tbody></table></div>';
   h+='<p class="note">The Excel file has a Summary tab and one tab per sheet, with each person\'s mark for every day in the period and their totals.</p>';
   main.innerHTML=h}
 async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toast("Could not load those dates: "+(e.message||"try again"));return}
   shift=shift||"all";const dates=rangeDates(from,to);const wb=XLSX.utils.book_new();const es=onShift(inPeriod(from),from,from===to?shift:"all");if(from!==to)shift="all";
-  const sumHead=["Sheet","Employees","Present"].concat(EXC,["Off","Resigned, absconded, suspended","Not marked","Overtime hours","Attendance %"]);
+  const sumHead=["Sheet","Employees","Present"].concat(EXC,["Off","Resigned, absconded, deceased, suspended","Not marked","Overtime hours","Attendance %"]);
   const line=(name,n,t)=>{const p=pct(t.present,t.exc);return [name,n,t.present].concat(EXC.map(k=>t.codes[k]||0),[t.off,t.out,t.blank,Math.round(t.ot*10)/10,p==null?"":p/100])};
   const sum=[["TKR Operations – Attendance Report"+(shift!=="all"?" – "+SHIFT_LBL[shift]:"")],["Period",periodText(from,to)],[],sumHead];
   SHEETS.forEach(sh=>{const l=es.filter(e=>e.sheet===sh);if(l.length)sum.push(line(sh,l.length,tally(l,dates)))});
