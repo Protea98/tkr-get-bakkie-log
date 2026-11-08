@@ -181,13 +181,13 @@ function viewDaily(){const D=dailyData();
    (S.dshift!=="all"?'<p class="note" style="margin:0 0 10px">'+SHIFT_LBL[S.dshift]+' on '+nice(S.date)+': people whose group rota shows '+(S.dshift==="day"?"DAY":"NIGHT")+' that day'+(S.dshift==="day"?", plus groups with no rota (office and Monday to Friday)":"")+'. Groups on OFF are left out.</p>':"")+
    '<div class="bar"><button class="btn gold" id="copyDaily">Copy report for WhatsApp</button><button class="btn" id="xlsDaily">Download Excel</button></div>';
   h+='<div class="summary">'+stat("Employees",D.n)+stat("Present",D.all.present)+stat("AWOP",D.all.absent)+stat("Leave",D.all.leave)+stat("Off",D.all.off)+stat("Not marked",D.all.blank)+stat("Overtime",fmtH(D.all.ot)+" h")+stat("Attendance",fmtPct(pct(D.all.present,D.all.exc)),"pct")+'</div>';
-  h+='<h2 class="sheet-h">Daily report'+(S.dshift!=="all"?" – "+SHIFT_LBL[S.dshift]:"")+' <small>'+nice(S.date)+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
+  h+='<h2 class="sheet-h">Daily report'+(S.dshift!=="all"?" – "+SHIFT_LBL[S.dshift]:"")+' <small>'+nice(S.date)+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime</th><th>Hours worked</th><th>Attendance</th></tr></thead><tbody>';
   D.rows.forEach(r=>{h+=trow(r.sheet,r.n,r.t)});h+=trow("Total",D.n,D.all,"tot")+'</tbody></table></div>';
   const li=(arr,f)=>arr.length?'<ul>'+arr.map(e=>'<li>'+esc(e.name)+' <span class="note">'+esc(e.sheet)+(f?" · "+esc(f(e)):"")+'</span></li>').join("")+'</ul>':'<p class="none">None</p>';
   h+='<div class="lists"><div class="list"><h3>AWOP ('+D.awop.length+')</h3>'+li(D.awop)+'</div><div class="list"><h3>On leave ('+D.leave.length+')</h3>'+li(D.leave,e=>markOf(e,S.date))+'</div><div class="list"><h3>Not marked ('+D.blank.length+')</h3>'+li(D.blank)+'</div><div class="list"><h3>Overtime ('+fmtH(D.all.ot)+' h)</h3>'+li(D.ot,e=>fmtH(otOf(e,S.date))+' h')+'</div></div>';
   main.innerHTML=h;
 }
-function trow(name,n,t,cls){const p=pct(t.present,t.exc);return '<tr class="'+(cls||"")+'"><td>'+esc(name)+'</td><td>'+n+'</td><td>'+t.present+'</td><td>'+t.absent+'</td><td>'+t.leave+'</td><td>'+t.off+'</td><td>'+t.out+'</td><td>'+t.blank+'</td><td>'+fmtH(t.ot)+'</td><td class="pc">'+fmtPct(p)+'</td></tr>'}
+function trow(name,n,t,cls){const p=pct(t.present,t.exc);return '<tr class="'+(cls||"")+'"><td>'+esc(name)+'</td><td>'+n+'</td><td>'+t.present+'</td><td>'+t.absent+'</td><td>'+t.leave+'</td><td>'+t.off+'</td><td>'+t.out+'</td><td>'+t.blank+'</td><td>'+hm(t.ot)+'</td><td>'+hm(hrsWorked(t))+'</td><td class="pc">'+fmtPct(p)+'</td></tr>'}
 function dailyText(){const D=dailyData();let s="*TKR Operations – Daily Attendance"+(S.dshift!=="all"?" – "+SHIFT_LBL[S.dshift]:"")+"*\n"+nice(S.date)+" "+parse(S.date).getFullYear()+"\n\n";
   D.rows.forEach(r=>{s+="*"+r.sheet+"*: Present "+r.t.present+", AWOP "+r.t.absent+", Leave "+r.t.leave+", Off "+r.t.off+(r.t.blank?", Not marked "+r.t.blank:"")+" – "+fmtPct(pct(r.t.present,r.t.exc))+"\n"});
   s+="\n*Total*: "+D.all.present+" present, "+D.all.absent+" AWOP, "+D.all.leave+" on leave, "+D.all.off+" off – attendance "+fmtPct(pct(D.all.present,D.all.exc))+"\n";
@@ -204,11 +204,11 @@ function viewCycle(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.d
   const all=tally(rows.map(r=>r.e),upto);
   let h=cycleBanner()+chipsBar('<input class="search" id="q" type="search" placeholder="Search name, number or job" value="'+esc(S.q)+'">');
   h+='<div class="bar"><button class="btn" id="sortLow" aria-pressed="'+S.sortLow+'">'+(S.sortLow?"Show in timesheet order":"Lowest attendance first")+'</button><button class="btn gold" id="xlsCycle">Download Excel timesheet</button></div>';
-  h+='<div class="summary">'+stat("Days counted",upto.length+" of "+c.dates.length)+stat("Present days",all.present)+stat("Exception days",all.exc)+stat("Cycle attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
+  h+='<div class="summary">'+stat("Days counted",upto.length+" of "+c.dates.length)+stat("Present days",all.present)+stat("Exception days",all.exc)+stat("Hours worked",hm(hrsWorked(all)))+stat("Cycle attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
   h+='<p class="note">'+short(c.start)+' to '+short(upto[upto.length-1]||c.start)+'. Attendance = present days ÷ (present days + exception days). Exceptions are AWOP, sick and maternity leave. Annual leave, family responsibility, family emergency and study leave are not counted as absent. Medical counts as present. Off days are not counted.</p>';
-  h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Present</th><th>AWOP</th>'+LEAVE_COLS.map(k=>'<th>'+esc(k.replace(" LEAVE","").replace("FAMILY ","FAM. "))+'</th>').join("")+'<th>Off</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
-  let last="";rows.forEach(r=>{if(!S.sortLow&&r.e.sheet!==last){last=r.e.sheet;h+='<tr class="tot"><td colspan="'+(LEAVE_COLS.length+7)+'">'+esc(last)+'</td></tr>'}
-    const t=r.t;h+='<tr><td>'+esc(r.e.name)+'<br><span class="note">'+esc(r.e.sheet+" · "+groupLabel(r.e))+'</span></td><td>'+t.present+'</td><td>'+t.absent+'</td>'+LEAVE_COLS.map(k=>'<td>'+(t.codes[k]||"")+'</td>').join("")+'<td>'+t.off+'</td><td>'+t.blank+'</td><td>'+(t.ot?fmtH(t.ot):'')+'</td><td class="'+(r.p!=null&&r.p<90?"lowpc":"pc")+'">'+fmtPct(r.p)+'</td></tr>'});
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Present</th><th>AWOP</th>'+LEAVE_COLS.map(k=>'<th>'+esc(k.replace(" LEAVE","").replace("FAMILY ","FAM. "))+'</th>').join("")+'<th>Off</th><th>Not marked</th><th>Overtime</th><th>Hours worked</th><th>Attendance</th></tr></thead><tbody>';
+  let last="";rows.forEach(r=>{if(!S.sortLow&&r.e.sheet!==last){last=r.e.sheet;h+='<tr class="tot"><td colspan="'+(LEAVE_COLS.length+8)+'">'+esc(last)+'</td></tr>'}
+    const t=r.t;h+='<tr><td>'+esc(r.e.name)+'<br><span class="note">'+esc(r.e.sheet+" · "+groupLabel(r.e))+'</span></td><td>'+t.present+'</td><td>'+t.absent+'</td>'+LEAVE_COLS.map(k=>'<td>'+(t.codes[k]||"")+'</td>').join("")+'<td>'+t.off+'</td><td>'+t.blank+'</td><td>'+(t.ot?hm(t.ot):'')+'</td><td><b>'+hm(hrsWorked(t))+'</b></td><td class="'+(r.p!=null&&r.p<90?"lowpc":"pc")+'">'+fmtPct(r.p)+'</td></tr>'});
   h+='</tbody></table></div>';main.innerHTML=h;
 }
 
@@ -568,9 +568,16 @@ function viewExport(){const E=S.exp;if(!E.from){[E.from,E.to]=preset(E.type,S.da
   if(E.loading){main.innerHTML=h+'<div class="empty"><b>Loading these dates</b>Fetching marks for the period.</div>';return}
   const all=tally(es,dates);
   h+='<div class="summary">'+stat("Employees",es.length)+stat("Present days",all.present)+stat("AWOP days",all.absent)+stat("Leave & sick days",all.leave)+stat("Off days",all.off)+stat("Not marked",all.blank)+stat("Overtime",hm(all.ot))+stat("Hours worked",hm(hrsWorked(all)))+stat("Attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
-  h+='<div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime</th><th>Hours worked</th><th>Attendance</th></tr></thead><tbody>';
   SHEETS.forEach(sh=>{const l=es.filter(e=>e.sheet===sh);if(l.length)h+=trow(sh,l.length,tally(l,dates))});
   h+=trow("Total",es.length,all,"tot")+'</tbody></table></div>';
+  h+='<h2 class="sheet-h">Hours worked per employee <small>'+periodText(E.from,E.to)+'</small></h2>';
+  h+='<div class="bar"><input class="search" id="hq" type="search" placeholder="Search name, number or job" value="'+esc(S.hq||"")+'"></div>';
+  {const q=(S.hq||"").toLowerCase();let last="";let rows="";
+   bySheetGroup(es).forEach(sg=>sg.groups.forEach(g=>g.emps.forEach(e=>{if(q&&!(e.name+" "+e.number+" "+e.title).toLowerCase().includes(q))return;const t=tally([e],dates);
+     if(sg.sheet!==last){last=sg.sheet;rows+='<tr class="tot"><td colspan="5">'+esc(last)+'</td></tr>'}
+     rows+='<tr><td>'+esc(e.name)+'<br><span class="note">'+esc([e.number,g.label].filter(Boolean).join(" · "))+'</span></td><td>'+t.present+'</td><td>'+hm(normHrs(t,HPD()))+'</td><td>'+(t.ot?hm(t.ot):"")+'</td><td><b>'+hm(hrsWorked(t))+'</b></td></tr>'})));
+   h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Present days</th><th>Normal hours</th><th>Overtime</th><th>Hours worked</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">No employees match</td></tr>')+'</tbody></table></div>'}
   h+='<p class="note">The Excel file has a Summary tab, one tab per sheet with each person\'s mark for every day and their totals, and an Hours worked tab. Hours worked = the hours entered on the register each day + overtime. Days marked present with no hours entered count as '+fmtH(HPD())+' hours (change this above).</p>';
   main.innerHTML=h}
 async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toast("Could not load those dates: "+(e.message||"try again"));return}
@@ -641,7 +648,7 @@ $("date").onchange=ev=>{if(ev.target.value){S.date=ev.target.value;if(S.db)watch
 $("cycleLbl").onclick=()=>{if(S.db)openCyclePanel()};
 $("prev").onclick=()=>{S.date=addDays(S.date,-1);if(S.db)watchCycle();render()};
 $("next").onclick=()=>{S.date=addDays(S.date,1);if(S.db)watchCycle();render()};
-main.addEventListener("input",ev=>{if(ev.target.id==="q"){S.q=ev.target.value;const pos=ev.target.selectionStart;render();const q=$("q");if(q){q.focus();q.setSelectionRange(pos,pos)}}});
+main.addEventListener("input",ev=>{if(ev.target.id==="hq"){S.hq=ev.target.value;const pos=ev.target.selectionStart;render();const q=$("hq");if(q){q.focus();q.setSelectionRange(pos,pos)}return}if(ev.target.id==="q"){S.q=ev.target.value;const pos=ev.target.selectionStart;render();const q=$("q");if(q){q.focus();q.setSelectionRange(pos,pos)}}});
 main.addEventListener("submit",ev=>{if(ev.target.id!=="empForm")return;ev.preventDefault();
   const f={sheet:$("f-sheet").value,group:$("f-group").value,name:$("f-name").value.trim(),number:$("f-number").value.trim(),dept:$("f-dept").value.trim(),title:$("f-title").value.trim()};
   if(!f.name){toast("Enter the employee's name");return}
