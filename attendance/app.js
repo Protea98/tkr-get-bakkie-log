@@ -597,9 +597,9 @@ async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toa
     const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:24}].concat(dates.map(()=>({wch:7})));
     const pc=head.length-1;for(let r=2;r<aoa.length;r++){const ref=XLSX.utils.encode_cell({r,c:pc});if(ws[ref]&&typeof ws[ref].v==="number")ws[ref].z="0.0%"}
     XLSX.utils.book_append_sheet(wb,ws,s.sheet.slice(0,31))});
-  {const hpd=HPD();const hw=[["Hours worked – "+periodText(from,to)],["Hours per present day",hm(hpd)],[],["Employee","Number","Sheet","Group","Job Title","Present days","Hours per day","Normal hours","Overtime hours","Hours worked"]];let tp=0,tn=0,to=0;
-    bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>{const t=tally([e],dates);const n=Math.round(normHrs(t,hpd)*10)/10,o=Math.round(t.ot*10)/10;tp+=t.present;tn+=n;to+=o;hw.push([e.name,e.number,s.sheet,g.label,e.title,t.present,hm(hpd),hm(n),hm(o),hm(n+o)])})));
-    hw.push(["Total","","","","",tp,"",hm(tn),hm(to),hm(tn+to)]);
+  {const hpd=HPD();const hw=[["Hours worked – "+periodText(from,to)],["Hours per present day",hm(hpd)],[],["Employee","Number","Sheet","Group","Job Title","Present days","Hours per day","Normal hours","Overtime hours","Hours worked"]];let tp=0,tn=0,tov=0;
+    bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>{const t=tally([e],dates);const n=Math.round(normHrs(t,hpd)*10)/10,o=Math.round(t.ot*10)/10;tp+=t.present;tn+=n;tov+=o;hw.push([e.name,e.number,s.sheet,g.label,e.title,t.present,hm(hpd),hm(n),hm(o),hm(n+o)])})));
+    hw.push(["Total","","","","",tp,"",hm(tn),hm(tov),hm(tn+tov)]);
     hw.push([],["Hours worked = hours entered on the register + hours per day for present days with no hours entered + overtime hours."]);
     const wsh=XLSX.utils.aoa_to_sheet(hw);wsh["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:22},{wch:24},{wch:9},{wch:9},{wch:10},{wch:10},{wch:11}];XLSX.utils.book_append_sheet(wb,wsh,"Hours worked")}
   const otRows=[];bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>dates.forEach(d=>{const h=otOf(e,d);if(h)otRows.push([e.name,e.number,s.sheet,g.label,nice(d)+" "+yr(d),h])}))));
