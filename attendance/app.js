@@ -32,8 +32,11 @@ const KIND={P:"present",MEDICAL:"present","SITE OFFICE":"present","HEAD OFFICE":
   OFF:"off",RESIGNED:"out",ABSCONDED:"out",DECEASED:"out",SUSPENDED:"out"};
 const CODE_ORDER=["P","LATE","MEDICAL","SITE OFFICE","HEAD OFFICE","TRAINING","SOOSAN TRAINING","PIT LICENCE","INDUCTION","AWOP","SICK","ANNUAL LEAVE","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE","MATERNITY LEAVE","OFF","SUSPENDED","RESIGNED","ABSCONDED","DECEASED"];
 const isTime=v=>/^\d{2}:\d{2}$/.test(v||"");
-const isHrs=v=>/^\d+(\.\d+)? HRS$/.test(v||"");
-const hrsOf=v=>isHrs(v)?parseFloat(v):0;
+const isHrs=v=>/^\d+(\.\d+)? HRS$/.test(v||"")||/^\d{1,2}:\d{2} HRS$/.test(v||"");
+const hrsOf=v=>{if(!isHrs(v))return 0;const m=/^(\d{1,2}):(\d{2})/.exec(v);return m?Number(m[1])+Number(m[2])/60:parseFloat(v)};
+const hm=h=>{const t=Math.round((Number(h)||0)*60);return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0")};
+const showMark=v=>isHrs(v)?hm(hrsOf(v)):v;
+const parseHm=x=>{const m=/^\s*(\d{1,2})(?:[:h.,](\d{1,2}))?\s*$/.exec(x||"");if(!m)return NaN;const mm=m[2]==null?0:Number(m[2].length===1?m[2]+"0":m[2]);if(mm>59)return NaN;return Number(m[1])+mm/60};
 const kindOf=v=>!v?"blank":(isTime(v)||isHrs(v))?"present":(KIND[v]||"present");
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pad=n=>String(n).padStart(2,"0");
@@ -128,7 +131,7 @@ function groupLabel(e){const parts=[];if(e.section&&e.section!==e.sheet)parts.pu
 function bySheetGroup(list){const out=[];let cur=null,g=null;
   SHEETS.forEach(sh=>{const es=list.filter(e=>e.sheet===sh).sort((a,b)=>a.order-b.order);if(!es.length)return;cur={sheet:sh,groups:[]};out.push(cur);g=null;
     es.forEach(e=>{if(!g||g.id!==e.group){g={id:e.group,label:groupLabel(e),emps:[]};cur.groups.push(g)}g.emps.push(e)})});return out}
-function pill(v){const k=kindOf(v);return '<span class="pill s-'+k+((isTime(v)||isHrs(v))?" time":"")+'">'+(v?esc(isHrs(v)?v.replace(" HRS"," h"):v):"Mark")+'</span>'}
+function pill(v){const k=kindOf(v);return '<span class="pill s-'+k+((isTime(v)||isHrs(v))?" time":"")+'">'+(v?esc(showMark(v)):"Mark")+'</span>'}
 // Leave that does not lower attendance: annual, family responsibility, family emergency and study leave.
 // AWOP, sick and maternity leave lower it (t.exc).
 const NOT_ABSENT=["ANNUAL LEAVE","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE"];
@@ -403,13 +406,14 @@ async function saveEmps(list){if(!S.canWrite){toast("You can view this register 
 // ---------- mark panel ----------
 function openPanel(e){const v=markOf(e,S.date);const now=new Date();const hv=isHrs(v)?hrsOf(v):HPD();
   $("sheetHost").innerHTML='<div class="scrim" id="scrim"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="pt"><h2 id="pt">'+esc(e.name)+'</h2><div class="sub">'+esc([e.number,e.title,groupLabel(e)].filter(Boolean).join(" · "))+' — '+nice(S.date)+'</div>'+
-   '<div class="lbl">Total hours worked today</div><div class="clock"><input type="number" id="tm" min="0.5" max="24" step="0.5" inputmode="decimal" value="'+hv+'"><button class="btn gold" id="saveTime">Save hours</button></div>'+
+   '<div class="lbl">Total hours worked today (hh:mm)</div><div class="clock"><input type="text" id="tm" inputmode="numeric" maxlength="5" placeholder="12:00" value="'+hm(hv)+'"><button class="btn gold" id="saveTime">Save hours</button></div>'+
    '<div class="lbl">Overtime hours</div><div class="clock"><input type="number" id="ot" min="0" max="24" step="0.5" inputmode="decimal" placeholder="0" value="'+(otOf(e,S.date)||"")+'"><button class="btn gold" id="saveOt">Save overtime</button></div>'+
    '<div class="lbl">Or mark as</div><div class="codes">'+CODE_ORDER.map(c=>'<button class="k-'+KIND[c]+(v===c?" cur":"")+'" data-code="'+esc(c)+'">'+esc(c)+'</button>').join("")+'</div>'+
    '<div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><button class="btn" id="clr"'+(v?"":" disabled")+'>Clear mark</button><button class="btn" id="closeP">Close</button></div></div></div>';
   const close=()=>{$("sheetHost").innerHTML=""};
   $("scrim").onclick=ev=>{if(ev.target.id==="scrim")close()};$("closeP").onclick=close;
-  $("saveTime").onclick=()=>{const h=parseFloat($("tm").value);if(isNaN(h)||h<=0||h>24){toast("Enter hours worked between 0.5 and 24");return}setMark(e,fmtH(h)+" HRS");toast(fmtH(h)+" hours saved for "+e.name);close()};
+  $("tm").oninput=ev=>{let d=ev.target.value.replace(/\D/g,"").slice(0,4);ev.target.value=d.length>2?d.slice(0,2)+":"+d.slice(2):d};
+  $("saveTime").onclick=()=>{const h=parseHm($("tm").value);if(isNaN(h)||h<=0||h>24){toast("Enter hours worked like 12:00 (up to 24:00)");return}setMark(e,hm(h)+" HRS");toast(hm(h)+" hours saved for "+e.name);close()};
   $("clr").onclick=()=>{setMark(e,"");close()};
   $("saveOt").onclick=()=>{const raw=$("ot").value.trim();const h=raw===""?0:parseFloat(raw);if(isNaN(h)||h<0||h>24){toast("Enter overtime hours between 0 and 24");return}setOt(e,h?h:"");toast(h?fmtH(h)+" h overtime saved for "+e.name:"Overtime cleared for "+e.name);close()};
   $("sheetHost").querySelectorAll("[data-code]").forEach(b=>b.onclick=()=>{setMark(e,b.dataset.code);close()});
@@ -563,7 +567,7 @@ function viewExport(){const E=S.exp;if(!E.from){[E.from,E.to]=preset(E.type,S.da
   h+='<h2 class="sheet-h">Attendance report <small>'+periodText(E.from,E.to)+'</small></h2>';
   if(E.loading){main.innerHTML=h+'<div class="empty"><b>Loading these dates</b>Fetching marks for the period.</div>';return}
   const all=tally(es,dates);
-  h+='<div class="summary">'+stat("Employees",es.length)+stat("Present days",all.present)+stat("AWOP days",all.absent)+stat("Leave & sick days",all.leave)+stat("Off days",all.off)+stat("Not marked",all.blank)+stat("Overtime",fmtH(all.ot)+" h")+stat("Hours worked",fmtH(hrsWorked(all))+" h")+stat("Attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
+  h+='<div class="summary">'+stat("Employees",es.length)+stat("Present days",all.present)+stat("AWOP days",all.absent)+stat("Leave & sick days",all.leave)+stat("Off days",all.off)+stat("Not marked",all.blank)+stat("Overtime",hm(all.ot))+stat("Hours worked",hm(hrsWorked(all)))+stat("Attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
   h+='<div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, deceased, suspended</th><th>Not marked</th><th>Overtime hrs</th><th>Attendance</th></tr></thead><tbody>';
   SHEETS.forEach(sh=>{const l=es.filter(e=>e.sheet===sh);if(l.length)h+=trow(sh,l.length,tally(l,dates))});
   h+=trow("Total",es.length,all,"tot")+'</tbody></table></div>';
@@ -572,7 +576,7 @@ function viewExport(){const E=S.exp;if(!E.from){[E.from,E.to]=preset(E.type,S.da
 async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toast("Could not load those dates: "+(e.message||"try again"));return}
   shift=shift||"all";const dates=rangeDates(from,to);const wb=XLSX.utils.book_new();const es=onShift(inPeriod(from),from,from===to?shift:"all");if(from!==to)shift="all";
   const sumHead=["Sheet","Employees","Present"].concat(EXC,["Off","Resigned, absconded, deceased, suspended","Not marked","Overtime hours","Hours worked","Attendance %"]);
-  const line=(name,n,t)=>{const p=pct(t.present,t.exc);return [name,n,t.present].concat(EXC.map(k=>t.codes[k]||0),[t.off,t.out,t.blank,Math.round(t.ot*10)/10,hrsWorked(t),p==null?"":p/100])};
+  const line=(name,n,t)=>{const p=pct(t.present,t.exc);return [name,n,t.present].concat(EXC.map(k=>t.codes[k]||0),[t.off,t.out,t.blank,hm(t.ot),hm(hrsWorked(t)),p==null?"":p/100])};
   const sum=[["TKR Operations – Attendance Report"+(shift!=="all"?" – "+SHIFT_LBL[shift]:"")],["Period",periodText(from,to)],[],sumHead];
   SHEETS.forEach(sh=>{const l=es.filter(e=>e.sheet===sh);if(l.length)sum.push(line(sh,l.length,tally(l,dates)))});
   sum.push(line("Total",es.length,tally(es,dates)));
@@ -582,13 +586,13 @@ async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toa
   XLSX.utils.book_append_sheet(wb,ws0,"Summary");
   bySheetGroup(es).forEach(s=>{const head=["Employee","Number","Department","Job Title"].concat(dates.map(short),["Present"],EXC,["Off","Not marked","Overtime hours","Hours worked","Attendance %"]);const aoa=[[s.sheet+" – "+periodText(from,to)],head];
     s.groups.forEach(g=>{aoa.push([g.label,"","",""].concat(dates.map(d=>rotaFor(g.id,d))));
-      g.emps.forEach(e=>{const t=tally([e],dates);const p=pct(t.present,t.exc);aoa.push([e.name,e.number,e.dept,e.title].concat(dates.map(d=>markOf(e,d)),[t.present],EXC.map(k=>t.codes[k]||0),[t.off,t.blank,Math.round(t.ot*10)/10,hrsWorked(t),p==null?"":p/100]))})});
+      g.emps.forEach(e=>{const t=tally([e],dates);const p=pct(t.present,t.exc);aoa.push([e.name,e.number,e.dept,e.title].concat(dates.map(d=>showMark(markOf(e,d))),[t.present],EXC.map(k=>t.codes[k]||0),[t.off,t.blank,hm(t.ot),hm(hrsWorked(t)),p==null?"":p/100]))})});
     const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:24}].concat(dates.map(()=>({wch:7})));
     const pc=head.length-1;for(let r=2;r<aoa.length;r++){const ref=XLSX.utils.encode_cell({r,c:pc});if(ws[ref]&&typeof ws[ref].v==="number")ws[ref].z="0.0%"}
     XLSX.utils.book_append_sheet(wb,ws,s.sheet.slice(0,31))});
-  {const hpd=HPD();const hw=[["Hours worked – "+periodText(from,to)],["Hours per present day",fmtH(hpd)+" hours"],[],["Employee","Number","Sheet","Group","Job Title","Present days","Hours per day","Normal hours","Overtime hours","Hours worked"]];let tp=0,tn=0,to=0;
-    bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>{const t=tally([e],dates);const n=Math.round(normHrs(t,hpd)*10)/10,o=Math.round(t.ot*10)/10;tp+=t.present;tn+=n;to+=o;hw.push([e.name,e.number,s.sheet,g.label,e.title,t.present,hpd,n,o,Math.round((n+o)*10)/10])})));
-    hw.push(["Total","","","","",tp,"",Math.round(tn*10)/10,Math.round(to*10)/10,Math.round((tn+to)*10)/10]);
+  {const hpd=HPD();const hw=[["Hours worked – "+periodText(from,to)],["Hours per present day",hm(hpd)],[],["Employee","Number","Sheet","Group","Job Title","Present days","Hours per day","Normal hours","Overtime hours","Hours worked"]];let tp=0,tn=0,to=0;
+    bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>{const t=tally([e],dates);const n=Math.round(normHrs(t,hpd)*10)/10,o=Math.round(t.ot*10)/10;tp+=t.present;tn+=n;to+=o;hw.push([e.name,e.number,s.sheet,g.label,e.title,t.present,hm(hpd),hm(n),hm(o),hm(n+o)])})));
+    hw.push(["Total","","","","",tp,"",hm(tn),hm(to),hm(tn+to)]);
     hw.push([],["Hours worked = hours entered on the register + hours per day for present days with no hours entered + overtime hours."]);
     const wsh=XLSX.utils.aoa_to_sheet(hw);wsh["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:22},{wch:24},{wch:9},{wch:9},{wch:10},{wch:10},{wch:11}];XLSX.utils.book_append_sheet(wb,wsh,"Hours worked")}
   const otRows=[];bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>dates.forEach(d=>{const h=otOf(e,d);if(h)otRows.push([e.name,e.number,s.sheet,g.label,nice(d)+" "+yr(d),h])}))));
