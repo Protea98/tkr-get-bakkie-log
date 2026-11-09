@@ -125,7 +125,7 @@ function openCyclePanel(){const c=cycleOf(S.date);
 
 // ---------- helpers ----------
 function activeEmps(){return (S.emps||[]).filter(e=>e.active!==false)}
-function inPeriod(from){return (S.emps||[]).filter(e=>e.active!==false||(e.leftDate&&e.leftDate>=from))}
+function inPeriod(from){return activeEmps()}
 function filtered(from){const q=S.q.trim().toLowerCase();return (from?inPeriod(from):activeEmps()).filter(e=>(S.sheet==="All"||e.sheet===S.sheet)&&(!q||(e.name+" "+e.number+" "+e.title).toLowerCase().includes(q)))}
 function groupLabel(e){const parts=[];if(e.section&&e.section!==e.sheet)parts.push(e.section);if(e.shift)parts.push(e.shift);return parts.join(" · ")||e.sheet}
 function bySheetGroup(list){const out=[];let cur=null,g=null;
@@ -300,9 +300,6 @@ function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-
   const c=cycleOf(S.date);const flagged=activeEmps().map(x=>{const d=c.dates.find(d=>["RESIGNED","ABSCONDED","DECEASED"].includes(rawMark(x,d)));return d?{x,d,code:rawMark(x,d)}:null}).filter(Boolean);
   if(flagged.length)h='<div class="list" style="margin-bottom:14px"><h3>Marked resigned, absconded or deceased this cycle ('+flagged.length+')</h3><p class="note" style="margin:0 0 8px">These people are still on the register. Remove them to take them off the marking list.</p><ul>'+
     flagged.map(f=>'<li>'+esc(f.x.name)+' <span class="note">'+esc(f.x.sheet)+' · '+esc(f.code)+' from '+short(f.d)+'</span> <button class="btn sm" data-remove="'+esc(f.x.id)+'" data-reason="'+esc(f.code)+'" data-last="'+addDays(f.d,-1)+'">Remove</button></li>').join("")+'</ul></div>'+h;
-  const gone=(S.emps||[]).filter(x=>x.active===false);
-  if(gone.length)h+='<h2 class="sheet-h">Removed employees <small>'+gone.length+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Sheet</th><th>Reason</th><th>Last working day</th><th></th></tr></thead><tbody>'+
-    gone.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.sheet)+'</td><td>'+esc(x.leftReason||"")+'</td><td>'+(x.leftDate?nice(x.leftDate)+" "+yr(x.leftDate):"")+'</td><td><button class="btn sm" data-restore="'+esc(x.id)+'">Put back</button></td></tr>').join("")+'</tbody></table></div>';
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Update from the register Excel</h3><p class="note" style="margin:0 0 8px">Pick the register (one tab per sheet: rompad, support fleet, shared services, drilling, intern). The app puts everyone in the shift group they are under (SHIFT A, SHIFT B …), sets each group\'s DAY / NIGHT / OFF rota from the group row, and copies the marks for every date in the file. Anyone not yet on the register is added. Empty cells in the Excel do not clear marks in the app.</p><button class="btn gold" id="impReg">Choose register Excel</button><input type="file" id="regFile" accept=".xlsx,.xls,.xlsb" hidden><p class="note" id="regMsg" role="status">'+esc(regNote)+'</p></div>';
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Add employees from Excel</h3><p class="note" style="margin:0 0 8px">Pick an Excel list with the columns Employee, Number, Job Title and Department. People already on the register (same employee number) are skipped. Department decides the sheet: Rompad, Drilling and Shared Services go to their own sheet; Buses, Water Bowsers, Low Beds and TLB go to Support Fleet; Corporate goes to Shared Services. Each department becomes a shift group.</p><button class="btn gold" id="impEmps">Choose Excel file</button><input type="file" id="impFile" accept=".xlsx,.xls,.xlsb,.csv" hidden><p class="note" id="impMsg" role="status">'+esc(impNote)+'</p></div>';
   if(isAdmin()&&(S.emps||[]).length)h+='<div class="list" style="margin-top:18px"><h3>Remove all employees</h3><p class="note" style="margin:0 0 8px">Clears the whole employee list ('+(S.emps||[]).length+' people, including removed ones) so you can add your own. A copy of the data file downloads first, so you can load it back under Users if you need it. Marks already saved are not deleted.</p><button class="btn" id="clearEmps" style="border-color:var(--bad);color:var(--bad)">Remove all employees</button></div>';
@@ -552,13 +549,12 @@ function xlsEmployees(){const act=activeEmps().slice().sort((a,b)=>SHEETS.indexO
   const title="TKR Operations – Employee list – "+nice(iso(new Date()))+" "+yr(iso(new Date()));
   add("All employees",[[title],["Employees on the register: "+act.length],[],head].concat(act.map(row)),cols);
   SHEETS.forEach(sh=>{const es=act.filter(e=>e.sheet===sh);if(es.length)add(sh,[[sh+" – "+es.length+" employees"],[],head].concat(es.map(row)),cols)});
-  if(gone.length)add("Removed",[["Removed employees – "+gone.length],[],head.concat(["Reason","Last working day"])].concat(gone.map(e=>row(e).concat([e.leftReason||"",e.leftDate?fmtD(e.leftDate):""]))),cols.concat([{wch:14},{wch:16}]));
   saveFile("TKR Employee list "+iso(new Date())+".xlsx",wb)}
 const fmtD=s=>{const [y,m,d]=s.split("-");return d+"/"+m+"/"+y};
 function viewExport(){const E=S.exp;if(!E.from){[E.from,E.to]=preset(E.type,S.date)}
   const key=E.from+"|"+E.to;if(E.key!==key){E.key=key;E.loading=true;loadRange(E.from,E.to).then(()=>{E.loading=false;if(S.view==="export")render()},e=>{E.loading=false;toast("Could not load those dates: "+(e.message||"try again"))})}
   const dates=rangeDates(E.from,E.to);const es=inPeriod(E.from);
-  let h='<div class="list" style="margin-bottom:14px"><h3>Employee list</h3><p class="note" style="margin:0 0 8px">Everyone on the register with their sheet, shift group, number, department and job title, one tab per sheet. Removed employees are on their own tab.</p><button class="btn gold" id="xlsEmps">Download employee list</button></div>';
+  let h='<div class="list" style="margin-bottom:14px"><h3>Employee list</h3><p class="note" style="margin:0 0 8px">Everyone on the register with their sheet, shift group, number, department and job title, one tab per sheet.</p><button class="btn gold" id="xlsEmps">Download employee list</button></div>';
   h+='<div class="bar" role="group" aria-label="Report period">'+PRESETS.map(([k,l])=>'<button class="chip" data-exp="'+k+'" aria-pressed="'+(E.type===k)+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="form"><label>From<input type="date" id="exp-from" value="'+E.from+'"></label><label>To<input type="date" id="exp-to" value="'+E.to+'"></label>'+
     '<div style="display:flex;align-items:end"><button class="btn gold" id="xlsRange"'+(E.loading?" disabled":"")+'>Download Excel</button></div></div>';
