@@ -1,7 +1,7 @@
 /* TKR Attendance — installable app for TKR Operations (Tharisa Mine).
    Data is shared through Firebase (project tkr-operations-app). Marks made with no signal stay on the device and are sent when the signal is back. */
 import {initializeApp,deleteApp,getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,
-  initializeFirestore,persistentLocalCache,persistentMultipleTabManager,collection,doc,setDoc,getDoc,getDocs,onSnapshot,arrayUnion,arrayRemove} from "../lib/firebase.js";
+  initializeFirestore,persistentLocalCache,persistentMultipleTabManager,collection,doc,setDoc,getDoc,getDocs,deleteDoc,onSnapshot,arrayUnion,arrayRemove} from "../lib/firebase.js";
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };  // managers can sign in with a username
 const firebaseConfig={apiKey:"AIzaSyALzOBLObrONGVD1bS0Tz02aNKhQ40TRoI",authDomain:"tkr-operations-app.firebaseapp.com",projectId:"tkr-operations-app",
   storageBucket:"tkr-operations-app.firebasestorage.app",messagingSenderId:"158080247079",appId:"1:158080247079:web:7cb7786d2b7f9ee172b502"};
@@ -149,8 +149,62 @@ function render(){
   if(!activeEmps().length&&S.view!=="people"&&S.view!=="users"&&S.view!=="groups"){main.innerHTML=isAdmin()?'<div class="empty"><b>No employees yet</b>Load the TKR Attendance data file to bring in your employees, shift rotas and marks.<div class="bar" style="justify-content:center;margin-top:14px"><button class="btn gold" id="emptyLoad">Load data file</button></div><p class="note" id="uMsg" role="status"></p><input type="file" id="dataIn" accept=".json,application/json" hidden></div>':'<div class="empty"><b>No employees yet</b>Ask admin to load the register.</div>';
     if(isAdmin()){$("emptyLoad").onclick=()=>$("dataIn").click();$("dataIn").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{loadBackup(JSON.parse(rd.result))}catch(e){toast("That file is not a TKR Attendance data file")}};rd.readAsText(f);ev.target.value=""}}
     return}
-  ({mark:viewMark,daily:viewDaily,cycle:viewCycle,export:viewExport,flags:viewFlags,people:viewPeople,groups:viewGroups,users:viewUsers}[S.view]||viewMark)();
+  ({mark:viewMark,daily:viewDaily,cycle:viewCycle,export:viewExport,flags:viewFlags,docs:viewDocs,people:viewPeople,groups:viewGroups,users:viewUsers}[S.view]||viewMark)();
 }
+
+// ---------- Documents: annual leave, sick notes, family responsibility, overtime ----------
+const DOC_TYPES=["Annual leave","Sick note","Family responsibility","Overtime"];
+const DOC_META="attMonths/attdocs/sheets",DOC_CHUNK="attMonths/attdocchunks/sheets";
+let docsCache=null,docsBusy=false;
+async function loadDocs(force){if(docsCache&&!force)return docsCache;const q=await getDocs(collection(fs,DOC_META));
+  docsCache=q.docs.map(d=>Object.assign({id:d.id},d.data())).sort((a,b)=>(b.from||"").localeCompare(a.from||"")||(b.at||0)-(a.at||0));return docsCache}
+const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=rej;r.readAsDataURL(f)});
+async function shrinkImg(file,max=1600){const url=URL.createObjectURL(file);const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
+  const k=Math.min(1,max/Math.max(img.width,img.height)),c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+  const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);return c.toDataURL("image/jpeg",0.75).split(",")[1]}
+async function uploadDoc(meta,file){let b64,mime=file.type||"";
+  if(mime.startsWith("image/")){b64=await shrinkImg(file);mime="image/jpeg"}
+  else if(mime==="application/pdf"||/\.pdf$/i.test(file.name)){if(file.size>8*1024*1024)throw new Error("The PDF is bigger than 8 MB. Scan it at a lower quality and try again");b64=await fileB64(file);mime="application/pdf"}
+  else throw new Error("Choose a PDF or a photo");
+  const id="doc_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),CH=700000,n=Math.ceil(b64.length/CH);
+  for(let i=0;i<n;i++)await setDoc(doc(fs,DOC_CHUNK,id+"_"+i),{parent:id,i,data:b64.slice(i*CH,(i+1)*CH)});
+  await setDoc(doc(fs,DOC_META,id),Object.assign({},meta,{mime,fname:file.name,size:file.size,n,by:email,at:Date.now()}));
+  docsCache=null}
+async function docBlob(m){const parts=[];for(let i=0;i<m.n;i++){const d=await getDoc(doc(fs,DOC_CHUNK,m.id+"_"+i));if(!d.exists())throw new Error("Part of this file is missing");parts.push(d.data().data)}
+  const bin=atob(parts.join(""));const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:m.mime})}
+async function openDoc(m){const w=window.open("","_blank");try{toast("Opening "+m.fname+"…");const url=URL.createObjectURL(await docBlob(m));
+  if(w&&!w.closed)w.location.href=url;else{const a=document.createElement("a");a.href=url;a.download=m.fname||"document";document.body.appendChild(a);a.click();a.remove()}}catch(e){if(w)w.close();toast("Could not open: "+(e.message||"try again"))}}
+async function removeDoc(m){for(let i=0;i<m.n;i++)await deleteDoc(doc(fs,DOC_CHUNK,m.id+"_"+i));await deleteDoc(doc(fs,DOC_META,m.id));docsCache=null}
+const kb=n=>n>1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+function viewDocs(){S.docF=S.docF||{type:"All",q:""};const F=S.docF,pre=S.docPre||{};
+  let h='<h2 class="sheet-h">Documents <small>annual leave, sick notes, family responsibility and overtime</small></h2>';
+  if(canWrite()){const emps=activeEmps().slice().sort((a,b)=>a.name.localeCompare(b.name));
+    h+='<div class="list" style="margin-bottom:14px"><h3>Upload a document</h3><div class="form">'+
+      '<label>Employee<select id="dEmp"><option value="">Choose the employee</option>'+emps.map(e=>'<option value="'+esc(e.id)+'"'+(pre.emp===e.id?" selected":"")+'>'+esc(e.name+(e.number?" ("+e.number+")":""))+'</option>').join("")+'</select></label>'+
+      '<label>Document type<select id="dType">'+DOC_TYPES.map(t=>'<option'+(pre.type===t?" selected":"")+'>'+t+'</option>').join("")+'</select></label>'+
+      '<label>From<input type="date" id="dFrom" value="'+(pre.date||S.date)+'"></label><label>To<input type="date" id="dTo" value="'+(pre.date||S.date)+'"></label>'+
+      '<label>Note (optional)<input type="text" id="dNote" maxlength="120" placeholder="For example: 3 days approved by HR"></label>'+
+      '<label>File (PDF or photo)<input type="file" id="dFile" accept="application/pdf,image/*"></label>'+
+      '<div style="display:flex;align-items:end"><button class="btn gold" id="dUp">Upload</button></div></div></div>'}
+  h+='<div class="bar" role="group" aria-label="Document type">'+["All"].concat(DOC_TYPES).map(t=>'<button class="chip" data-dtype="'+esc(t)+'" aria-pressed="'+(F.type===t)+'">'+t+'</button>').join("")+
+    '<input class="search" id="dq" type="search" placeholder="Search name or number" value="'+esc(F.q)+'"></div><div id="docList"><div class="empty"><b>Loading documents</b></div></div>';
+  main.innerHTML=h;
+  const draw=list=>{const q=F.q.trim().toLowerCase();const rows=list.filter(m=>(F.type==="All"||m.type===F.type)&&(!q||((m.name||"")+" "+(m.number||"")).toLowerCase().includes(q)));
+    const el=$("docList");if(!el)return;
+    el.innerHTML=rows.length?'<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>File</th><th>Uploaded</th><th></th></tr></thead><tbody>'+rows.map(m=>
+      '<tr><td>'+esc(m.name)+'<br><span class="note">'+esc([m.number,m.sheet].filter(Boolean).join(" · "))+'</span></td><td>'+esc(m.type)+'</td><td>'+(m.from?nice(m.from):"")+(m.to&&m.to!==m.from?" – "+nice(m.to):"")+(m.note?'<br><span class="note">'+esc(m.note)+'</span>':"")+'</td><td>'+esc(m.fname)+'<br><span class="note">'+kb(m.size||0)+'</span></td><td><span class="note">'+esc((m.by||"").split("@")[0])+'<br>'+(m.at?new Date(m.at).toLocaleDateString("en-ZA"):"")+'</span></td><td style="white-space:nowrap"><button class="btn sm gold" data-dopen="'+esc(m.id)+'">Open</button>'+(canWrite()?' <button class="btn sm" data-ddel="'+esc(m.id)+'">Delete</button>':"")+'</td></tr>').join("")+'</tbody></table></div>'
+      :'<div class="empty"><b>No documents yet</b>'+(F.type==="All"?"":esc(F.type)+" · ")+'Uploaded documents show here.</div>';
+    el.querySelectorAll("[data-dopen]").forEach(b=>b.onclick=()=>{const m=list.find(x=>x.id===b.dataset.dopen);if(m)openDoc(m)});
+    el.querySelectorAll("[data-ddel]").forEach(b=>b.onclick=async()=>{const m=list.find(x=>x.id===b.dataset.ddel);if(!m||!confirm("Delete "+m.type.toLowerCase()+" document for "+m.name+"?"))return;
+      try{await removeDoc(m);toast("Document deleted");render()}catch(e){toast("Not deleted: "+(e.message||"try again"))}})};
+  loadDocs().then(draw,e=>{const el=$("docList");if(el)el.innerHTML='<div class="empty"><b>Could not load documents</b>'+esc(e.message||"Check the signal and try again")+'</div>'});
+  main.querySelectorAll("[data-dtype]").forEach(b=>b.onclick=()=>{F.type=b.dataset.dtype;render()});
+  const dq=$("dq");if(dq)dq.oninput=()=>{F.q=dq.value;if(docsCache)draw(docsCache)};
+  const up=$("dUp");if(up)up.onclick=async()=>{const e=activeEmps().find(x=>x.id===$("dEmp").value),f=$("dFile").files[0];let from=$("dFrom").value,to=$("dTo").value||from;
+    if(!e){toast("Choose the employee");return}if(!from){toast("Choose the date");return}if(!f){toast("Choose the PDF or photo to upload");return}if(to<from)[from,to]=[to,from];
+    if(docsBusy)return;docsBusy=true;up.disabled=true;up.textContent="Uploading…";
+    try{await uploadDoc({empId:e.id,name:e.name,number:e.number||"",sheet:e.sheet||"",type:$("dType").value,from,to,note:$("dNote").value.trim()},f);S.docPre=null;toast("Uploaded for "+e.name);render()}
+    catch(er){toast("Not uploaded: "+(er.message||"try again"));up.disabled=false;up.textContent="Upload"}finally{docsBusy=false}}}
 
 function cycleBanner(){const gap=rotaGap();if(!gap)return"";const c=cycleOf(S.date);
   return '<div class="list" style="margin-bottom:14px"><h3>Shift rotas</h3><p class="note" style="margin:0 0 8px">'+gap+' day'+(gap===1?"":"s")+' in '+short(c.start)+' – '+short(c.end)+' have no shift rota yet. Carry the shift pattern forward to fill them.</p><button class="btn gold" id="startCycle">Carry shift pattern forward</button></div>'}
@@ -406,9 +460,10 @@ function openPanel(e){const v=markOf(e,S.date);const now=new Date();const hv=isH
    '<div class="lbl">Total hours worked today (hh:mm)</div><div class="clock"><input type="text" id="tm" inputmode="numeric" maxlength="5" placeholder="12:00" value="'+hm(hv)+'"><button class="btn gold" id="saveTime">Save hours</button></div>'+
    '<div class="lbl">Overtime hours</div><div class="clock"><input type="number" id="ot" min="0" max="24" step="0.5" inputmode="decimal" placeholder="0" value="'+(otOf(e,S.date)||"")+'"><button class="btn gold" id="saveOt">Save overtime</button></div>'+
    '<div class="lbl">Or mark as</div><div class="codes">'+CODE_ORDER.map(c=>'<button class="k-'+KIND[c]+(v===c?" cur":"")+'" data-code="'+esc(c)+'">'+esc(c)+'</button>').join("")+'</div>'+
-   '<div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><button class="btn" id="clr"'+(v?"":" disabled")+'>Clear mark</button><button class="btn" id="closeP">Close</button></div></div></div>';
+   '<div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><button class="btn" id="clr"'+(v?"":" disabled")+'>Clear mark</button><button class="btn" id="attDoc">Attach document</button><button class="btn" id="closeP">Close</button></div></div></div>';
   const close=()=>{$("sheetHost").innerHTML=""};
   $("scrim").onclick=ev=>{if(ev.target.id==="scrim")close()};$("closeP").onclick=close;
+  $("attDoc").onclick=()=>{const map={"ANNUAL LEAVE":"Annual leave",SICK:"Sick note","FAMILY RESPONSIBILITY":"Family responsibility"};S.docPre={emp:e.id,type:map[v]||(otOf(e,S.date)?"Overtime":"Annual leave"),date:S.date};S.view="docs";close();render()};
   $("tm").oninput=ev=>{let d=ev.target.value.replace(/\D/g,"").slice(0,4);ev.target.value=d.length>2?d.slice(0,2)+":"+d.slice(2):d};
   $("saveTime").onclick=()=>{const h=parseHm($("tm").value);if(isNaN(h)||h<=0||h>24){toast("Enter hours worked like 12:00 (up to 24:00)");return}setMark(e,hm(h)+" HRS");toast(hm(h)+" hours saved for "+e.name);close()};
   $("clr").onclick=()=>{setMark(e,"");close()};
