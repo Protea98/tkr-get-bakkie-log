@@ -6,6 +6,7 @@ import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where,
 } from "../lib/firebase.js";
 import { withOct2026 } from "../lib/oct2026.js";
+import { makeDrill } from "./drill.js";
 const showName = e => /@mgr\.tkroperations\.app$/.test(e || "") ? (e[0].toUpperCase() + e.slice(1, e.indexOf("@"))) : e;
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };  // managers can sign in with a username
 
@@ -63,6 +64,9 @@ let reportDate = ymd(new Date()), tab = "dash", subs = [], impStatus = "", metSt
 const isAdmin = () => ADMINS.includes(email);
 const isManager = () => isAdmin() || (email && managers.includes(email));
 const app = $("app");
+
+const drill = makeDrill({ db, fs: { collection, doc, setDoc, deleteDoc, getDoc, getDocs, query, where }, $, esc, fmt, num, r1, M1, ymd, parse, addDays, toast, fail, loadLib, RIGS,
+  isAdmin: () => isAdmin(), getMetres: () => metres, getEmail: () => email, render: () => render(), evidencePdf: d => evidencePdf(d) });
 
 /* ---------- sign in ---------- */
 onAuthStateChanged(auth, u => {
@@ -175,17 +179,19 @@ function explain(c) {
 }
 
 /* ---------- rendering ---------- */
-const tabs = [["dash", "Dashboard"], ["metres", "Metres"], ["issues", "GET issued"], ["stock", "GET stock"], ["settings", "Settings"], ["import", "Import"]];
+const tabs = [["dash", "Dashboard"], ["metres", "Metres"], ["docs", "Documents"], ["bd", "Breakdown report"], ["issues", "GET issued"], ["stock", "GET stock"], ["settings", "Settings"], ["import", "Import"]];
 function render() {
   if (app.hidden) return;
   const c = calc(reportDate);
   const head = `<div class="tabs" role="tablist">${tabs.filter(([k]) => isAdmin() || ["dash"].includes(k)).map(([k, t]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${t}</button>`).join("")}</div>`;
   let body = "";
   if (tab === "dash") body = dash(c);
-  if (tab === "metres") body = metresView();
+  if (tab === "metres") body = drill.metresView();
+  if (tab === "docs") body = drill.docsView();
+  if (tab === "bd") body = drill.bdView();
   if (tab === "issues") body = issuesView();
   if (tab === "stock") body = stockView(c);
-  if (tab === "settings") body = settingsView();
+  if (tab === "settings") body = settingsView() + drill.spCard();
   if (tab === "import") body = importView();
   app.innerHTML = head + body;
 }
@@ -281,22 +287,7 @@ function listOf(arr, line) {
   return `<div class="list">${rows.map(x => `<div class="it"><span>${line(x)}</span>${x._c ? `<button class="danger" data-del="${esc(x._c)}|${esc(x.id)}">Delete</button>` : '<span class="muted">from Stores</span>'}</div>`).join("") || `<div class="muted">Nothing yet.</div>`}</div>`;
 }
 const today = () => ymd(new Date());
-/* ---------- daily metres with evidence (tally sheet photos kept in Firebase, one record per photo) ---------- */
-let evDays = null;
-async function loadEvDays() { try { const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "day"))); evDays = {}; s.docs.forEach(d => { const v = d.data(); evDays[v.ev_date] = v.n || 0; }); render(); } catch (e) { console.warn(e); evDays = {}; } }
-function dailyCard() {
-  if (evDays === null) { evDays = {}; loadEvDays(); }
-  const by = {}; metres.forEach(x => { const d = x.date; by[d] = by[d] || { t: 0, r: {} }; by[d].t += num(x.metres); const k = x.rig === "Not allocated" ? "Unassigned" : x.rig; by[d].r[k] = (by[d].r[k] || 0) + num(x.metres); });
-  const days = Object.keys(by).sort().reverse().slice(0, 45);
-  return `<section class="card"><h2>Daily metres and evidence</h2>
-    <p class="muted" style="margin-top:0">Tap See tally sheet next to a day to see its signed tally sheets. Download PDF is on that page.${isAdmin() ? " Admin can add, replace or remove tally sheets on that page, or tap + Add tally sheet." : ""}</p>
-    ${isAdmin() ? `<div style="border:2px dashed var(--gold);border-radius:10px;padding:12px;margin-bottom:12px"><b>Tally sheets not showing?</b> Choose the file <b>TKR_Tally_Sheet_Evidence_October_2026.zip</b> (sent in the chat). It takes about a minute; loading it again does not make copies.
-      <div style="margin-top:8px"><label class="primary" style="display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;border-radius:8px;background:var(--gold);color:#141006;font-weight:700;cursor:pointer">Choose the tally sheet file<input type="file" id="evFile" accept=".zip" hidden></label> <span id="evMsg" class="muted"></span></div></div>` : ""}
-    <div class="tbl"><table><thead><tr><th>Date</th><th>TDR 013</th><th>TDR 015</th><th>Unassigned</th><th>Day total</th><th>Month to date</th><th>Tally sheet</th></tr></thead><tbody>
-    ${days.map(d => `<tr><td><b>${fmt(d)}</b></td><td>${M1(by[d].r["TDR 013"] || 0)}</td><td>${M1(by[d].r["TDR 015"] || 0)}</td><td>${by[d].r.Unassigned ? M1(by[d].r.Unassigned) : ""}</td><td><b>${M1(by[d].t)}</b></td><td><b>${M1(Object.keys(by).filter(x => x.slice(0, 7) === d.slice(0, 7) && x <= d).reduce((n, x) => n + by[x].t, 0))}</b></td>
-      <td style="white-space:nowrap">${evDays[d] ? `<button class="primary" data-evsee="${d}">See tally sheet (${evDays[d]})</button>` : '<span class="muted">No tally sheet</span>'}${isAdmin() ? ` <button data-evsee="${d}" data-evnew="1">+ Add tally sheet</button>` : ""}</td></tr>`).join("")}
-    </tbody></table></div></section>`;
-}
+/* ---------- tally sheets and other documents: see drill.js ---------- */
 async function shrinkB64(file, max = 1400) {
   const url = URL.createObjectURL(file); const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
   const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
@@ -305,10 +296,8 @@ async function shrinkB64(file, max = 1400) {
 }
 async function saveEvidence(date, rig, shift, note, data, key) {
   const id = "ev_" + (key || date + "_" + Date.now().toString(36)).replace(/[^\w-]/g, "_");
-  await setDoc(doc(db, "fcSettings", id), { ev_kind: "sheet", ev_date: date, rig, shift, note, data, by: email, at: Date.now() });
-  const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "sheet"), where("ev_date", "==", date)));
-  await setDoc(doc(db, "fcSettings", "evday_" + date), { ev_kind: "day", ev_date: date, n: s.size });
-  evDays[date] = s.size;
+  await setDoc(doc(db, "fcSettings", id), { ev_kind: "sheet", ev_date: date, rig, shift, type: "Tally sheet", mime: "image/jpeg", note, data, by: email, at: Date.now() });
+  await drill.indexDay(date);
 }
 async function importEvidence(file) {
   const say = t => { const el = $("evMsg"); if (el) el.textContent = t; else if (/^Saving \d*0 of/.test(t)) toast("Tally sheets: " + t); };
@@ -323,13 +312,8 @@ async function importEvidence(file) {
       const data = "data:image/jpeg;base64," + await z.files[nm].async("base64");
       await saveEvidence(m[1], "TDR " + m[2].slice(3), m[3], (meta[base] || ""), data, base.replace(/\.jpe?g$/i, ""));
     }
-    say(`Done: ${n} tally sheet photos saved. They now show under Metres → Daily metres and evidence.`); render(); return n;
+    say(`Done: ${n} tally sheet photos saved. They now show under Documents.`); render(); return n;
   } catch (x) { console.warn(x); say(x?.code === "permission-denied" ? "Only an admin can import evidence." : "The file couldn't be read. Choose the evidence ZIP file."); }
-}
-async function recountEv(date) {
-  const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "sheet"), where("ev_date", "==", date)));
-  if (s.size) await setDoc(doc(db, "fcSettings", "evday_" + date), { ev_kind: "day", ev_date: date, n: s.size }); else await deleteDoc(doc(db, "fcSettings", "evday_" + date));
-  evDays[date] = s.size;
 }
 let evAuto = false;
 async function autoEvidence() {
@@ -346,47 +330,14 @@ async function autoEvidence() {
     const buf = new Uint8Array(await res.arrayBuffer());
     const zip = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.slice(0, 12) }, key, buf.slice(12));
     const n = await importEvidence(zip);
-    if (n) { await setDoc(flag, { done: Date.now(), by: email, n }); toast(`Tally sheets loaded: ${n} photos. Tap See tally sheet next to any day.`); render(); }
+    if (n) { await setDoc(flag, { done: Date.now(), by: email, n }); toast(`Tally sheets loaded: ${n} photos. They are under Documents.`); render(); }
   } catch (e) { console.warn(e); toast("The tally sheets couldn't load yet. Open the app again with signal."); }
-}
-async function showSheets(date) {
-  toast("Opening the tally sheets…");
-  const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "sheet"), where("ev_date", "==", date)));
-  const L = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.rig + (a.shift === "Night" ? 2 : 1)).localeCompare(b.rig + (b.shift === "Night" ? 2 : 1)));
-  document.getElementById("evView")?.remove();
-  const adm = isAdmin(), sel = "font:inherit;min-height:44px;border-radius:8px;padding:6px 10px";
-  const pick = (attr, label, bg) => `<label style="display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700;${bg}">${label}<input type="file" accept="image/*" ${attr} hidden></label>`;
-  const ov = document.createElement("div"); ov.id = "evView"; ov.setAttribute("role", "dialog");
-  ov.style.cssText = "position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.92);overflow:auto;padding:12px";
-  const btn = "font:inherit;font-weight:700;min-height:44px;padding:8px 14px;border-radius:8px;cursor:pointer;";
-  ov.innerHTML = `<div style="position:sticky;top:0;display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;background:#111;border:2px solid #d4a12a;border-radius:10px;padding:8px 12px;margin:0 auto 12px;max-width:900px;color:#f2efe8">
-      <b style="font-size:17px">${fmt(date)} · ${L.length} tally sheet${L.length === 1 ? "" : "s"}</b>
-      <span style="display:flex;gap:8px"><button data-evpdf="${date}" style="${btn}background:#d4a12a;color:#141006;border:1px solid #d4a12a">Download PDF</button><button data-evclose style="${btn}background:transparent;color:#f2efe8;border:1px solid #6b6558">Close</button></span></div>
-    <div style="max-width:900px;margin:0 auto">
-    ${adm ? `<div style="background:#1b1b1b;border:2px dashed #d4a12a;border-radius:10px;padding:10px 12px;margin-bottom:12px;color:#f2efe8"><b>Add a tally sheet to ${fmt(date)}</b>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:center"><select id="evRig" style="${sel}"><option>TDR 015</option><option>TDR 013</option><option>TDR 014</option></select>
-      <select id="evShift" style="${sel}"><option>Day</option><option>Night</option></select>${pick('data-evaddv="' + date + '"', "Choose the photo", "background:#d4a12a;color:#141006")}</div></div>` : ""}
-    ${L.map(x => `<figure style="margin:0 0 14px;background:#fff;border-radius:8px;padding:6px"><figcaption style="font:600 15px/1.35 Roboto,Arial,sans-serif;color:#111;padding:4px 2px 6px">${esc(x.rig)} · ${esc(x.shift)} shift${x.note ? " – " + esc(x.note) : ""}
-      ${adm ? `<span style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">${pick('data-evrep="' + x.id + '"', "Replace photo", "background:#f2efe8;color:#111;border:1px solid #999")}<button data-evrm="${x.id}" style="${btn}background:#fff;color:#b42318;border:1px solid #b42318">Remove</button></span>` : ""}</figcaption><img src="${x.data}" alt="Tally sheet ${esc(x.rig)} ${esc(x.shift)}" style="width:100%;height:auto;display:block"></figure>`).join("") || '<p style="color:#fff">No tally sheet for this day.</p>'}</div>`;
-  document.body.appendChild(ov);
-  ov.addEventListener("click", async e => { const b = e.target.closest("button"); if (!b) return;
-    if (b.hasAttribute("data-evclose")) { ov.remove(); return; }
-    if (b.dataset.evpdf) { b.disabled = true; try { await evidencePdf(b.dataset.evpdf); } catch (x) { console.warn(x); toast("The evidence PDF couldn't be made."); } b.disabled = false; return; }
-    if (b.dataset.evrm) { if (!confirm("Remove this tally sheet from " + fmt(date) + "?")) return; b.disabled = true;
-      try { await deleteDoc(doc(db, "fcSettings", b.dataset.evrm)); await recountEv(date); toast("Tally sheet removed"); render(); await showSheets(date); } catch (x) { b.disabled = false; fail(x); } } });
-  ov.addEventListener("change", async e => { const f = e.target.files?.[0]; if (!f) return;
-    try {
-      if (e.target.dataset.evaddv) { toast("Saving the tally sheet…"); await saveEvidence(date, $("evRig").value, $("evShift").value, "", await shrinkB64(f)); toast("Tally sheet added"); }
-      else if (e.target.dataset.evrep) { toast("Replacing the photo…"); await setDoc(doc(db, "fcSettings", e.target.dataset.evrep), { data: await shrinkB64(f), by: email, at: Date.now() }, { merge: true }); toast("Photo replaced"); }
-      else return;
-      render(); await showSheets(date);
-    } catch (x) { fail(x); } });
 }
 async function evidencePdf(date) {
   toast("Making the evidence PDF…");
   try { await loadLib("../lib/jspdf.umd.min.js"); } catch { toast("Open the app once with signal, then try again."); return; }
   const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "sheet"), where("ev_date", "==", date)));
-  const sheets = s.docs.map(d => d.data()).sort((a, b) => (a.rig + (a.shift === "Night" ? 2 : 1)).localeCompare(b.rig + (b.shift === "Night" ? 2 : 1)));
+  const sheets = s.docs.map(d => d.data()).filter(x => (x.type || "Tally sheet") === "Tally sheet" && /^data:image/.test(x.data || "")).sort((a, b) => (a.rig + (a.shift === "Night" ? 2 : 1)).localeCompare(b.rig + (b.shift === "Night" ? 2 : 1)));
   const { jsPDF } = window.jspdf, P = new jsPDF({ unit: "mm", format: "a4" }), W = 210, H = 297;
   const day = metres.filter(x => x.date === date), sum = r => day.filter(x => r === "Unassigned" ? x.rig === "Not allocated" : x.rig === r).reduce((n, x) => n + num(x.metres), 0);
   let logo = null; try { const bl = await (await fetch("../icons/icon-192.png")).blob(); logo = await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(bl); }); } catch {}
@@ -402,29 +353,6 @@ async function evidencePdf(date) {
   }
   if (!sheets.length) { P.setFontSize(11); P.text("No tally sheet saved for this day.", 10, 40); }
   const blob = P.output("blob"), { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Drilling_Evidence_${fmt(date).replace(/\//g, "-")}.pdf`);
-}
-function metresView() {
-  const first = metres.map(x => x.date).sort()[0] || today().slice(0, 8) + "01";
-  mxFrom = mxFrom || first; mxTo = mxTo || addDays(today(), -1);
-  return `<section class="card" style="border:2px solid #d4a12a"><h2>Machines and metres (Excel)</h2>
-    <p class="muted" style="margin-top:0">Every rig's metres per day for the dates you choose, with the status and delays from the shift reports, totals per machine and a chart.</p>
-    <div class="row" style="align-items:flex-end"><label style="flex:1 1 150px">From <input type="date" id="mxFrom" value="${mxFrom}" min="${first}" max="${today()}"></label>
-      <label style="flex:1 1 150px">To <input type="date" id="mxTo" value="${mxTo}" min="${first}" max="${today()}"></label>
-      <button class="primary" id="mxGo" style="flex:1 1 220px;min-height:48px">Download machines and metres</button></div>
-    <p style="margin:10px 0 0;font-size:18px"><b>${fmt(mxFrom)}</b> to <b>${fmt(mxTo)}</b></p></section>
-    ${dailyCard()}
-    <section class="card"><h2>Add metres</h2>
-    <form id="fMetres" class="grid" autocomplete="off">
-      <label>Date <input type="date" name="date" value="${addDays(today(), -1)}" required></label>
-      <label>Shift <select name="shift"><option>Day</option><option>Night</option></select></label>
-      <label>Rig <select name="rig">${RIGS.map(r => `<option>${r}</option>`).join("")}</select></label>
-      <label>Metres (fresh) <input name="metres" inputmode="decimal" required></label>
-      <label>Block <input name="block"></label>
-      <label>Supervisor <input name="supervisor"></label>
-      <label style="grid-column:1/-1">Status / delays <input name="note" placeholder="For example Drifter out for service, No drill bit, Waiting for engine"></label>
-      <div style="display:flex;align-items:flex-end"><button class="primary" style="width:100%">Add</button></div>
-    </form></section>
-    <section class="card"><h2>Latest metres</h2>${listOf(metres.map(x => ({ ...x, _c: x.builtin ? "" : "fcMetres" })), x => `${fmt(x.date)} ${esc(x.shift)} · <b>${esc(x.rig)}</b> · ${M1(num(x.metres))} m ${x.block ? "· " + esc(x.block) : ""} ${x.supervisor ? "· " + esc(x.supervisor) : ""}${x.note ? ` <span class="muted">· ${esc(x.note)}</span>` : ""}${evDays && evDays[x.date] ? ` <button data-evsee="${x.date}" style="min-height:34px;padding:2px 10px">See tally sheet</button>` : ""}`)}</section>`;
 }
 function issuesView() {
   const list = allIssues();
@@ -458,7 +386,7 @@ function importView() {
     <p id="impMsg" class="muted">${esc(impStatus)}</p></section>
     <section class="card"><h2>Import tally sheet evidence</h2>
     <p style="margin-top:0">Choose the evidence ZIP file (tally sheet photos named by date, rig and shift). Each photo is saved once; importing the same file again does not make copies.</p>
-    <p class="muted">Use the button under Metres → Daily metres and evidence.</p></section>
+    <input type="file" id="evFile" accept=".zip"> <p id="evMsg" class="muted"></p></section>
     <section class="card"><h2>Import a metres summary</h2>
     <p style="margin-top:0">Choose an Excel with one row per date: <b>Date</b>, <b>TDR 013</b>, <b>TDR 015</b>, <b>TDR 014</b>, and if you have it <b>Month to date</b>. The metres for those dates replace whatever the app had for them, so nothing counts twice.</p>
     <p class="muted">With a Month to date column, any site metres not split by rig are added per day as "Not allocated", so the month to date matches the site total. They count in month to date and cost per metre, not in a rig's average.</p>
@@ -470,25 +398,20 @@ function importView() {
 app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.tab) { tab = b.dataset.tab; render(); return; }
+  if (await drill.onClick(e)) return;
   if (b.dataset.del) { const [c, id] = b.dataset.del.split("|"); if (confirm("Delete this line?")) deleteDoc(doc(db, c, id)).catch(fail); return; }
   if (b.id === "msgBtn") { const t = message(calc(reportDate)); try { await navigator.clipboard.writeText(t); toast("Message copied. Paste it into WhatsApp."); } catch { prompt("Copy the message:", t); } return; }
-  if (b.dataset.evsee) { b.disabled = true; try { await showSheets(b.dataset.evsee); } catch (x) { console.warn(x); toast("The tally sheets couldn't open. Check the signal."); } b.disabled = false; return; }
-  if (b.dataset.ev) { b.disabled = true; try { await evidencePdf(b.dataset.ev); } catch (x) { console.warn(x); toast("The evidence PDF couldn't be made."); } b.disabled = false; return; }
-  if (b.id === "mxGo") { const f = $("mxFrom").value || mxFrom, t = $("mxTo").value || mxTo; if (f > t) { toast("Choose a From date before the To date."); return; }
-    b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportMetres(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } render(); return; }
   if (b.id === "xlBtn") { b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportExcel(calc(reportDate)); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } render(); }
 });
 app.addEventListener("change", async e => {
-  if (e.target.id === "mxFrom" || e.target.id === "mxTo") { if (e.target.id === "mxFrom") mxFrom = e.target.value || mxFrom; else mxTo = e.target.value || mxTo; render(); return; }
+  if (drill.onChange(e)) return;
   if (e.target.id === "rd") { reportDate = e.target.value || ymd(new Date()); render(); }
   if (e.target.id === "impFile") importFile(e.target.files[0]);
   if (e.target.id === "metFile") importMetres(e.target.files[0]);
   if (e.target.id === "evFile") importEvidence(e.target.files[0]);
-  if (e.target.dataset.evadd) { const d = e.target.dataset.evadd, f = e.target.files[0]; if (!f) return;
-    const rig = prompt("Which rig? Type 013 or 015", "015"); if (!rig) return; const shift = confirm("Night shift? OK = Night, Cancel = Day") ? "Night" : "Day";
-    try { toast("Saving the photo…"); await saveEvidence(d, "TDR " + rig.replace(/\D/g, "").padStart(3, "0"), shift, "", await shrinkB64(f)); toast("Tally sheet saved"); render(); } catch (x) { fail(x); } }
 });
 app.addEventListener("submit", async e => {
+  if (await drill.onSubmit(e)) return;
   e.preventDefault(); const f = e.target, v = Object.fromEntries(new FormData(f).entries()), now = Date.now();
   try {
     if (f.id === "fMetres") { await addDoc(collection(db, "fcMetres"), { date: v.date, shift: v.shift, rig: v.rig, metres: num(v.metres), block: v.block.trim(), supervisor: v.supervisor.trim(), note: (v.note || "").trim(), by: email, createdAt: now }); toast("Metres added"); }
@@ -798,86 +721,6 @@ function message(c) {
 /* ---------- Excel export in the layout of the Daily GET Consumption Tracker ----------
    Same tabs as the tracker (Daily report, Prices, Consumption, Production, Stock, This week, Next week), TKR-branded, values worked out by the app. */
 /* ---------- machines and metres Excel (Metres tab): chosen dates, every rig, statuses from the shift reports ---------- */
-let mxFrom = "", mxTo = "";
-function stackPng(days, rigs, colors, val) {
-  const w = 1100, h = 430, k = 2, c = document.createElement("canvas"); c.width = w * k; c.height = h * k; const g = c.getContext("2d"); g.scale(k, k);
-  g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); g.fillStyle = "#111"; g.fillRect(0, 0, w, 44); g.fillStyle = "#d4a12a"; g.fillRect(0, 44, w, 3);
-  g.font = "bold 19px Arial"; g.fillStyle = "#fff"; g.textBaseline = "middle"; g.fillText("Metres drilled per day, by machine", 18, 23);
-  let x0 = 18; g.font = "13px Arial"; rigs.forEach((r, i) => { g.fillStyle = colors[i]; g.fillRect(x0, 60, 14, 14); g.fillStyle = "#1a1a1a"; g.fillText(r, x0 + 20, 67); x0 += g.measureText(r).width + 46; });
-  const left = 60, right = w - 16, top = 92, bottom = h - 40, tot = days.map(d => rigs.reduce((n, r) => n + Math.max(0, val(d, r)), 0)), max = Math.max(1, ...tot), cw = (right - left) / Math.max(1, days.length);
-  g.strokeStyle = "#e6e0d2"; g.textAlign = "right"; for (let t = 0; t <= 4; t++) { const y = bottom - (bottom - top) * t / 4; g.beginPath(); g.moveTo(left, y); g.lineTo(right, y); g.stroke(); g.fillStyle = "#6b6558"; g.font = "11px Arial"; g.fillText(Math.round(max * t / 4), left - 6, y); }
-  g.textAlign = "center";
-  days.forEach((d, i) => { let y = bottom; const x = left + cw * i + cw * 0.15, bw = cw * 0.7;
-    rigs.forEach((r, ri) => { const v = Math.max(0, val(d, r)); if (!v) return; const bh = (bottom - top) * v / max; g.fillStyle = colors[ri]; g.fillRect(x, y - bh, bw, bh); y -= bh; });
-    if (tot[i] && days.length <= 31) { g.fillStyle = "#1a1a1a"; g.font = "bold 10px Arial"; g.fillText(Math.round(tot[i]), x + bw / 2, y - 8); }
-    if (days.length <= 16 || i % Math.ceil(days.length / 16) === 0) { g.fillStyle = "#1a1a1a"; g.font = "11px Arial"; g.fillText(d.slice(8, 10) + "/" + d.slice(5, 7), x + bw / 2, bottom + 15); } });
-  return c.toDataURL("image/png");
-}
-async function exportMetres(from, to) {
-  toast("Making the machines and metres report…");
-  try { await loadLib("../lib/exceljs.min.js"); } catch { toast("Open the app once with signal, then try again."); return; }
-  const wb = new ExcelJS.Workbook(); wb.creator = "TKR Operations"; wb.created = new Date();
-  let logo = null; try { logo = wb.addImage({ buffer: await (await fetch("../icons/icon-512.png")).arrayBuffer(), extension: "png" }); } catch {}
-  const X = { BLACK: "FF111111", HEAD: "FF262626", GOLD: "FFD4A12A", CREAM: "FFFFF8E6", TOT: "FFFFF2CC", WHITE: "FFFFFFFF", GRID: "FFD9D3C5", MUTED: "FF6B6558", RED: "FFB3261E" };
-  const fill = x => ({ type: "pattern", pattern: "solid", fgColor: { argb: x } }), thin = { style: "thin", color: { argb: X.GRID } }, box = { top: thin, left: thin, bottom: thin, right: thin };
-  const F = (o = {}) => Object.assign({ name: "Arial", size: 10, color: { argb: X.BLACK } }, o);
-  const D = s => { const [y, m, d] = s.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); }, DEC1 = "#,##0.0";
-  const period = from === to ? fmt(from) : `${fmt(from)}  to  ${fmt(to)}`;
-  function sheet(name, widths, sub) {
-    const ws = wb.addWorksheet(name, { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
-    ws.columns = widths.map(w => ({ width: w })); const n = widths.length, H = [8, 22, 30, 18];
-    for (let r = 1; r <= 4; r++) { ws.getRow(r).height = H[r - 1]; for (let k = 1; k <= n; k++) ws.getCell(r, k).fill = fill(X.BLACK); }
-    ws.getRow(5).height = 4; for (let k = 1; k <= n; k++) ws.getCell(5, k).fill = fill(X.GOLD);
-    if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.12 }, ext: { width: 62, height: 62 } });
-    const put = (r, v, f) => { const x = ws.getCell(r, 2); x.value = v; x.font = f; x.alignment = { vertical: "middle" }; };
-    put(2, "TKR OPERATIONS – DRILLING: MACHINES AND METRES", F({ size: 13, bold: true, color: { argb: X.WHITE } }));
-    put(3, "DATES:  " + period, F({ size: 20, bold: true, color: { argb: X.GOLD } }));
-    put(4, sub, F({ size: 10, bold: true, color: { argb: X.WHITE } }));
-    ws.views = [{ state: "frozen", ySplit: 5, showGridLines: false }]; return ws;
-  }
-  const head = (ws, r, labels) => { const row = ws.getRow(r); row.height = 30; labels.forEach((l, i) => { const x = row.getCell(i + 1); x.value = l; x.font = F({ bold: true, color: { argb: X.WHITE } }); x.fill = fill(X.HEAD); x.border = box; x.alignment = { vertical: "middle", horizontal: i ? "center" : "left", wrapText: true }; }); return r + 1; };
-  const line = (ws, r, vals, i, o = {}) => { const row = ws.getRow(r); row.height = o.h || 18;
-    vals.forEach((v, k) => { const x = row.getCell(k + 1); x.value = v === "" || v == null ? null : v; x.border = box; x.font = F({ bold: !!o.bold || k === 0 });
-      x.alignment = { vertical: "middle", horizontal: typeof v === "number" || v instanceof Date ? "center" : "left", wrapText: true };
-      if (typeof v === "number") x.numFmt = DEC1; if (v instanceof Date) x.numFmt = "dd/mm/yyyy";
-      if (o.tot) { x.fill = fill(X.TOT); x.border = { ...box, top: { style: "medium", color: { argb: X.GOLD } } }; x.font = F({ bold: true }); } else if (i % 2) x.fill = fill(X.CREAM); });
-    return r + 1; };
-  const NA = "Not allocated", inR = x => x.date >= from && x.date <= to, list = metres.filter(inR);
-  const rigs = [...RIGS, ...(list.some(x => x.rig === NA) ? [NA] : [])], label = r => r === NA ? "Unassigned" : r;
-  const days = []; for (let d = parse(from); ymd(d) <= to; d.setDate(d.getDate() + 1)) days.push(ymd(d));
-  const m = (d, r, sh) => list.filter(x => x.date === d && x.rig === r && (!sh || x.shift === sh)).reduce((n, x) => n + num(x.metres), 0);
-  const notes = d => { const g = new Map(); list.filter(x => x.date === d && x.note).forEach(x => { const k = x.note.trim(); if (!g.has(k)) g.set(k, new Set()); if (x.rig !== NA) g.get(k).add(x.rig.replace(" ", "") + (x.shift ? " " + x.shift.toLowerCase() : "")); });
-    return [...g.entries()].map(([t, rs]) => /TDR/i.test(t) || !rs.size ? t : [...rs].join(", ") + ": " + t).join(" | "); };
-  // 1. per day
-  let ws = sheet("Metres per day", [13, 13, 13, 13, ...(rigs.includes(NA) ? [14] : []), 13, 15, 60], "Metres per machine per day, with the status from the shift reports"), r = 7;
-  r = head(ws, r, ["Date", ...rigs.map(label), "Day total", "Running total", "Status / delays"]);
-  let run = 0;
-  days.forEach((d, i) => { const v = rigs.map(rg => r1(m(d, rg))), t = r1(v.reduce((a, b) => a + b, 0)); run = r1(run + t);
-    const nt = notes(d);
-    r = line(ws, r, [D(d), ...v, t, run, nt], i, { h: nt.length > 70 ? 32 : 18 }); });
-  const tots = rigs.map(rg => r1(list.filter(x => x.rig === rg).reduce((n, x) => n + num(x.metres), 0)));
-  r = line(ws, r, ["Total", ...tots, r1(tots.reduce((a, b) => a + b, 0)), "", ""], 0, { tot: true });
-  // chart
-  const colors = ["#d4a12a", "#111111", "#2e7d4f", "#8a8378"];
-  const png = stackPng(days, rigs.map(label), colors, (d, rg) => m(d, rigs[rigs.map(label).indexOf(rg)]));
-  const im = await new Promise(res => { const x = new Image(); x.onload = () => res(x); x.src = png; });
-  const id = wb.addImage({ base64: png, extension: "png" }); ws.addImage(id, { tl: { col: 0, row: r + 1 }, ext: { width: 980, height: Math.round(980 * im.height / im.width) } });
-  // 2. per machine
-  ws = sheet("Per machine", [18, 14, 16, 16, 18, 14], "Totals per machine for the dates chosen"); r = 7;
-  r = head(ws, r, ["Machine", "Total (m)", "Days with metres", "Days on 0 m", "Average m per drilling day", "Share of total"]);
-  const grand = tots.reduce((a, b) => a + b, 0) || 1;
-  rigs.forEach((rg, i) => { const dd = days.map(d => m(d, rg)), drilled = dd.filter(v => v > 0).length, zero = days.filter(d => list.some(x => x.date === d && x.rig === rg) && m(d, rg) <= 0).length;
-    const t = tots[i]; r = line(ws, r, [label(rg), t, drilled, rg === NA ? "" : zero, drilled ? r1(t / drilled) : 0, Math.round(t / grand * 1000) / 10 + "%"], i); });
-  r = line(ws, r, ["All machines", r1(grand), "", "", "", "100%"], 0, { tot: true });
-  // 3. every shift line
-  ws = sheet("Shift detail", [13, 10, 14, 16, 12, 18, 70], "Every metres line captured"); r = 7;
-  r = head(ws, r, ["Date", "Shift", "Machine", "Block", "Metres", "Supervisor", "Status / delays"]);
-  list.slice().sort((a, b) => a.date.localeCompare(b.date) || String(a.shift).localeCompare(String(b.shift)) || String(a.rig).localeCompare(String(b.rig)))
-    .forEach((x, i) => { r = line(ws, r, [D(x.date), x.shift || "", label(x.rig), x.block || "", r1(num(x.metres)), x.supervisor || "", x.note || ""], i); });
-  const buf = await wb.xlsx.writeBuffer(), blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const name = `TKR_Drilling_Machines_and_Metres_${fmt(from).replace(/\//g, "-")}${from === to ? "" : "_to_" + fmt(to).replace(/\//g, "-")}.xlsx`;
-  const { deliver } = await import("../lib/deliver.js"); deliver(blob, name);
-}
 
 async function exportExcel(c) {
   await loadLib("../lib/exceljs.min.js");
