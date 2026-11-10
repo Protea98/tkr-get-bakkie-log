@@ -96,11 +96,53 @@ const fileList = (files, owner) => (files || []).length ? '<div class="files">' 
 async function save(name, rec) { rec.id = rec.id || name.slice(0, 3) + "_" + uid(); rec.updatedAt = Date.now(); rec.updatedBy = email; await setDoc(ref(name, rec.id), rec); return rec; }
 async function remove(name, rec) { for (const f of rec.files || []) await dropFile(f); await deleteDoc(ref(name, rec.id)); }
 
-/* ---------- Excel ---------- */
+/* ---------- Excel (TKR branded) ---------- */
+const loadScript = src => new Promise((res, rej) => { if (window.ExcelJS) return res(); const el = document.createElement("script"); el.src = src; el.onload = res; el.onerror = () => rej(new Error("open the app once with signal")); document.head.appendChild(el); });
+let logoBuf = null;
+async function brandedXlsx(fname, sheets) {
+  toast("Preparing the Excel…"); await loadScript("../lib/exceljs.min.js");
+  if (!logoBuf) { try { logoBuf = await (await fetch("../icons/icon-512.png")).arrayBuffer(); } catch { logoBuf = null; } }
+  const C = { BLACK: "FF111111", HEAD: "FF262626", GOLD: "FFD4A12A", CREAM: "FFFFF8E6", TOT: "FFFFF2CC", WHITE: "FFFFFFFF", GRID: "FFD9D3C5", MUTED: "FF6B6558" };
+  const fill = c => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } }), thin = { style: "thin", color: { argb: C.GRID } }, box = { top: thin, left: thin, bottom: thin, right: thin };
+  const X = new ExcelJS.Workbook(); X.creator = "TKR Operations"; X.created = new Date();
+  const logo = logoBuf ? X.addImage({ buffer: logoBuf, extension: "png" }) : null;
+  for (const [name, aoaIn, widths] of sheets) {
+    let aoa = aoaIn.slice(), title = name;
+    if (aoa.length > 1 && aoa[0].filter(v => v !== "" && v != null).length <= 2 && (!aoa[1] || !aoa[1].length)) { title = String(aoa[0][0]); aoa = aoa.slice(2); }
+    const head = aoa[0] || [], rows = aoa.slice(1), n = Math.max(4, head.length);
+    const ws = X.addWorksheet(name.slice(0, 31), { views: [{ showGridLines: false, state: "frozen", ySplit: 7 }], pageSetup: { orientation: n > 6 ? "landscape" : "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
+    ws.columns = Array.from({ length: n }, (_, i) => ({ width: Math.max((widths || [])[i] || 12, i === 0 ? 18 : 8) }));
+    for (let r = 1; r <= 4; r++) { ws.getRow(r).height = r === 1 ? 8 : 20; for (let c = 1; c <= n; c++) ws.getCell(r, c).fill = fill(C.BLACK); }
+    ws.getRow(5).height = 4; for (let c = 1; c <= n; c++) ws.getCell(5, c).fill = fill(C.GOLD);
+    if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.08 }, ext: { width: 56, height: 56 } });
+    const put = (r, v, font) => { const c = ws.getCell(r, 2); c.value = v; c.font = Object.assign({ name: "Arial" }, font); c.alignment = { vertical: "middle" }; };
+    put(2, title, { size: 15, bold: true, color: { argb: C.WHITE } });
+    put(3, "TKR OPERATIONS  ·  HUMAN RESOURCES", { size: 9, bold: true, color: { argb: C.GOLD } });
+    put(4, "Downloaded " + fmtD(today()) + (email ? "  ·  " + email.replace("@mgr.tkroperations.app", "") : "") + "  ·  Confidential", { size: 9, color: { argb: "FFCFC8B8" } });
+    const hr = ws.getRow(7); hr.height = 30;
+    head.forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: "Arial", size: 10, bold: true, color: { argb: C.WHITE } }; c.fill = fill(C.HEAD); c.border = box; c.alignment = { vertical: "middle", wrapText: true, horizontal: i === 0 ? "left" : "center" }; });
+    rows.forEach((r, k) => {
+      const row = ws.getRow(8 + k), tot = String(r[0] || "") === "Total";
+      for (let i = 0; i < n; i++) {
+        const v = r[i] ?? "", c = row.getCell(i + 1); c.value = v === "" ? null : v; c.border = box;
+        c.font = { name: "Arial", size: 10, bold: tot || i === 0 }; c.alignment = { vertical: "middle", wrapText: typeof v === "string" && v.length > 28, horizontal: typeof v === "number" ? "center" : "left" };
+        if (tot) { c.fill = fill(C.TOT); c.border = { top: { style: "medium", color: { argb: C.GOLD } }, left: thin, bottom: thin, right: thin }; } else if (k % 2) c.fill = fill(C.CREAM);
+      }
+    });
+    const end = 8 + rows.length + 1, nc = ws.getCell(end, 1);
+    nc.value = rows.length ? rows.filter(r => String(r[0] || "") !== "Total").length + " row(s)" : "No records"; nc.font = { name: "Arial", size: 9, italic: true, color: { argb: C.MUTED } };
+  }
+  const buf = await X.xlsx.writeBuffer();
+  const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = document.createElement("a"); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast("Downloaded " + fname);
+}
 function downloadXlsx(fname, sheets) {
-  const wb = XLSX.utils.book_new();
-  sheets.forEach(([title, aoa, widths]) => { const ws = XLSX.utils.aoa_to_sheet(aoa); if (widths) ws["!cols"] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, title.slice(0, 31)); });
-  XLSX.writeFile(wb, fname);
+  brandedXlsx(fname, sheets).catch(e => {
+    console.warn(e); const wb = XLSX.utils.book_new();
+    sheets.forEach(([title, aoa, widths]) => { const ws = XLSX.utils.aoa_to_sheet(aoa); if (widths) ws["!cols"] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, title.slice(0, 31)); });
+    XLSX.writeFile(wb, fname); toast("Downloaded without the TKR layout: " + (e.message || "try again"));
+  });
 }
 
 /* ---------- modal ---------- */
@@ -172,7 +214,7 @@ function viewEmps() {
     const head = EMP_FIELDS.map(f => f[1]).concat(["Status", "Termination date", "Termination reason"]);
     const rows = D.employees.slice().sort((a, b) => (a.department || "").localeCompare(b.department || "") || (a.supervisor || "").localeCompare(b.supervisor || "") || a.name.localeCompare(b.name))
       .map(e => EMP_FIELDS.map(([k, , t]) => t === "date" ? fmtD(e[k]) : (e[k] || "")).concat([e.status || "Active", fmtD(e.termDate), e.termReason || ""]));
-    downloadXlsx("TKR HR Employee list " + today() + ".xlsx", [["Employees", [head].concat(rows), head.map(h => Math.max(12, h.length + 2))]]);
+    downloadXlsx("TKR HR Employee list " + today() + ".xlsx", [["Employees", [["Employee list"], [], head].concat(rows), head.map(h => Math.max(12, h.length + 2))]]);
   };
   if (!ed) return;
   $("eAdd").onclick = () => empForm(null);
@@ -267,7 +309,7 @@ function viewEr() {
     const rows = list().map(w => { const e = empById(w.empId) || {}; return [fmtD(w.date), e.name || w.empName || "", e.number || "", e.department || "", e.supervisor || "", w.type, w.offence || "", w.action || "", w.issuedBy || "", fmtD(w.validUntil), w.notes || ""]; });
     const by = {}; list().forEach(w => by[w.type] = (by[w.type] || 0) + 1);
     downloadXlsx(`TKR HR Employee relations report ${today()}.xlsx`, [["Warnings and actions", [[`Employee relations report${erFrom || erTo ? ` – ${fmtD(erFrom) || "start"} to ${fmtD(erTo) || "today"}` : ""}`], [], head].concat(rows), [12, 26, 14, 18, 18, 20, 34, 34, 18, 12, 30]],
-      ["Summary", [["Warning", "Number"]].concat(WARN_TYPES.map(t => [t, by[t] || 0])).concat([["Total", rows.length]]), [24, 10]]]);
+      ["Summary", [["Warnings summary"], [], ["Warning", "Number"]].concat(WARN_TYPES.map(t => [t, by[t] || 0])).concat([["Total", rows.length]]), [24, 10]]]);
   };
   if (ed) $("wAdd").onclick = () => warnForm(null);
 }
@@ -312,8 +354,8 @@ function viewPerf() {
   $("pXls").onclick = () => {
     const rv = D.perf.filter(p => p.kind === "Review"), pd = D.perf.filter(p => p.kind === "PDP");
     downloadXlsx(`TKR HR Performance ${today()}.xlsx`, [
-      ["Completed reviews", [["Employee", "Department", "Review period", "Review date", "Reviewer", "Comments", "Files"]].concat(rv.map(p => [empName(p.empId) || p.empName, empById(p.empId)?.department || "", p.period || "", fmtD(p.date), p.reviewer || "", p.notes || "", (p.files || []).map(f => f.name).join(", ")])), [26, 18, 18, 12, 18, 34, 30]],
-      ["Development plans", [["Employee", "Department", "Development area", "Actions", "Start", "Due", "Status", "Files"]].concat(pd.map(p => [empName(p.empId) || p.empName, empById(p.empId)?.department || "", p.goal || "", p.notes || "", fmtD(p.start), fmtD(p.due), p.status || "", (p.files || []).map(f => f.name).join(", ")])), [26, 18, 30, 34, 12, 12, 12, 30]]]);
+      ["Completed reviews", [["Completed performance reviews"], [], ["Employee", "Department", "Review period", "Review date", "Reviewer", "Comments", "Files"]].concat(rv.map(p => [empName(p.empId) || p.empName, empById(p.empId)?.department || "", p.period || "", fmtD(p.date), p.reviewer || "", p.notes || "", (p.files || []).map(f => f.name).join(", ")])), [26, 18, 18, 12, 18, 34, 30]],
+      ["Development plans", [["Personal development plans"], [], ["Employee", "Department", "Development area", "Actions", "Start", "Due", "Status", "Files"]].concat(pd.map(p => [empName(p.empId) || p.empName, empById(p.empId)?.department || "", p.goal || "", p.notes || "", fmtD(p.start), fmtD(p.due), p.status || "", (p.files || []).map(f => f.name).join(", ")])), [26, 18, 30, 34, 12, 12, 12, 30]]]);
   };
 }
 function perfForm(p) {
@@ -358,7 +400,7 @@ function viewEe() {
     (all.unset ? `<p class="note">${all.unset} active employee${all.unset === 1 ? " is" : "s are"} not counted because their occupational level, gender or race is not filled in on the Employees tab.</p>` : "") +
     '<p class="note">A = African, C = Coloured, I = Indian, W = White. Active employees only.</p>';
   $("eeXls").onclick = () => downloadXlsx(`TKR Workforce profile ${today()}.xlsx`, [
-    ["All employees", [["Workforce profile – all employees", "", "", "", "", "", "", "", "", "", "", fmtD(today())], [], all.head].concat(all.rows, [all.tot]), [60, 8, 8, 8, 8, 9, 9, 9, 9, 12, 13, 8]],
+    ["All employees", [["Workforce profile – all employees"], [], all.head].concat(all.rows, [all.tot]), [60, 8, 8, 8, 8, 9, 9, 9, 9, 12, 13, 8]],
     ["Disabled employees", [["Workforce profile – employees with disabilities"], [], dis.head].concat(dis.rows, [dis.tot]), [60, 8, 8, 8, 8, 9, 9, 9, 9, 12, 13, 8]]]);
 }
 
@@ -381,7 +423,7 @@ function viewTrain() {
   document.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => { trKind = b.dataset.tk; viewTrain(); });
   document.querySelectorAll("[data-topen]").forEach(b => b.onclick = () => trForm(D[trKind].find(r => r.id === b.dataset.topen)));
   if (ed) $("tAdd").onclick = () => trForm(null);
-  $("tXls").onclick = () => downloadXlsx(`TKR HR ${T.title} ${today()}.xlsx`, [[T.title, [T.fields.map(f => f[1]).concat([T.files])].concat(l.map(r => T.fields.map(([k, , t]) => t === "date" ? fmtD(r[k]) : (r[k] || "")).concat([(r.files || []).map(f => f.name).join(", ")]))), T.fields.map(f => Math.max(14, f[1].length + 2)).concat([30])]]);
+  $("tXls").onclick = () => downloadXlsx(`TKR HR ${T.title} ${today()}.xlsx`, [[T.title, [[T.title], [], T.fields.map(f => f[1]).concat([T.files])].concat(l.map(r => T.fields.map(([k, , t]) => t === "date" ? fmtD(r[k]) : (r[k] || "")).concat([(r.files || []).map(f => f.name).join(", ")]))), T.fields.map(f => Math.max(14, f[1].length + 2)).concat([30])]]);
 }
 function trForm(r) {
   const ed = canEdit(), T = TR[trKind], x = r || {}, dis = ed ? "" : " disabled";
