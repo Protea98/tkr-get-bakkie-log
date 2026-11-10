@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 28 Oct 2026 (supervisor, stock counts)
+// TKR Operations app – rules updated 10 Nov 2026 (HR section)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -27,7 +27,7 @@ service cloud.firestore {
 
     match /config/{docId} {
       allow read: if signedIn() && !(docId in ['attEmployees', 'attSettings']);
-      allow write: if isAdmin();
+      allow write: if isAdmin() && docId != 'hrAccess';
     }
     match /team/{id} {
       allow read: if signedIn();
@@ -167,6 +167,20 @@ service cloud.firestore {
     match /attMonths/{month}/sheets/{sheet} {
       allow read: if attViewer();
       allow write: if attCapturer();
+    }
+    // ---------- HR (access given by Amogelang only) ----------
+    function hrAdmin() { return myEmail() in ['amogelang@tkroperations.com', 'amogelangmabilu56@gmail.com']; }
+    function hrHas() { return exists(/databases/$(database)/documents/config/hrAccess); }
+    function hrAcc() { return get(/databases/$(database)/documents/config/hrAccess).data; }
+    function hrEditor() { return hrAdmin() || (hrHas() && myEmail() in hrAcc().get('editors', [])); }
+    function hrViewer() { return hrEditor() || (hrHas() && myEmail() in hrAcc().get('viewers', [])); }
+    match /config/hrAccess {
+      allow read: if signedIn();
+      allow write: if hrAdmin();
+    }
+    match /hr/{section}/items/{id} {
+      allow read: if hrViewer();
+      allow write: if hrEditor();
     }
   }
 }

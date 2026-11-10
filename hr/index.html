@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HR · TKR</title>
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="apple-touch-icon" href="../icons/maskable-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="hr.css">
+</head>
+<body>
+<div class="band"><div class="in">
+  <a href="../" class="logolink" aria-label="TKR home"><img class="logo" src="../icons/logo-96.png" alt="TKR Operations"></a>
+  <div><h1>HR</h1><div class="sub">TKR Operations · Tharisa Mine</div></div>
+  <div class="who"><span id="who"></span><button id="outBtn" class="ghost sm" hidden>Sign out</button></div>
+</div></div>
+
+<main class="wrap" id="signin" hidden>
+  <form class="card signin" id="signForm">
+    <h2>Sign in to HR</h2>
+    <p class="muted">Only people Amogelang has given HR access can open this section.</p>
+    <label>Email or username<input id="sEmail" autocomplete="username" required></label>
+    <label>Password<input id="sPass" type="password" autocomplete="current-password" required></label>
+    <div class="row"><button class="primary" id="sBtn">Sign in</button><button type="button" class="ghost" id="sReset">Forgot password</button></div>
+    <p class="muted" id="sMsg" role="status"></p>
+  </form>
+</main>
+
+<main class="wrap" id="noaccess" hidden>
+  <div class="card"><h2>No HR access</h2><p class="muted">You are signed in as <b id="naEmail"></b>, but you have not been given access to HR. Ask Amogelang to add you.</p><button id="naOut">Sign out</button></div>
+</main>
+
+<div class="wrap" id="app" hidden>
+  <nav class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-v="dash" aria-selected="true">Dashboard</button>
+    <button role="tab" data-v="emps" aria-selected="false">Employees</button>
+    <button role="tab" data-v="er" aria-selected="false">Employee relations</button>
+    <button role="tab" data-v="perf" aria-selected="false">Performance</button>
+    <button role="tab" data-v="ee" aria-selected="false">Employment equity</button>
+    <button role="tab" data-v="train" aria-selected="false">Training</button>
+    <button role="tab" data-v="access" aria-selected="false" id="accessTab" hidden>Access</button>
+  </nav>
+  <div id="main"></div>
+</div>
+<div id="modal"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="../lib/xlsx.full.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
