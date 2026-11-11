@@ -112,17 +112,19 @@ export function makeDrill(ctx) {
       if (spConfigured(spCfg)) { try { await spInit(spCfg); spState = ""; } catch (e) { console.warn(e); spState = "The Microsoft sign-in couldn't load. Check the signal."; } }
       render(); } catch (e) { console.warn(e); spCfg = {}; }
   }
-  const spFolder = (date, type) => `Drilling/${date.slice(0, 4)}/${date.slice(5, 7)} ${MONTHS[+date.slice(5, 7) - 1]}/${date}/${FOLDER[type] || "Supporting documents"}`;
+  /* SharePoint: one folder per month, one folder per day and shift, the way the METRES folder is kept: "November 2026 Metres" › "01 DAY", "01 NIGHT" */
+  const monthFolder = date => `Drilling/${MONTHS[+date.slice(5, 7) - 1]} ${date.slice(0, 4)} Metres`;
+  const spFolder = (date, type, shift) => `${monthFolder(date)}/${date.slice(8, 10)} ${shift ? shift.toUpperCase() : "DAY AND NIGHT"}`;
   function spStrip() {
     if (!spCfg) return "";
     if (!spConfigured(spCfg)) return `<div class="spbar off"><b>SharePoint is not linked yet.</b> Files are kept in the app for now. ${isAdmin() ? "The link is set up once under Settings → SharePoint." : ""}</div>`;
     if (!spReady()) return `<div class="spbar off"><b>SharePoint: not signed in on this device.</b> Files you add now stay in the app only. <button class="primary sm" data-sp="in">Sign in to Microsoft</button> <span class="muted">${esc(spState)}</span></div>`;
-    return `<div class="spbar on"><b>SharePoint is linked</b> · signed in as ${esc(spWho())}. New files go to <b>${esc(spRoot())} › Drilling › year › month › date › type of document</b>. <button class="sm" data-sp="open">Open the folder</button></div>`;
+    return `<div class="spbar on"><b>SharePoint is linked</b> · signed in as ${esc(spWho())}. New files go to <b>${esc(spRoot())} › ${monthFolder(month + "-01").replace("/", " › ")} › 01 DAY, 01 NIGHT, 02 DAY…</b> <button class="sm" data-sp="open">Open the folder</button></div>`;
   }
   function spCard() {
     ensureIndex(); const c = spCfg || {};
     return `<section class="card" id="spCard"><h2>SharePoint</h2>
-      <p class="muted" style="margin-top:0">When this is filled in, every tally sheet, job card, checklist, breakdown report and supporting document added in the app is also saved in SharePoint, in a folder per date. Your Microsoft 365 administrator gives you the three values below.</p>
+      <p class="muted" style="margin-top:0">When this is filled in, every tally sheet, job card, checklist, breakdown report and supporting document added in the app is also saved in SharePoint: a folder per month ("November 2026 Metres") with a folder per day and shift inside ("01 DAY", "01 NIGHT"). Your Microsoft 365 administrator gives you the three values below.</p>
       <form id="fSp" class="grid" autocomplete="off">
         <label>Tenant ID <input name="tenant" value="${esc(c.tenant || "")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
         <label>Application (client) ID <input name="clientId" value="${esc(c.clientId || "")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
@@ -147,7 +149,7 @@ export function makeDrill(ctx) {
     for (const d of dates) { const L = await daySheets(d); let ch = false;
       for (const x of L) { if (x.sp?.url) { skip++; continue; } const data = await fullData(x); if (!data) continue;
         say(`Sending ${fmt(d)}… ${n + 1}`); const blob = await (await fetch(data)).blob();
-        const sp = await spUpload(spFolder(d, x.type || "Tally sheet"), fileName(d, x.rig, x.shift, x.type || "Tally sheet", x.name || (/pdf/.test(x.mime || "") ? "x.pdf" : "x.jpg"), x.id.slice(-6)), blob);
+        const sp = await spUpload(spFolder(d, x.type || "Tally sheet", x.shift), fileName(d, x.rig, x.shift, x.type || "Tally sheet", x.name || (/pdf/.test(x.mime || "") ? "x.pdf" : "x.jpg"), x.id.slice(-6)), blob);
         await setDoc(doc(db, "fcSettings", x.id), { sp }, { merge: true }); x.sp = sp; n++; ch = true; }
       if (ch) await indexDay(d, L); }
     say(`Done: ${n} files sent to SharePoint${skip ? `, ${skip} were already there` : ""}.`); render();
@@ -163,7 +165,7 @@ export function makeDrill(ctx) {
     let q = q0, d = c.toDataURL("image/jpeg", q); while (d.length > cap && q > 0.3) { q -= 0.1; d = c.toDataURL("image/jpeg", q); }
     return { data: d, w: c.width, h: c.height };
   }
-  const fileName = (date, rig, shift, type, orig, tag) => `${date} ${rig || "All machines"}${shift ? " " + shift + " shift" : ""} - ${type} ${tag}.${(String(orig).match(/\.([a-z0-9]{2,5})$/i) || [, "jpg"])[1].toLowerCase()}`;
+  const fileName = (date, rig, shift, type, orig, tag) => `${rig || "All machines"} - ${type} - ${date.slice(8, 10)} ${MONTHS[+date.slice(5, 7) - 1].slice(0, 3)} ${shift ? shift.toLowerCase() : "day and night"} ${tag}.${(String(orig).match(/\.([a-z0-9]{2,5})$/i) || [, "jpg"])[1].toLowerCase()}`;
   async function fullData(x) {
     if (!x.parts) return x.data || "";
     const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "part"), where("parent", "==", x.id)));
@@ -176,7 +178,7 @@ export function makeDrill(ctx) {
     const now = new Date(), tag = String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0") + String(now.getSeconds()).padStart(2, "0") + "-" + Math.random().toString(36).slice(2, 4);
     const id = ("ev_" + date + "_" + (rig || "All").replace(/\s/g, "") + "_" + (shift || "NA") + "_" + type.replace(/\s/g, "") + "_" + tag).replace(/[^\w-]/g, "_");
     let sp = null, spErr = false;
-    if (spReady()) { try { sp = await spUpload(spFolder(date, type), fileName(date, rig, shift, type, file.name, tag), file); } catch (e) { console.warn(e); spErr = true; } }
+    if (spReady()) { try { sp = await spUpload(spFolder(date, type, shift), fileName(date, rig, shift, type, file.name, tag), file); } catch (e) { console.warn(e); spErr = true; } }
     let data = "", parts = 0, rest = [];
     if (isImg) { try { data = (await shrink(file, sp ? 1200 : 1400)).data; } catch { throw Object.assign(new Error("img"), { user: `${file.name}: this photo type can't be read here. Send it as JPG or PDF.` }); } }
     else { const d = await dataUrl(file);
@@ -281,7 +283,7 @@ export function makeDrill(ctx) {
       <h3>Documents for this shift</h3>
       ${files.length ? `<div class="files">${files.map(f => `<div class="file"><span><b>${esc(f.type)}</b>${f.name ? " · " + esc(f.name) : ""}</span><button type="button" class="sm" data-open="${f.id}">View</button></div>`).join("")}</div>` : '<p class="muted" style="margin:0 0 6px">Nothing attached yet.</p>'}
       ${isAdmin() ? `<div class="upl">${DOC_TYPES.map(t => `<label class="pick"><span>${t}${t === "Tally sheet" ? "" : "s"}</span><input type="file" data-type="${t}" accept="image/*,application/pdf" multiple><em></em></label>`).join("")}</div>
-      <p class="muted" style="margin:6px 0 0">Photos or PDF. ${spReady() ? "They are filed in SharePoint under the date." : ""}</p>` : ""}
+      <p class="muted" style="margin:6px 0 0">Photos or PDF. ${spReady() ? "They are filed in SharePoint under the month, the date and the shift." : ""}</p>` : ""}
       <div class="acts"><button type="button" class="ghost" data-close>Close</button>${isAdmin() ? `<button class="primary">${ro ? "Save documents" : "Save shift"}</button>` : ""}</div></form>`;
     document.body.appendChild(ov);
     ov.addEventListener("click", async e => {
@@ -563,7 +565,7 @@ export function makeDrill(ctx) {
     const buf = await wb.xlsx.writeBuffer(), blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const tag = `${fmt(from).replace(/\//g, "-")}${from === to ? "" : "_to_" + fmt(to).replace(/\//g, "-")}`;
     const name = only ? `TKR_Drilling_Breakdown_Report_${tag}.xlsx` : `TKR_Drilling_Metres_and_Tally_Sheets_${tag}.xlsx`;
-    if (spReady()) { try { await spUpload(`Drilling/${to.slice(0, 4)}/${to.slice(5, 7)} ${MONTHS[+to.slice(5, 7) - 1]}/Reports`, name, blob); toast("A copy of the report is in SharePoint › Reports."); } catch (e) { console.warn(e); } }
+    if (spReady()) { try { await spUpload(`${monthFolder(to)}/Reports`, name, blob); toast(`A copy of the report is in SharePoint › ${monthFolder(to).replace("/", " › ")} › Reports.`); } catch (e) { console.warn(e); } }
     const { deliver } = await import("../lib/deliver.js"); deliver(blob, name);
     return blob;
   }
@@ -580,7 +582,7 @@ export function makeDrill(ctx) {
     if (b.dataset.sp) { const a = b.dataset.sp;
       try { if (a === "in") { await spSignIn(); toast("Signed in to Microsoft. New files now go to SharePoint."); }
         if (a === "out") { await spSignOut(); }
-        if (a === "open") { window.open(await spFolderUrl("Drilling"), "_blank", "noopener"); }
+        if (a === "open") { window.open(await spFolderUrl(monthFolder(month + "-01")), "_blank", "noopener"); }
         if (a === "move") { if (!confirm("Send every file that is in the app and not yet in SharePoint? Keep the app open until it says Done.")) return true; b.disabled = true; await moveAllToSp(); } }
       catch (x) { console.warn(x); spState = "Microsoft didn't sign in: " + String(x?.errorMessage || x?.message || x).slice(0, 140); toast("SharePoint: that didn't work. " + spState); }
       render(); return true; }
