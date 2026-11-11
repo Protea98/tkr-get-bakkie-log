@@ -134,7 +134,7 @@ const TABS = [["now", "Live board and workbook", "deploy"], ["inv", "Invoicing",
 const pendingReqs = () => R("req").filter(q => q.status === "pending").length;
 const tabs = () => { const n = pendingReqs(); return [TABS[0], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(1)]; };
 function render() {
-  $("who").innerHTML = me ? `${esc(me.name)} <button class="sm danger" data-logout style="min-height:36px;padding:2px 12px;margin-left:6px">Log out</button>` : "";
+  $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
   if (!me) { app.innerHTML = gateView(); return; }
   let body = "";
   if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView();
@@ -442,12 +442,12 @@ async function backUp(id) {
 /* ---------- sessions: log in, log out ---------- */
 let admApp = null;
 async function startSession(u) { const sid = "s_" + uid(), start = Date.now(); me = { ...u, sid, start }; await metaSet("me", { id: u.id, admin: !!u.admin, sid, start, until: start + (u.admin ? 12 : 14) * 36e5 }); }
-async function logout() {
+async function logout(swap) {
   if (!me) return;
-  if (!me.admin && !confirm(`Log out ${me.name} and end your shift?\n\nYour entries are saved and turn grey (locked). Hour boxes you left empty stay open for the next controller. To change a locked entry later, ask the admin.`)) return;
+  if (!me.admin && !confirm(`${swap ? "Change controller: l" : "L"}og out ${me.name} and end your shift?\n\nYour entries are saved and turn grey (locked). Hour boxes you left empty stay open for the next controller. To change a locked entry later, ask the admin.`)) return;
   await put({ id: "log_" + uid(), kind: "log", ym: today().slice(0, 7), date: today(), at: Date.now(), what: `${me.name} logged out${me.admin ? "" : " – end of shift"}` });
   me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
-  toast("Logged out. Everything is saved on this PC."); syncNow(false);
+  toast(swap ? "Logged out. The next controller taps their name, or Add yourself." : "Logged out. Everything is saved on this PC."); syncNow(false);
 }
 
 /* ---------- change requests: locked entries change only once the admin approves ---------- */
@@ -515,7 +515,7 @@ async function clickH(ev) {
   if (b.id === "cancelAdd") { addingMe = false; render(); return; }
   if (b.id === "cancelPin") { pinFor = null; render(); return; }
   if (b.dataset.who) { pinFor = b.dataset.who; render(); setTimeout(() => app.querySelector("input[name=pin]")?.focus(), 50); return; }
-  if (b.hasAttribute("data-logout")) { logout(); return; }
+  if (b.hasAttribute("data-logout")) { logout(b.dataset.logout === "swap"); return; }
   if (b.id === "adminIn") { adminStep = adminRec() ? "pin" : "email"; render(); return; }
   if (b.id === "cancelAdm") { adminStep = ""; render(); return; }
   if (b.id === "admReset") { adminStep = "email"; render(); return; }
