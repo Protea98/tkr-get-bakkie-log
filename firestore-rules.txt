@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 10 Nov 2026 (HR section)
+// TKR Operations app – rules updated 11 Nov 2026 (Control Room)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -85,6 +85,13 @@ service cloud.firestore {
     }
 
     // ---------- GET Forecast ----------
+    // ---------- Control Room (controllers capture on the control room PC; managers see it) ----------
+    function ctrlUser() {
+      return signedIn() && exists(/databases/$(database)/documents/config/ctrlAccess)
+        && myEmail() in get(/databases/$(database)/documents/config/ctrlAccess).data.get('emails', []);
+    }
+    match /ctrl/{id} { allow read, write: if isManager() || ctrlUser(); }
+
     match /fcMetres/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
     match /fcIssues/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
     match /fcCounts/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
