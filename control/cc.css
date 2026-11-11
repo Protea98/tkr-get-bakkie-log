@@ -90,3 +90,19 @@ table.xl input[readonly]{background:#f3f1ec;color:#777}
 .ccdone button{width:100%;min-height:50px;margin-top:8px}
 .xltabs{top:62px}
 table.xl tr.gt td:first-child,table.xl tr.ft td:first-child{text-align:left}
+
+/* the workbook as a window: own scroll, sheet tabs along the bottom like Excel */
+.xlwin{border:2px solid #d4a12a;border-radius:10px;overflow:hidden;background:#fff;margin-bottom:24px}
+.xlwin .xlsheet{max-height:min(78vh,900px);overflow:auto;margin:0;border-radius:0;padding-bottom:0}
+.xlwin .xltabs{position:static;border-bottom:0;border-top:3px solid #d4a12a;background:#1b1f1d;padding:4px 6px}
+.xlwin .xltabs .xt{border-radius:0 0 8px 8px}
+.xlwin table.xl thead th{position:sticky;top:0;z-index:2}
+table.xl td.ty{font-weight:700;cursor:pointer}
+table.xl td.ty.BD,table.xl select.ty.BD{background:#fde2df!important;color:#9c0006}
+table.xl td.ty.SB,table.xl select.ty.SB{background:#fff2cc!important;color:#7f6000}
+table.xl td.ty.PM,table.xl select.ty.PM{background:#ddebf7!important;color:#1f4e78}
+table.xl td.ty.NU,table.xl select.ty.NU{background:#ededed!important;color:#595959}
+table.xl select.ty.OP{background:#e2f0d9;color:#375623;font-weight:700}
+table.xl select[data-status]{width:auto;min-width:118px;height:34px}
+table.xl td[data-edit]{cursor:pointer}
+table.xl td[data-edit]:hover{outline:2px solid #d4a12a;outline-offset:-2px}
