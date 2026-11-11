@@ -103,7 +103,7 @@ function gateView() {
 }
 
 /* ---------- views ---------- */
-const TABS = [["now", "Live board", "deploy"], ["avail", "Availability", "hours"], ["docs", "Documents", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
+const TABS = [["now", "Live board and workbook", "deploy"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
 function render() {
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" id="swap" style="min-height:32px;padding:2px 10px">Change controller</button>` : "";
   if (!me) { app.innerHTML = gateView(); return; }
@@ -133,7 +133,7 @@ function nowView() {
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Every machine is working.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "Today's breakdowns and standby", `<div class="res">${todays.map(evLine).join("") || '<p class="muted">Nothing logged today.</p>'}</div>`, { icon: icon("bd"), count: todays.length, sub: "every event with its exact times" })}
       ${sheet("checks", "Data and documents checklist", checklist(today()), { icon: icon("docs"), sub: `${chkDone(today())} of ${CHECK.flatMap(([, i]) => i).length * COLS.length} ticked today` })}
-      ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>`;
+      ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>` + workbookSection();
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
@@ -186,7 +186,7 @@ function invView() {
 function exportView() {
   const m = month, mb = `<div class="mbar"><button data-mnav="-1">‹</button><b>${monthName(m)}</b><button data-mnav="1" ${m >= today().slice(0, 7) ? "disabled" : ""}>›</button></div>`;
   return pageHead("Export and sync", "One file when you need it", "", "", "")
-    + `<section class="card dl-card"><h2>Download the month (Excel)</h2><div class="mhead">${mb}</div><p class="muted">Monthly availability, every breakdown and standby with exact times, the daily checklists, the supporting documents and the additional documents, in one file.</p><button class="primary" id="xl" style="min-height:52px">Download ${monthName(m)} Excel</button></section>`
+    + `<section class="card dl-card"><h2>Download the month (Excel)</h2><div class="mhead">${mb}</div><p class="muted">The same sheets as the control room workbook: the invoicing lists, Monthly Availability and one sheet per day with the documents, the day and night shift times, the 24-hour summary and the hourly update log.</p><button class="primary" id="xl" style="min-height:52px">Download ${monthName(m)} Excel</button></section>`
     + syncCard()
     + `<section class="card"><h2>Backup</h2><p class="muted" style="margin-top:0">Only needed if this PC never gets signal: save a backup file and load it on another PC.</p><div class="row"><button id="bk">Save a backup file</button><label class="btn" style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer">Load a backup <input type="file" id="rs" accept=".json" hidden></label></div></section>`;
 }
@@ -196,6 +196,124 @@ function settingsView() {
     + `<section class="card"><h2>Machines</h2>${F.map(([g, L], gi) => `<div style="margin-bottom:12px"><b>${esc(g)}</b><div class="row" style="margin-top:6px">${L.map(m => `<span class="tag" style="font-size:13px;padding:4px 10px">${esc(m)} <button class="sm ghost" data-rmm="${gi}|${esc(m)}" style="min-height:28px;padding:0 6px">×</button></span>`).join("")}</div>
       <div class="row" style="margin-top:6px"><input data-newm="${gi}" placeholder="Add a machine to ${esc(g)}" style="max-width:260px"><button class="sm" data-addm="${gi}">+ Add</button></div></div>`).join("")}</section>
     <section class="card"><h2>Controllers on this PC</h2><div class="res">${users.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div>${u.id === me.id ? `<button class="sm danger" data-rmu="${u.id}">Remove me</button>` : ""}</div>`).join("")}</div></section>`;
+}
+
+
+/* ---------- the control room workbook, as in Excel: Monthly Availability, then one sheet per day ---------- */
+let sheetSel = "", sheetDirty = false;
+const shiftWin = (d, sh) => sh === "Day" ? [toMs(d + "T06:00"), toMs(d + "T18:00")] : [toMs(d + "T18:00"), toMs(addDays(d, 1) + "T06:00")];
+const isoAt = (d, sh, t) => sh === "Day" || t >= "18:00" ? `${d}T${t}` : `${addDays(d, 1)}T${t}`;
+const tOf = ms => { const x = new Date(ms); return `${pad(x.getHours())}:${pad(x.getMinutes())}`; };
+function shiftSum(m, d, sh) {
+  const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()); if (b <= a) return null;
+  const h = hoursIn(m, a, b), total = (b - a) / 36e5, down = h.BD + h.PM; return { total, ...h, down, avail: Math.max(0, total - down - h.NU) };
+}
+function evsIn(m, d, sh) { const [a, b] = shiftWin(d, sh); return evs().filter(e => e.machine === m && toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)); }
+const n2 = v => v == null ? "" : (Math.round(v * 100) / 100).toFixed(2);
+function sheetTabs() {
+  const m = (sheetSel && sheetSel !== "month" ? sheetSel : date).slice(0, 7), days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);
+  return `<div class="xltabs"><button data-wbm="-1" aria-label="Month before">‹</button><b>${monthName(m)}</b><button data-wbm="1" aria-label="Next month" ${m >= today().slice(0, 7) ? "disabled" : ""}>›</button>
+    <button class="xt ${sheetSel === "month" ? "on" : ""}" data-sh="month">Monthly Availability</button>${days.map(x => `<button class="xt ${sheetSel === x ? "on" : ""}" data-sh="${x}" ${x > today() ? "disabled" : ""}>${x.slice(8)} ${MONTHS[+x.slice(5, 7) - 1].slice(0, 3)}</button>`).join("")}</div>`;
+}
+function workbookSection() {
+  if (!sheetSel) sheetSel = date;
+  return `<h2 class="sect" style="margin-top:26px">Control room workbook</h2><p class="muted" style="margin-top:-4px">The same sheets as the Excel. Fill in the day sheet and tap <b>Save and upload</b> at the end of each shift.</p>`
+    + sheetTabs() + `<div class="xlsheet">${sheetSel === "month" ? monthSheet(date.slice(0, 7)) : daySheet(sheetSel)}</div>`;
+}
+function monthSheet(m) {
+  const days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);
+  const T = () => ({ avail: 0, BD: 0, PM: 0, SB: 0, down: 0, per: days.map(() => 0) });
+  const add = (t, S) => { S.forEach((s, i) => { if (s) { t.per[i] += s.avail; for (const k of ["avail", "BD", "PM", "SB", "down"]) t[k] += s[k]; } }); };
+  const line = (lab, t, cls = "") => `<tr class="${cls}"><td colspan="2">${lab}</td>${t.per.map(v => `<td>${v ? Math.round(v * 10) / 10 : ""}</td>`).join("")}<td>${n2(t.avail)}</td><td>${n2(t.BD)}</td><td>${n2(t.PM)}</td><td>${n2(t.SB)}</td><td>${n2(t.down)}</td><td><b>${t.avail + t.down ? Math.round(t.avail / (t.avail + t.down) * 100) + "%" : ""}</b></td></tr>`;
+  const fleetT = T(); let body = "";
+  for (const [g, L] of fleet()) { const gt = T();
+    L.forEach((mc, i) => { const S = days.map(x => daySum(mc, x)), t = T(); add(t, S); add(gt, S);
+      body += `<tr>${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><b>${esc(mc)}</b></td>${S.map(s => `<td class="${s && s.BD ? "hot" : ""}">${s ? Math.round(s.avail * 10) / 10 : ""}</td>`).join("")}<td>${n2(t.avail)}</td><td>${n2(t.BD)}</td><td>${n2(t.PM)}</td><td>${n2(t.SB)}</td><td>${n2(t.down)}</td><td><b>${t.avail + t.down ? Math.round(t.avail / (t.avail + t.down) * 100) + "%" : ""}</b></td></tr>`; });
+    body += line(`${esc(g)} total`, gt, "gt"); for (const k of ["avail", "BD", "PM", "SB", "down"]) fleetT[k] += gt[k]; gt.per.forEach((v, i) => fleetT.per[i] += v); }
+  body += line("Fleet total", fleetT, "ft");
+  return `<div class="xlhead"><b>Monthly Availability – ${monthName(m)}</b><span>TKR OPERATIONS · THARISA MINE</span><small>Available hours per machine per day (06:00 to 06:00), with month totals. Filled in by itself from the day sheets.</small></div>
+    <div class="xlwrap"><table class="xl"><thead><tr><th colspan="2"></th><th colspan="${days.length}">Available hours per day</th><th colspan="6">Month totals</th></tr>
+    <tr><th>Group</th><th>Machine</th>${days.map(x => `<th>${+x.slice(8)}</th>`).join("")}<th>Available hrs</th><th>Breakdown hrs</th><th>Planned maint. hrs</th><th>Standby hrs</th><th>Down hrs</th><th>Availability %</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+const TSEL = v => `<option value=""></option>${Object.keys(TYPES).map(k => `<option ${k === v ? "selected" : ""}>${k}</option>`).join("")}`;
+function shiftTable(d, sh) {
+  const [a, b] = shiftWin(d, sh), fut = a > Date.now();
+  const tot = () => ({ SB: 0, n: 0, avail: 0, BD: 0, PM: 0, down: 0 }), shT = tot(); let body = "";
+  for (const [g, L] of fleet()) { const gt = tot();
+    L.forEach((mc, i) => { const E = evsIn(mc, d, sh), s = shiftSum(mc, d, sh) || { SB: 0, avail: 0, BD: 0, PM: 0, down: 0 }, reason = [...new Set(E.map(e => e.reason).filter(Boolean))].join("; ");
+      const slots = [0, 1, 2, 3].map(k => { const e = E[k]; if (!e) return `<td><select data-k="t${k}">${TSEL("")}</select></td><td><input type="time" data-k="f${k}"></td><td><input type="time" data-k="o${k}"></td>`;
+        const carried = toMs(e.start) < a, f = carried ? tOf(a) : hhmm(e.start), o = e.end && toMs(e.end) <= b ? hhmm(e.end) : "";
+        return `<td><select data-k="t${k}" data-id="${e.id}" class="ty ${e.type}">${TSEL(e.type)}</select></td><td><input type="time" data-k="f${k}" value="${f}" data-was="${f}" ${carried ? 'readonly title="Started on an earlier shift"' : ""}></td><td><input type="time" data-k="o${k}" value="${o}" data-was="${o}" ${!e.end ? 'placeholder="going"' : ""}></td>`; }).join("");
+      body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><b>${esc(mc)}</b>${E.length > 4 ? `<br><small class="hot">${E.length} events – see the live board</small>` : ""}</td>${slots}
+        <td>${n2(s.SB)}</td><td>${E.length}</td><td><input data-k="r" value="${esc(reason)}" data-was="${esc(reason)}" class="rsn"></td><td>${fut ? "" : n2(s.avail)}</td><td class="${s.BD ? "hot" : ""}">${n2(s.BD)}</td><td>${n2(s.PM)}</td><td>${n2(s.down)}</td></tr>`;
+      for (const k of ["SB", "avail", "BD", "PM", "down"]) gt[k] += s[k]; gt.n += E.length; });
+    body += `<tr class="gt"><td colspan="14">${esc(g)} total</td><td>${n2(gt.SB)}</td><td>${gt.n}</td><td></td><td>${n2(gt.avail)}</td><td>${n2(gt.BD)}</td><td>${n2(gt.PM)}</td><td>${n2(gt.down)}</td></tr>`;
+    for (const k of ["SB", "n", "avail", "BD", "PM", "down"]) shT[k] += gt[k]; }
+  body += `<tr class="ft"><td colspan="14">${sh} shift total</td><td>${n2(shT.SB)}</td><td>${shT.n}</td><td></td><td>${n2(shT.avail)}</td><td>${n2(shT.BD)}</td><td>${n2(shT.PM)}</td><td>${n2(shT.down)}</td></tr>`;
+  return `<div class="xlband">Machine availability – ${sh} shift ${sh === "Day" ? "06:00–18:00" : "18:00–06:00"} · type every breakdown (BD), standby (SB), planned maintenance (PM) and not in use (NU) with the exact time it started and ended. Leave To empty if it is still going.</div>
+    <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${[1, 2, 3, 4].map(k => `<th>Type ${k}</th><th>From</th><th>To</th>`).join("")}<th>Standby hrs</th><th>Events</th><th>Reason / what happened</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="savebar"><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><span class="muted">${fut ? "This shift has not started yet." : ""}</span></div>`;
+}
+function daySheet(d) {
+  const day = recs.find(r => r.id === "day_" + d && !r.deleted) || {}, logs = R("log").filter(l => l.date === d).sort((x, y) => x.at - y.at), last = logs[logs.length - 1];
+  const get = item => recs.find(r => r.id === chkKey(d, item)) || {}, opt = v => ["", "✓", "✗"].map(o => `<option ${o === (v || "") ? "selected" : ""}>${o}</option>`).join("");
+  const hours = []; for (let h = 6; h < 30; h++) hours.push(h % 24);
+  const hourLog = hours.map(h => { const st = toMs((h < 6 ? addDays(d, 1) : d) + `T${pad(h)}:00`), L = logs.filter(l => l.at >= st && l.at < st + 36e5); return [h, L]; });
+  return `<form id="fDay" data-date="${d}" autocomplete="off"><div class="xlhead"><b>Control Room Capture – ${parse(d).getDate()} ${MONTHS[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}</b><span>TKR OPERATIONS · THARISA MINE</span><small>Day shift 06:00 to 18:00 · Night shift 18:00 to 06:00</small></div>
+    <div class="xlinfo"><label>Date <input value="${fmt(d)}" readonly></label><label>Day controller <input name="dayCtl" value="${esc(day.dayCtl || "")}" placeholder="${esc(me.name)}"></label><label>Night controller <input name="nightCtl" value="${esc(day.nightCtl || "")}" placeholder="${esc(me.name)}"></label>
+      <label>Last update <input value="${last ? new Date(last.at).toTimeString().slice(0, 5) : ""}" readonly></label><label>Next update <input value="${last ? new Date(last.at + 36e5).toTimeString().slice(0, 5) : ""}" readonly></label>
+      <label>Status <input value="${d !== today() ? "" : !last ? "Not started" : Date.now() - last.at > 36e5 ? "Update due" : "Up to date"}" readonly></label></div>
+    <div class="xlband">Data and documents</div>
+    <div class="xlwrap"><table class="xl"><thead><tr><th>Section</th><th>Item</th>${COLS.map(c => `<th>${c}</th>`).join("")}<th>Time updated</th><th>Updated by</th><th>Comments</th></tr></thead><tbody>
+      ${CHECK.map(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr data-item="${esc(it)}">${i ? "" : `<td rowspan="${items.length}" class="grpc">${esc(sec)}</td>`}<td class="lt">${esc(it)}</td>${COLS.map(k => `<td><select data-c="${k}" class="tk">${opt(c[k])}</select></td>`).join("")}<td>${c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : ""}</td><td>${esc(c.by || "")}</td><td><input data-c="comment" value="${esc(c.comment || "")}"></td></tr>`; }).join("")).join("")}
+      <tr class="gt"><td colspan="2">Captured</td>${COLS.map(k => `<td>${CHECK.flatMap(([, i]) => i).filter(it => get(it)[k] === "✓").length} of ${CHECK.flatMap(([, i]) => i).length}</td>`).join("")}<td colspan="3"></td></tr></tbody></table></div>
+    ${shiftTable(d, "Day")}${shiftTable(d, "Night")}
+    <div class="xlband">24-hour availability summary per machine</div>
+    <div class="xlwrap"><table class="xl"><thead><tr><th>Group</th><th>Machine</th><th>Available hrs</th><th>Breakdown hrs</th><th>Planned maint. hrs</th><th>Standby hrs</th><th>Down hrs</th><th>Total hrs</th><th>Availability %</th></tr></thead><tbody>
+      ${fleet().map(([g, L]) => L.map((mc, i) => { const s = daySum(mc, d); return `<tr>${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><b>${esc(mc)}</b></td>${s ? `<td>${n2(s.avail)}</td><td class="${s.BD ? "hot" : ""}">${n2(s.BD)}</td><td>${n2(s.PM)}</td><td>${n2(s.SB)}</td><td>${n2(s.down)}</td><td>${n2(s.avail + s.down)}</td><td><b>${s.pct == null ? "" : Math.round(s.pct * 100) + "%"}</b></td>` : '<td colspan="7"></td>'}</tr>`; }).join("")).join("")}</tbody></table></div>
+    <div class="xlband">Hourly update log <small>(fills in by itself every time something is saved)</small></div>
+    <div class="xlwrap"><table class="xl"><thead><tr><th>Hour</th><th>Updated</th><th>Time done</th><th>Controller</th><th>Notes</th></tr></thead><tbody>
+      ${hourLog.map(([h, L]) => `<tr><td>${pad(h)}:00–${pad((h + 1) % 24)}:00</td><td class="${L.length ? "okc" : ""}">${L.length ? "✓" : ""}</td><td>${L[0] ? new Date(L[0].at).toTimeString().slice(0, 5) : ""}</td><td>${esc([...new Set(L.map(l => l.by))].join(", "))}</td><td class="nt">${esc(L.map(l => l.what).slice(0, 3).join(" · "))}${L.length > 3 ? ` · +${L.length - 3} more` : ""}</td></tr>`).join("")}
+      <tr class="gt"><td>Hours updated</td><td colspan="4">${hourLog.filter(([, L]) => L.length).length} of 24</td></tr></tbody></table></div></form>`;
+}
+async function saveShift(sh) {
+  const f = $("fDay"); if (!f) return; const d = f.dataset.date, tbl = f.querySelector(`table.av[data-shift="${sh}"]`), [a, b] = shiftWin(d, sh);
+  const changes = [], errors = [];
+  for (const tr of tbl.querySelectorAll("tr[data-mach]")) {
+    const mc = tr.dataset.mach, q = k => tr.querySelector(`[data-k="${k}"]`), rIn = q("r"), reason = rIn.value.trim(), rChanged = reason !== (rIn.dataset.was || "");
+    for (let k = 0; k < 4; k++) {
+      const tS = q("t" + k), fI = q("f" + k), oI = q("o" + k), id = tS.dataset.id, type = tS.value, fv = fI.value, ov = oI.value;
+      const e = id ? recs.find(r => r.id === id) : null;
+      if (e && !type) { if (toMs(e.start) >= a) changes.push({ ...e, deleted: true, _what: `Deleted ${mc} ${TYPES[e.type]} ${hhmm(e.start)}` }); continue; }
+      if (!type) continue;
+      if (!fv) { errors.push(`${mc}: type the From time`); continue; }
+      const start = e && toMs(e.start) < a ? e.start : isoAt(d, sh, fv);
+      let end = e && ov === (oI.dataset.was || "") ? e.end : ov ? isoAt(d, sh, ov) : "";
+      if (end && toMs(end) <= toMs(start)) { errors.push(`${mc}: the To time ${ov} is before the From time ${fv}`); continue; }
+      if (toMs(start) > Date.now() + 6e4) { errors.push(`${mc}: ${fv} has not come yet`); continue; }
+      const nr = { ...(e || { id: "ev_" + uid(), kind: "ev" }), ym: start.slice(0, 7), machine: mc, group: groupOf(mc), type, start, end, reason: rChanged || !e ? reason : e.reason, endBy: end && !e?.end ? me.name : e?.endBy || "" };
+      if (!e || ["type", "start", "end", "reason"].some(x => (e[x] || "") !== (nr[x] || ""))) changes.push({ ...nr, _what: `${e ? "Changed" : "Logged"} ${mc}: ${TYPES[type]} ${hhmm(start)}${end ? "–" + hhmm(end) : " (still going)"}` });
+    }
+  }
+  if (errors.length) { toast(errors[0]); return; }
+  // the checklist and the controllers on this sheet
+  const dayR = recs.find(r => r.id === "day_" + d) || { id: "day_" + d, kind: "day", ym: d.slice(0, 7), date: d };
+  const ctl = { dayCtl: f.elements.dayCtl.value.trim() || (sh === "Day" ? me.name : dayR.dayCtl || ""), nightCtl: f.elements.nightCtl.value.trim() || (sh === "Night" ? me.name : dayR.nightCtl || "") };
+  if (ctl.dayCtl !== (dayR.dayCtl || "") || ctl.nightCtl !== (dayR.nightCtl || "")) changes.push({ ...dayR, ...ctl, _what: `Controllers: day ${ctl.dayCtl || "–"}, night ${ctl.nightCtl || "–"}` });
+  for (const tr of f.querySelectorAll("tr[data-item]")) { const it = tr.dataset.item, c = recs.find(r => r.id === chkKey(d, it)) || { id: chkKey(d, it), kind: "chk", ym: d.slice(0, 7), date: d, item: it }, nv = { ...c };
+    tr.querySelectorAll("[data-c]").forEach(x => nv[x.dataset.c] = x.value.trim());
+    if (["Rompad", "Drilling", "Buses", "comment"].some(k => (c[k] || "") !== (nv[k] || ""))) changes.push({ ...nv, _what: `${it}: ${COLS.map(k => `${k} ${nv[k] || "–"}`).join(", ")}` }); }
+  for (const c of changes) { const { _what, ...r } = c; await put(r, _what); }
+  await put({ id: "log_" + uid(), kind: "log", ym: d.slice(0, 7), date: d, at: Date.now(), what: `Saved the ${sh.toLowerCase()} shift sheet (${changes.length} change${changes.length === 1 ? "" : "s"})` });
+  sheetDirty = false;
+  let up = false; if (navigator.onLine && fbUser) { await syncNow(false); up = !waiting(); }
+  render();
+  popupMsg(up ? "Saved and uploaded" : "Saved on this PC", `${sh} shift, ${dow(d)} ${fmt(d)}: ${changes.length} change${changes.length === 1 ? "" : "s"} saved.` + (up ? " Everyone in the TKR app can see it now." : fbUser ? " It uploads by itself as soon as this PC has signal." : " It uploads once someone signs in under Export & sync (needs signal once)."));
+}
+function popupMsg(title, text) {
+  document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "alertdialog");
+  d.innerHTML = `<div><div class="big"><i>✓</i>${esc(title)}</div><p>${esc(text)}</p><button class="primary">OK</button></div>`; d.onclick = e => { if (e.target.closest("button") || e.target === d) d.remove(); };
+  document.body.appendChild(d); d.querySelector("button").focus();
 }
 
 /* ---------- log / change an event ---------- */
@@ -242,6 +360,9 @@ async function clickH(ev) {
   if (b.dataset.dnav) { date = addDays(date, +b.dataset.dnav); render(); return; }
   if (b.hasAttribute("data-today")) { date = today(); render(); return; }
   if (b.dataset.mnav) { month = shiftMonth(month, +b.dataset.mnav); render(); return; }
+  if (b.dataset.sh) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; sheetSel = b.dataset.sh; if (sheetSel !== "month") date = sheetSel; render(); document.querySelector(".xltabs")?.scrollIntoView({ block: "start" }); return; }
+  if (b.dataset.wbm) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; const m = shiftMonth((sheetSel === "month" ? date : sheetSel).slice(0, 7), +b.dataset.wbm), last = monthEnd(m) < today() ? monthEnd(m) : today(); date = last; sheetSel = sheetSel === "month" ? "month" : last; render(); return; }
+  if (b.dataset.saveshift) { b.disabled = true; b.textContent = "Saving…"; try { await saveShift(b.dataset.saveshift); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
   if (b.dataset.mach !== undefined) { const m = b.dataset.mach, open = statusNow(m); openEv(evForm({}, m), open ? `${m} · ${TYPES[open.type]}` : `${m} · log what happened`); return; }
   if (b.dataset.log !== undefined) { openEv(evForm(), "Log breakdown or standby"); return; }
   if (b.dataset.edit) { const e = recs.find(r => r.id === b.dataset.edit); openEv(evForm(e), `${e.machine} · change`); return; }
@@ -282,6 +403,7 @@ async function submitH(ev) {
 }
 async function changeH(ev) {
   const t = ev.target;
+  if (t.closest && t.closest("#fDay")) { sheetDirty = true; if (t.matches("select.ty, select[data-k^=t]")) t.className = "ty " + t.value; return; }
   if (t.id === "dPick") { date = t.value || today(); render(); return; }
   if (t.dataset.chkc) { const [d, it] = t.dataset.chkc.split("|"), id = chkKey(d, it), c = recs.find(r => r.id === id) || { id, kind: "chk", ym: d.slice(0, 7), date: d, item: it }; await put({ ...c, comment: t.value.trim() }, `${it}: comment`); toast("Saved"); return; }
   if (t.dataset.addc) { const [it, k] = t.dataset.addc.split("|"), id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it }; await put({ ...c, [k]: t.value.trim() }, `${it}: ${k}`); toast("Saved"); return; }
@@ -315,7 +437,7 @@ async function syncNow(manual) {
     recs = await all(); sync.last = Date.now(); await metaSet("syncLast", sync.last); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "This sign-in can't save Control Room data. Ask Muneer to add it." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
-  sync.busy = false; if (me && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
+  sync.busy = false; if (me && !sheetDirty && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
 }
 function syncCard() {
   if (!fbUser) return `<section class="card"><h2>Send to the TKR app</h2><p class="muted" style="margin-top:0">Sign in once on this PC with the control room app account (needs signal once). After that, everything goes to the TKR app by itself whenever there is signal, so managers see it live. Without signal it waits on this PC.</p>
@@ -323,9 +445,9 @@ function syncCard() {
   return `<section class="card"><h2>Send to the TKR app</h2><p style="margin-top:0">Signed in as <b>${esc(fbUser.email)}</b> · ${waiting() ? `<b>${waiting()}</b> changes waiting` : "nothing waiting"}. ${esc(sync.msg)}</p><div class="row"><button class="primary" id="syncNow">Send and check now</button><button class="ghost" id="syncOut">Sign out</button></div></section>`;
 }
 addEventListener("online", () => syncNow(false));
-setInterval(() => { if (me && tab === "now" && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
+setInterval(() => { if (me && tab === "now" && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
-/* ---------- Excel for one month ---------- */
+/* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
 async function exportXlsx(m) {
   toast("Making the Excel file…");
   await new Promise((res, rej) => { if (window.ExcelJS) return res(); const s = document.createElement("script"); s.src = "../lib/exceljs.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
@@ -333,40 +455,65 @@ async function exportXlsx(m) {
   let logo = null; try { logo = wb.addImage({ buffer: await (await fetch("../icons/icon-512.png")).arrayBuffer(), extension: "png" }); } catch {}
   const fill = c => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } }), thin = { style: "thin", color: { argb: "FFD9D3C5" } }, box = { top: thin, left: thin, bottom: thin, right: thin };
   const F = (o = {}) => Object.assign({ name: "Arial", size: 10 }, o);
-  const sheetH = (name, widths, title, sub) => { const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 5, showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-    ws.columns = widths.map(w => ({ width: w })); for (let r = 1; r <= 4; r++) { ws.getRow(r).height = [8, 22, 28, 18][r - 1]; for (let c = 1; c <= Math.max(6, widths.length); c++) ws.getCell(r, c).fill = fill("FF111111"); }
-    for (let c = 1; c <= Math.max(6, widths.length); c++) ws.getCell(5, c).fill = fill("FFD4A12A"); ws.getRow(5).height = 4;
-    if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.1 }, ext: { width: 58, height: 58 } });
-    ws.getCell(2, 2).value = "TKR OPERATIONS – " + title; ws.getCell(2, 2).font = F({ size: 13, bold: true, color: { argb: "FFFFFFFF" } });
-    ws.getCell(3, 2).value = monthName(m); ws.getCell(3, 2).font = F({ size: 18, bold: true, color: { argb: "FFD4A12A" } });
-    ws.getCell(4, 2).value = sub; ws.getCell(4, 2).font = F({ bold: true, color: { argb: "FFFFFFFF" } }); return ws; };
+  const COLR = { BD: ["FFFDE2DF", "FF9C0006"], SB: ["FFFFF2CC", "FF7F6000"], PM: ["FFDDEBF7", "FF1F4E78"], NU: ["FFEDEDED", "FF595959"], "✓": ["FFE2F0D9", "FF375623"], "✗": ["FFFDE2DF", "FF9C0006"] };
+  const top = (ws, n, t1, t2, t3) => { for (let r = 1; r <= 4; r++) { ws.getRow(r).height = [8, 22, 20, 18][r - 1]; for (let c = 1; c <= n; c++) ws.getCell(r, c).fill = fill("FF111111"); }
+    for (let c = 1; c <= n; c++) ws.getCell(5, c).fill = fill("FFD4A12A"); ws.getRow(5).height = 4; if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.1 }, ext: { width: 54, height: 54 } });
+    ws.getCell(2, 2).value = t1; ws.getCell(2, 2).font = F({ size: 15, bold: true, color: { argb: "FFFFFFFF" } }); ws.getCell(3, 2).value = t2; ws.getCell(3, 2).font = F({ size: 9, bold: true, color: { argb: "FFD4A12A" } });
+    ws.getCell(4, 2).value = t3; ws.getCell(4, 2).font = F({ size: 9, color: { argb: "FFCFC8B8" } }); };
+  const band = (ws, r, n, t) => { for (let c = 1; c <= n; c++) ws.getCell(r, c).fill = fill("FFD4A12A"); ws.getCell(r, 1).value = t; ws.getCell(r, 1).font = F({ bold: true }); ws.getRow(r).height = 20; };
   const head = (ws, r, L) => { L.forEach((t, i) => { const c = ws.getCell(r, i + 1); c.value = t; c.font = F({ bold: true, color: { argb: "FFFFFFFF" } }); c.fill = fill("FF262626"); c.border = box; c.alignment = { wrapText: true, vertical: "middle", horizontal: i < 2 ? "left" : "center" }; }); ws.getRow(r).height = 28; };
-  const row = (ws, r, L, o = {}) => { L.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v; c.border = box; c.font = F({ bold: !!o.bold }); c.alignment = { vertical: "middle", wrapText: true, horizontal: typeof v === "number" ? "center" : "left" }; if (typeof v === "number") c.numFmt = o.int ? "0" : "0.00"; if (o.fill) c.fill = fill(o.fill); }); };
+  const row = (ws, r, L, o = {}) => { L.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v === "" ? null : v; c.border = box; c.font = F({ bold: !!o.bold || (o.boldCol || []).includes(i) });
+    c.alignment = { vertical: "middle", wrapText: !!o.wrap, horizontal: i < 2 || (o.left || []).includes(i) ? "left" : "center" }; if (typeof v === "number") c.numFmt = (o.fmt || {})[i] || "0.00"; if (o.fill) c.fill = fill(o.fill);
+    const cc = COLR[v]; if (cc && !o.fill) { c.fill = fill(cc[0]); c.font = F({ bold: true, color: { argb: cc[1] } }); } }); };
   const days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);
-  // Monthly availability
-  let ws = sheetH("Monthly Availability", [14, 11, ...days.map(() => 5.2), 10, 10, 10, 10, 10, 10, 10], "MONTHLY AVAILABILITY", "Available hours per machine per day (06:00 to 06:00), from the exact times logged");
-  head(ws, 7, ["Group", "Machine", ...days.map(x => +x.slice(8)), "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Standby hrs", "Not in use hrs", "Down hrs", "Availability %"]); let r = 8;
-  for (const [g, L] of fleet()) { for (const mc of L) { const S = days.map(x => daySum(mc, x)), t = S.reduce((a, s) => { if (s) for (const k of ["avail", "BD", "PM", "SB", "NU", "down"]) a[k] += s[k]; return a; }, { avail: 0, BD: 0, PM: 0, SB: 0, NU: 0, down: 0 });
-      row(ws, r, [g, mc, ...S.map(s => s ? Math.round(s.avail * 100) / 100 : null), t.avail, t.BD, t.PM, t.SB, t.NU, t.down, t.avail + t.down ? t.avail / (t.avail + t.down) : null]); ws.getCell(r, days.length + 9).numFmt = "0%"; r++; } }
-  // Breakdown log
-  ws = sheetH("Breakdown log", [12, 12, 20, 16, 16, 11, 40, 16, 16], "BREAKDOWN AND STANDBY LOG", "Every breakdown, standby, planned maintenance and not-in-use with the exact start and end time");
-  head(ws, 7, ["Group", "Machine", "Type", "Started", "Ended", "Hours", "Reason", "Logged by", "Closed by"]); r = 8;
-  const mf = toMs(m + "-01T00:00"), mt = toMs(addDays(monthEnd(m), 1) + "T06:00");
-  for (const e of evs().filter(e => toMs(e.start) < mt && evEnd(e) > mf).sort((a, b) => toMs(a.start) - toMs(b.start))) {
-    row(ws, r++, [e.group || groupOf(e.machine), e.machine, TYPES[e.type], `${fmt(e.start.slice(0, 10))} ${hhmm(e.start)}`, e.end ? `${fmt(e.end.slice(0, 10))} ${hhmm(e.end)}` : "still going", Math.round((evEnd(e) - toMs(e.start)) / 36e5 * 100) / 100, e.reason || "", e.by || "", e.endBy || ""]); }
-  // Daily checklist
-  ws = sheetH("Daily checklist", [12, 16, 34, 10, 10, 10, 14, 30], "DATA AND DOCUMENTS", "Daily control room checklist");
-  head(ws, 7, ["Date", "Section", "Item", ...COLS, "Updated", "Comment"]); r = 8;
-  for (const d of days) for (const [sec, items] of CHECK) for (const it of items) { const c = recs.find(x => x.id === chkKey(d, it) && !x.deleted); if (!c) continue;
-    row(ws, r++, [fmt(d), sec, it, ...COLS.map(k => c[k] || ""), `${new Date(c.editedAt).toTimeString().slice(0, 5)} ${c.by || ""}`, c.comment || ""]); }
-  // Invoicing
-  ws = sheetH("Supporting documents", [20, 30, 9, 22, 14], "INVOICING PROCESS", "Supporting documents per machine and the person we get them from");
-  head(ws, 7, ["Service / machine", "Supporting documents", "Done", "Person responsible", "Ready to invoice"]); r = 8;
-  for (const [svc, docs, person] of SUPPORT) { const ready = docs.every(dc => recs.find(x => x.id === invKey(m, svc, dc))?.done === "✓");
-    docs.forEach((dc, i) => row(ws, r++, [i ? "" : svc, dc, recs.find(x => x.id === invKey(m, svc, dc))?.done || "", i ? "" : person, i ? "" : ready ? "Ready" : ""], ready ? { fill: "FFE2F0D9" } : {})); }
-  ws = sheetH("Additional documents", [40, 8, 26, 22, 40], "ADDITIONAL DOCUMENTS FOR INVOICING", "Needed every month");
-  head(ws, 7, ["Additional documents", "Done", "Person responsible", "Control room collector", "Notes"]); r = 8;
-  for (const [it, person, note] of ADDITIONAL) { const c = recs.find(x => x.id === addKey(m, it)) || {}; row(ws, r++, [it, c.done || "", c.person || person, c.collector || "", c.notes || note || ""]); }
+  const rec = id => recs.find(x => x.id === id && !x.deleted) || {};
+  // 1. supporting documents per service
+  let ws = wb.addWorksheet(monthName(m), { views: [{ showGridLines: false }] }); ws.columns = [20, 30, 9, 22, 16].map(w => ({ width: w }));
+  top(ws, 5, `Invoicing Process – ${monthName(m)}`, "TKR OPERATIONS  ·  THARISA MINE", "Supporting documents per machine and the person we get them from");
+  head(ws, 6, ["Service / machine", "Supporting documents", "Done", "Person responsible", "Ready to invoice"]); let r = 7;
+  for (const [svc, docs, person] of SUPPORT) { const ready = docs.every(dc => rec(invKey(m, svc, dc)).done === "✓"); docs.forEach((dc, i) => row(ws, r++, [i ? "" : svc, dc, rec(invKey(m, svc, dc)).done || "", i ? "" : person, i ? "" : ready ? "Ready" : ""], { boldCol: [0] })); }
+  // 2. additional documents
+  ws = wb.addWorksheet("Additional documents", { views: [{ showGridLines: false }] }); ws.columns = [44, 8, 26, 24, 44].map(w => ({ width: w }));
+  top(ws, 5, `Additional Documents for Invoicing – ${monthName(m)}`, "TKR OPERATIONS  ·  THARISA MINE", "Needed every month, together with the supporting documents per machine");
+  head(ws, 6, ["Additional documents", "Done", "Person responsible", "Control Room Collector", "Notes"]); r = 7;
+  for (const [it, person, note] of ADDITIONAL) { const c = rec(addKey(m, it)); row(ws, r++, [it, c.done || "", c.person || person, c.collector || "", c.notes || note || ""], { wrap: true, left: [4] }); }
+  const nDone = ADDITIONAL.filter(([it]) => rec(addKey(m, it)).done === "✓").length; row(ws, r, ["All additional documents received", nDone === ADDITIONAL.length ? "Ready" : `${nDone} of ${ADDITIONAL.length}`, "", "", ""], { bold: true, fill: "FFFFF2CC" });
+  // 3. monthly availability
+  ws = wb.addWorksheet("Monthly Availability", { views: [{ state: "frozen", xSplit: 2, ySplit: 7, showGridLines: false }] }); ws.columns = [14, 11, ...days.map(() => 5.4), 11, 11, 11, 11, 11, 11].map(w => ({ width: w }));
+  const nc = 2 + days.length + 6; top(ws, nc, `Monthly Availability – ${monthName(m)}`, "TKR OPERATIONS  ·  THARISA MINE", "Available hours per machine per day (06:00 to 06:00), with month totals");
+  head(ws, 7, ["Group", "Machine", ...days.map(x => +x.slice(8)), "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Standby hrs", "Down hrs", "Availability %"]); r = 8;
+  const pct = (a, d) => a + d ? a / (a + d) : "";
+  const fleetT = { per: days.map(() => 0), avail: 0, BD: 0, PM: 0, SB: 0, down: 0 };
+  for (const [g, L] of fleet()) { const gt = { per: days.map(() => 0), avail: 0, BD: 0, PM: 0, SB: 0, down: 0 };
+    for (const mc of L) { const S = days.map(x => daySum(mc, x)), t = { avail: 0, BD: 0, PM: 0, SB: 0, down: 0 }; S.forEach((s, i) => { if (s) { gt.per[i] += s.avail; for (const k in t) { t[k] += s[k]; gt[k] += s[k]; } } });
+      row(ws, r, [g, mc, ...S.map(s => s ? Math.round(s.avail * 100) / 100 : ""), t.avail, t.BD, t.PM, t.SB, t.down, pct(t.avail, t.down)], { boldCol: [1] }); ws.getCell(r, nc).numFmt = "0%"; r++; }
+    row(ws, r, [`${g} total`, "", ...gt.per.map(v => Math.round(v * 100) / 100), gt.avail, gt.BD, gt.PM, gt.SB, gt.down, pct(gt.avail, gt.down)], { bold: true, fill: "FFFFF2CC" }); ws.getCell(r, nc).numFmt = "0%"; r++;
+    gt.per.forEach((v, i) => fleetT.per[i] += v); for (const k of ["avail", "BD", "PM", "SB", "down"]) fleetT[k] += gt[k]; }
+  row(ws, r, ["Fleet total", "", ...fleetT.per.map(v => Math.round(v * 100) / 100), fleetT.avail, fleetT.BD, fleetT.PM, fleetT.SB, fleetT.down, pct(fleetT.avail, fleetT.down)], { bold: true, fill: "FFD9D9D9" }); ws.getCell(r, nc).numFmt = "0%";
+  // 4. one sheet per day, like the control room capture sheets
+  for (const d of days) {
+    ws = wb.addWorksheet(`${d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1].slice(0, 3)}`, { views: [{ showGridLines: false }] });
+    ws.columns = [16, 12, ...Array(12).fill(7.5), 10, 7, 30, 9, 9, 9, 9].map(w => ({ width: w }));
+    top(ws, 21, `Control Room Capture – ${parse(d).getDate()} ${MONTHS[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}`, "TKR OPERATIONS  ·  THARISA MINE", "Day shift 06:00 to 18:00  ·  Night shift 18:00 to 06:00");
+    const day = rec("day_" + d), logs = R("log").filter(l => l.date === d).sort((a, b) => a.at - b.at), last = logs[logs.length - 1];
+    row(ws, 7, ["Date", fmt(d), "Day controller", "", "", day.dayCtl || "", "", "", "Night controller", "", "", day.nightCtl || ""], { boldCol: [0, 2, 8] });
+    row(ws, 8, ["Last update", last ? new Date(last.at).toTimeString().slice(0, 5) : "", "Next update", "", "", last ? new Date(last.at + 36e5).toTimeString().slice(0, 5) : "", "", "", "Updates", "", "", `${new Set(logs.map(l => new Date(l.at).getHours())).size} of 24 hours`], { boldCol: [0, 2, 8] });
+    r = 10; band(ws, r++, 21, "Data and documents"); head(ws, r++, ["Section", "Item", ...COLS, "Time updated", "Updated by", "Comments"]);
+    for (const [sec, items] of CHECK) items.forEach((it, i) => { const c = rec(chkKey(d, it)); row(ws, r++, [i ? "" : sec, it, ...COLS.map(k => c[k] || ""), c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : "", c.by || "", c.comment || ""], { boldCol: [0], left: [7] }); });
+    for (const sh of ["Day", "Night"]) {
+      r++; band(ws, r++, 21, `Machine availability – ${sh} shift ${sh === "Day" ? "06:00–18:00" : "18:00–06:00"}  ·  BD breakdown · SB standby · PM planned maintenance · NU not in use, with the exact times`);
+      head(ws, r++, ["Group", "Machine", ...[1, 2, 3, 4].flatMap(k => [`Type ${k}`, "From", "To"]), "Standby hrs", "Events", "Reason / what happened", "Avail hrs", "BD hrs", "PM hrs", "Down hrs"]);
+      const [a, b] = shiftWin(d, sh);
+      for (const [g, L] of fleet()) L.forEach((mc, i) => { const E = evsIn(mc, d, sh), s = shiftSum(mc, d, sh);
+        const slots = [0, 1, 2, 3].flatMap(k => { const e = E[k]; if (!e) return ["", "", ""]; return [e.type, toMs(e.start) < a ? tOf(a) : hhmm(e.start), e.end && toMs(e.end) <= b ? hhmm(e.end) : e.end ? tOf(b) : "going"]; });
+        row(ws, r++, [i ? "" : g, mc, ...slots, s ? s.SB : "", E.length, [...new Set(E.map(e => e.reason).filter(Boolean))].join("; "), s ? s.avail : "", s ? s.BD : "", s ? s.PM : "", s ? s.down : ""], { boldCol: [0, 1], left: [16], fmt: { 15: "0" } }); });
+    }
+    r++; band(ws, r++, 21, "24-hour availability summary per machine"); head(ws, r++, ["Group", "Machine", "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Standby hrs", "Down hrs", "Total hrs", "Availability %"]);
+    for (const [g, L] of fleet()) L.forEach((mc, i) => { const s = daySum(mc, d); row(ws, r, [i ? "" : g, mc, ...(s ? [s.avail, s.BD, s.PM, s.SB, s.down, s.avail + s.down, s.pct ?? ""] : ["", "", "", "", "", "", ""])], { boldCol: [0, 1] }); ws.getCell(r, 9).numFmt = "0%"; r++; });
+    r++; band(ws, r++, 21, "Hourly update log"); head(ws, r++, ["Hour", "Updated", "Time done", "Controller", "Notes"]);
+    for (let h = 6; h < 30; h++) { const hh = h % 24, st = toMs((h >= 24 ? addDays(d, 1) : d) + `T${pad(hh)}:00`), L = logs.filter(l => l.at >= st && l.at < st + 36e5);
+      row(ws, r++, [`${pad(hh)}:00–${pad((hh + 1) % 24)}:00`, L.length ? "✓" : "", L[0] ? new Date(L[0].at).toTimeString().slice(0, 5) : "", [...new Set(L.map(l => l.by))].join(", "), L.map(l => l.what).slice(0, 4).join(" · ")], { left: [4] }); }
+  }
   const blob = new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_${monthName(m).replace(" ", "_")}.xlsx`);
 }

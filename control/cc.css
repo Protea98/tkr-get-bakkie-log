@@ -41,3 +41,52 @@
 .hot{color:var(--bad);font-weight:700}
 .evrow{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .evrow .t{font-family:var(--mono);font-size:13.5px}
+
+/* the control room workbook, drawn like the Excel (white sheet, black and gold) */
+.xltabs{display:flex;gap:4px;align-items:center;overflow-x:auto;padding:6px 0 0;border-bottom:3px solid #d4a12a;position:sticky;top:0;z-index:4;background:var(--bg);scrollbar-width:thin}
+.xltabs>b{flex:none;padding:0 8px;font-size:14px}
+.xltabs>button{flex:none;min-height:38px;padding:4px 10px;font-size:13px}
+.xltabs .xt{border-radius:8px 8px 0 0;border-bottom:0;background:#2a2f2c;color:#cfd3cc;font-weight:600}
+.xltabs .xt.on{background:#d4a12a;color:#141006}
+.xltabs .xt:disabled{opacity:.35}
+.xlsheet{background:#fff;color:#111;border-radius:0 0 10px 10px;padding:0 0 14px;margin-bottom:24px;font-family:Arial,Helvetica,sans-serif}
+.xlhead{background:#111;color:#fff;padding:14px 16px 12px;border-bottom:4px solid #d4a12a;display:flex;flex-direction:column;gap:2px}
+.xlhead b{font-size:19px}.xlhead span{color:#d4a12a;font-size:11.5px;font-weight:700;letter-spacing:1.5px}.xlhead small{color:#cfc8b8;font-size:12px}
+.xlinfo{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:12px 14px}
+.xlinfo label{color:#555;font-size:11px;letter-spacing:.5px}
+.xlinfo input{background:#fff8e6;color:#111;border:1px solid #d9d3c5;border-radius:4px;min-height:36px;font-family:inherit}
+.xlinfo input[readonly]{background:#f3f1ec}
+.xlband{background:#d4a12a;color:#111;font-weight:700;font-size:13.5px;padding:7px 12px;margin:14px 0 0}
+.xlband small{font-weight:400}
+.xlwrap{overflow-x:auto}
+table.xl{border-collapse:collapse;width:100%;font-size:12.5px;color:#111;background:#fff;min-width:720px}
+table.xl th{background:#262626;color:#fff;font-weight:700;font-size:11px;letter-spacing:0;text-transform:none;padding:6px 5px;border:1px solid #444;text-align:center;white-space:nowrap}
+table.xl td{border:1px solid #d9d3c5;padding:3px 5px;text-align:center;color:#111;white-space:nowrap}
+table.xl tbody tr:nth-child(even) td{background:#fffaf0}
+table.xl td.grpc{background:#fff8e6!important;font-weight:700;text-align:left;vertical-align:middle}
+table.xl td.lt{text-align:left}
+table.xl tr.gt td{background:#fff2cc!important;font-weight:700;text-align:right;border-top:2px solid #d4a12a}
+table.xl tr.ft td{background:#111!important;color:#fff;font-weight:700;text-align:right}
+table.xl td.hot{color:#9c0006;font-weight:700}
+table.xl td.okc{background:#e2f0d9!important;color:#375623;font-weight:700}
+table.xl td.nt{text-align:left;white-space:normal;min-width:240px;color:#555;font-size:11.5px}
+table.xl select,table.xl input{min-height:30px;height:30px;padding:2px 4px;font-size:12.5px;border:1px solid #cfc8b8;border-radius:3px;background:#fff;color:#111;font-family:inherit;width:auto}
+table.xl input[type=time]{width:84px}
+table.xl select{width:56px}
+table.xl input.rsn,table.xl input[data-c=comment]{width:100%;min-width:180px}
+table.xl select.tk{width:52px;font-weight:700}
+table.xl select.ty.BD{background:#fde2df;color:#9c0006;font-weight:700}
+table.xl select.ty.SB{background:#fff2cc;color:#7f6000;font-weight:700}
+table.xl select.ty.PM{background:#ddebf7;color:#1f4e78;font-weight:700}
+table.xl select.ty.NU{background:#ededed;color:#595959;font-weight:700}
+table.xl input[readonly]{background:#f3f1ec;color:#777}
+.savebar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#fffaf0;border-bottom:1px solid #d9d3c5}
+.savebar button{min-height:50px;font-size:16px;padding:8px 22px}
+.savebar .muted{color:#777}
+.ccdone{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px}
+.ccdone>div{background:var(--panel);border:1px solid var(--ok);border-radius:16px;padding:22px;max-width:440px;width:100%}
+.ccdone .big{display:flex;align-items:center;gap:12px;font-size:21px;font-weight:700;margin-bottom:8px}
+.ccdone .big i{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--ok) 20%,transparent);color:var(--ok);font-style:normal;font-size:26px}
+.ccdone button{width:100%;min-height:50px;margin-top:8px}
+.xltabs{top:62px}
+table.xl tr.gt td:first-child,table.xl tr.ft td:first-child{text-align:left}
