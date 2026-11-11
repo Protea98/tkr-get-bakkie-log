@@ -259,7 +259,7 @@ function shiftTable(d, sh) {
   for (const [g, L] of fleet()) { const gt = tot(), opCount = H.map(() => 0);
     L.forEach((mc, i) => { const C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
       const reason = [...new Set(E.map(e => e.reason).filter(Boolean))].join("; ");
-      const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++; return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}" ${hStart(d, h) > now ? "disabled" : ""}>${opt(v)}</select></td>`; }).join("");
+      const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++; return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}">${opt(v)}</select></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><b>${esc(mc)}</b></td>${cells}
         <td class="tm">${E.map(e => `<span data-edit="${e.id}" title="Tap to correct">${tm(e)}</span>`).join("<br>")}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
@@ -271,13 +271,14 @@ function shiftTable(d, sh) {
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
   return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operational / standby · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="savebar"><button type="button" class="primary" data-saveshift="${sh}" ${fut ? "disabled" : ""}>Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}" ${fut ? "disabled" : ""}>Generate message</button><span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : fut ? "This shift has not started yet." : ""}</span></div>`;
+    <div class="savebar"><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
 async function setCell(d, mc, h, val) {
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else delete cells[h];
   await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
+  if (a > now) return;
   const open = downEvs(mc).filter(e => !e.end && toMs(e.start) <= now).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (val === "BD" || val === "PM") {
     if (current) { if (open && open.type === val) return; if (open) await put({ ...open, end: nowLocal(), endBy: me.name });
@@ -452,7 +453,7 @@ async function submitH(ev) {
 }
 async function changeH(ev) {
   const t = ev.target;
-  if (t.dataset.cell !== undefined) { const [mc, h] = t.dataset.cell.split("|"); await setCell($("fDay").dataset.date, mc, +h, t.value); render(); return; }
+  if (t.dataset.cell !== undefined) { const [mc, h] = t.dataset.cell.split("|"); await setCell($("fDay").dataset.date, mc, +h, t.value); render(); app.querySelector(`select[data-cell="${CSS.escape(t.dataset.cell)}"]`)?.focus({ preventScroll: true }); return; }
   if (t.dataset.reason !== undefined) { const f = $("fDay"), tr = t.closest("table.av"); await setReason(t.dataset.reason, f.dataset.date, tr.dataset.shift, t.value.trim()); toast("Saved"); return; }
   if (t.closest && t.closest("#fDay") && t.closest("tr[data-item]")) { const f = $("fDay"), d = f.dataset.date, tr = t.closest("tr[data-item]"), it = tr.dataset.item, id = chkKey(d, it);
     const c = recs.find(r => r.id === id) || { id, kind: "chk", ym: d.slice(0, 7), date: d, item: it }; await put({ ...c, [t.dataset.c]: t.value.trim() }, `${it} (${t.dataset.c}): ${t.value.trim() || "cleared"}`);
@@ -491,7 +492,7 @@ async function syncNow(manual) {
     recs = await all(); sync.last = Date.now(); await metaSet("syncLast", sync.last); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "This sign-in can't save Control Room data. Ask Muneer to add it." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
-  sync.busy = false; if (me && !sheetDirty && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
+  sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
 }
 function syncCard() {
   if (!fbUser) return `<section class="card"><h2>Send to the TKR app</h2><p class="muted" style="margin-top:0">Sign in once on this PC with the control room app account (needs signal once). After that, everything goes to the TKR app by itself whenever there is signal, so managers see it live. Without signal it waits on this PC.</p>
