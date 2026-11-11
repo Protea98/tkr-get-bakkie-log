@@ -75,9 +75,12 @@ onAuthStateChanged(auth, u => {
   if (!u || u.isAnonymous || email.endsWith("@staff.tkroperations.app")) { showGate(); return; }
   subs.push(onSnapshot(doc(db, "config", "roles"), s => { managers = ((s.exists() && s.data().managers) || []).map(x => String(x).toLowerCase()); gateOrApp(); }, () => gateOrApp()));
 });
-function showGate(msg = "", html = false) { $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; $("who").textContent = ""; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("signForm").querySelectorAll("label, button, p.muted").forEach(el => el.hidden = html); }
+function showGate(msg = "", html = false) { $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; $("who").textContent = ""; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("signForm").querySelectorAll(":scope > label, :scope > button, :scope > p.muted").forEach(el => el.hidden = html); }
 function gateOrApp() {
-  if (!isManager()) { showGate(`<span style="color:var(--fg);font-weight:500">Sorry ${esc(showName(email))}, you don't have access here. Please ask admin.</span>`, true); return; }
+  if (!isManager()) { showGate(`<span style="color:var(--fg);font-weight:500;display:block">Sorry ${esc(showName(email))}, you don't have access to the GET Forecast with this account. Please ask admin.</span>
+    <span style="display:flex;flex-direction:column;gap:10px;margin-top:14px"><button type="button" class="primary" id="naSwitch">Sign in with a different account</button><button type="button" id="naHome">Back to the home page</button></span>`, true);
+    $("naSwitch").onclick = async () => { await signOut(auth); showGate(""); $("sEmail").value = ""; $("sPass").value = ""; $("sEmail").focus(); };
+    $("naHome").onclick = () => { location.href = "../"; }; return; }
   $("gate").hidden = true; app.hidden = false; $("signBtn").hidden = false; $("who").textContent = showName(email) + (isAdmin() ? " · admin" : " · manager");
   if (subs.length === 1) {
     const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => netNote("Couldn't load. Check the signal.")));
