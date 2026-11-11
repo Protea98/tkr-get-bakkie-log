@@ -7,6 +7,7 @@ import {
 } from "../lib/firebase.js";
 import { withOct2026 } from "../lib/oct2026.js";
 import { makeDrill } from "./drill.js";
+import { metresChart, metresChartClick } from "../lib/metres-chart.js";
 const showName = e => /@mgr\.tkroperations\.app$/.test(e || "") ? (e[0].toUpperCase() + e.slice(1, e.indexOf("@"))) : e;
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };  // managers can sign in with a username
 
@@ -234,6 +235,7 @@ function dash(c) {
       ${RIGS.map(r => tile(r, M1(c.monthRig[r]) + " m", `this week ${M1(c.weekRig[r])} m · ${M1(c.avg[r] || 0)} m/day avg`)).join("")}
       ${Math.abs(c.monthNA) >= 0.05 ? tile("Not allocated to a rig", M1(c.monthNA) + " m", "site total not split by rig") : ""}
     </div></section>
+  ${metresChart(metres, [...RIGS, ...[...new Set(metres.filter(x => num(x.metres)).map(x => x.rig))].filter(r => r && !RIGS.includes(r)).sort()])}
   <div class="tiles">
     ${tile("Metres " + fmt(c.upToCal), M1(c.day.metres) + " m", "")}
     ${tile("Metres this week to date", M1(w.metres.toDate) + " m", "last week " + M1(w.metres.last) + " m")}
@@ -258,7 +260,6 @@ function dash(c) {
     <p class="muted" style="margin:8px 0 0">Total order both weeks: <b>${R(orderNowCost + nextCost)}</b></p></section>
   </div>
   <div class="grid2c">
-    <section class="card chart"><h2>Metres per day – last 14 days</h2>${metresChart(c)}</section>
     <section class="card"><h2>Forecast basis</h2><div class="tbl"><table>
       <tr><th>Rig</th><th class="num">Average m/day</th></tr>
       ${Object.entries(c.avg).map(([r, v]) => `<tr><td>${r}</td><td class="num">${M1(v)}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No metres yet</td></tr>`}
@@ -266,22 +267,6 @@ function dash(c) {
       <p class="muted">Average over ${settings.avgDays} days (${fmt(c.avgFrom)} to ${fmt(c.upTo)}). Life used this month: ${ITEMS.map(([k, n]) => `${n.toLowerCase()} ${Math.round(c.lifeUsed[k])} m`).join(", ")}. Next week bits: ${settings.nextBits !== "" && settings.nextBits != null ? settings.nextBits + " (set in Settings)" : "from the forecast"}.</p>
     </section>
   </div>`;
-}
-function metresChart(c) {
-  const days = []; for (let i = 13; i >= 0; i--) days.push(addDays(c.upToCal, -i));
-  const col = { "TDR 013": "#d4a12a", "TDR 015": "#2e7d4f", "TDR 014": "#2f6fb8" };
-  const data = days.map(d => RIGS.map(r => metres.filter(x => x.date === d && x.rig === r).reduce((n, x) => n + num(x.metres), 0)));
-  const max = Math.max(50, ...data.map(v => v.reduce((a, b) => a + b, 0)));
-  const W = 560, H = 190, bot = 30, top = 14, bw = 28, gap = (W - bw * 14) / 14, sc = v => v / max * (H - top - bot);
-  let g = `<line x1="0" x2="${W}" y1="${H - bot}" y2="${H - bot}" stroke="var(--line)"/>`;
-  data.forEach((v, i) => {
-    const x = gap / 2 + i * (bw + gap); let y = H - bot;
-    v.forEach((m, j) => { if (!m) return; const h = sc(m); y -= h; g += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${col[RIGS[j]]}"><title>${RIGS[j]} ${M1(m)} m</title></rect>`; });
-    const tot = v.reduce((a, b) => a + b, 0);
-    g += `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle">${tot ? Math.round(tot) : ""}</text><text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle">${parse(days[i]).getDate()}</text>`;
-    if (days[i] === c.weekStart) g += `<line x1="${x - gap / 2}" x2="${x - gap / 2}" y1="${top}" y2="${H - bot}" stroke="var(--gold)" stroke-dasharray="3 3"/>`;
-  });
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Metres per day per rig">${g}</svg><div class="legend">${RIGS.map(r => `<span><i style="background:${col[r]}"></i>${r}</span>`).join("")}<span>dashed line = start of this week</span></div>`;
 }
 function lastUpdate() {
   const sk = x => (x.date || "") + (x.shift === "Night" ? "2" : "1");
@@ -407,6 +392,7 @@ function importView() {
 /* ---------- events ---------- */
 app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
+  if (metresChartClick(b)) { render(); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; render(); return; }
   if (await drill.onClick(e)) return;
   if (b.dataset.del) { const [c, id] = b.dataset.del.split("|"); if (confirm("Delete this line?")) deleteDoc(doc(db, c, id)).catch(fail); return; }

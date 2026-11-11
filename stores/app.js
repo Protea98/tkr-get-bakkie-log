@@ -747,7 +747,7 @@ function startApp() {
   live("stMoves", v => moves = v); live("stCounts", v => counts = v); live("stReports", v => reports = v);
   if (boss && isAdmin()) setTimeout(async () => { await seedOctoberGet(); await seedReports(); try { await seedSetList(); } catch (e) { console.warn(e); } try { await seedRompadLog(); } catch (e) { console.warn(e); } try { await seedRompadReceipts(); } catch (e) { console.warn(e); } }, 1500);
   subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { itemsSaved = s.exists(); items = itemsSaved ? (s.data().list || []) : DEFAULT_ITEMS.slice(); render(); }, () => {}));
-  subs.push(onSnapshot(doc(db, "stConfig", "status"), s => { status = s.exists() ? (s.data().machines || {}) : {}; render(); }, () => {}));
+  subs.push(onSnapshot(doc(db, "stConfig", "status"), s => { status = s.exists() ? (s.data().machines || {}) : {}; takeRemoteDrafts(s.exists() ? s.data().countDrafts : {}); render(); }, () => {}));
   subs.push(onSnapshot(doc(db, "stConfig", "settings"), s => { if (s.exists()) settings = Object.assign({ supervisor: "" }, s.data()); render(); }, () => {}));
   if (boss) subs.push(onSnapshot(collection(db, "fcMetres"), s => { fcMetres = withOct2026(s.docs.map(d => d.data())); render(); }, () => {}));
   if (isBoss()) subs.push(onSnapshot(collection(db, "stUsers"), s => { staff = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)); render(); }, () => {}));
@@ -1049,12 +1049,24 @@ function newDraft(st) {
   const h = new Date().getHours();
   return { store: st, date: today(), shift: h >= 6 && h < 18 ? "Day" : "Night", type: "Closing", supervisor: settings.supervisor || "", reorder: "", notes: "", lines };
 }
+/* The stock count is shared live: what one controller types shows on every phone (kept in stConfig/status → countDrafts). */
+let remoteDrafts = {}, scPushT = 0;
 function loadDraft() {
   if (sc && sc.store === store) return;
-  try { const d = JSON.parse(lsGet(draftKey(store)) || "null"); sc = d && d.store === store ? d : newDraft(store); } catch { sc = newDraft(store); }
+  let d = null; try { d = JSON.parse(lsGet(draftKey(store)) || "null"); } catch {}
+  const r = remoteDrafts[store]; if (r && r.store === store && (r.at || 0) > (d?.at || 0)) d = JSON.parse(JSON.stringify(r));
+  sc = d && d.store === store ? d : newDraft(store);
   scPhotos = [];
 }
-const saveDraft = () => { if (sc) lsSet(draftKey(sc.store), JSON.stringify(sc)); };
+function pushDraft() {
+  if (!sc || !db || !user) return; const d = JSON.parse(JSON.stringify(sc));
+  setDoc(doc(db, "stConfig", "status"), { countDrafts: { [sc.store]: d } }, { merge: true }).catch(e => console.warn("count not shared", e));
+}
+const saveDraft = () => { if (!sc) return; sc.at = Date.now(); sc.byName = showName(myName()); lsSet(draftKey(sc.store), JSON.stringify(sc)); clearTimeout(scPushT); scPushT = setTimeout(pushDraft, 600); };
+function takeRemoteDrafts(D) {
+  remoteDrafts = D || {}; const r = remoteDrafts[sc?.store];
+  if (sc && r && (r.at || 0) > (sc.at || 0)) { sc = JSON.parse(JSON.stringify(r)); lsSet(draftKey(sc.store), JSON.stringify(sc)); }
+}
 function countView() {
   loadDraft();
   const forOpts = [...FOR_OPTS[store], ...STORES[store].machines];
@@ -1083,6 +1095,7 @@ function countView() {
       <label>Supervisor <input data-scf="supervisor" value="${esc(sc.supervisor)}"></label>
     </div>
     <p class="muted" style="margin:10px 0 0">Store controller: <b>${esc(showName(myName()))}</b></p>
+    <p class="muted" style="margin:6px 0 0">Shared live: everyone with the app sees this same count on their phone as it is typed.${sc.at && sc.byName ? ` Last change ${new Date(sc.at).toTimeString().slice(0, 5)} by <b>${esc(sc.byName)}</b>.` : ""}</p>
   </section>
   ${SECTIONS.map(([k, t]) => { const l = sec(k); return `<section class="card"><h2>${esc(t)}</h2>${l.length ? l.map(lineRow).join("") : '<div class="muted">No items here yet. Add one below.</div>'}</section>`; }).join("")}
   <section class="card">

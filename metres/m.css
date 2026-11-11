@@ -49,21 +49,3 @@ body.embed .band{display:none}
 body.embed .wrap{padding-top:4px}
 body.embed .tkr-back{display:none}
 
-/* metres chart */
-.chartc .chead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px}
-.chartc h2{margin:0}
-.tfs{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.tfs button{border:0;border-radius:0;background:transparent;color:var(--muted);min-height:40px;padding:6px 12px;font-weight:700;font-family:var(--mono);display:flex;flex-direction:column;align-items:center;line-height:1.1}
-.tfs button span{font-family:var(--body);font-weight:500;font-size:10.5px}
-.tfs button+button{border-left:1px solid var(--line)}
-.tfs button[aria-pressed="true"]{background:#2a2a1c;color:var(--gold)}
-.tfs button:disabled{opacity:.35}
-.cstats{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--muted);margin-bottom:6px}
-.cstats b{color:var(--fg);font-family:var(--mono)}
-.chartc svg{display:block;width:100%;height:auto;background:#121715;border-radius:10px}
-.chartc svg text{font-family:var(--mono);font-size:12px;fill:var(--muted)}
-.chartc svg rect.hov:hover{fill:rgba(239,199,94,.08)}
-.chartc .legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.ser{min-height:36px;padding:4px 12px;font-size:13.5px;display:inline-flex;align-items:center;gap:6px;border-radius:99px}
-.ser i{width:12px;height:12px;border-radius:50%;display:inline-block}
-.ser[aria-pressed="false"]{opacity:.45;text-decoration:line-through}

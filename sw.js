@@ -1,7 +1,7 @@
 // Opens the app straight from the phone (fast, works with no signal) and fetches any update in the
 // background; the update shows the next time the app is opened. Bump VERSION when the app files change.
 // Firebase traffic (other websites) is never touched here; Firebase keeps its own offline copy.
-const VERSION = "v112";
+const VERSION = "v113";
 const FILES = ["./", "index.html", "style.css", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-192.png", "icons/maskable-512.png", "icons/logo-96.png",
   "lib/xlsx.full.min.js", "lib/jszip.min.js", "lib/firebase.js", "lib/exceljs.min.js", "lib/deliver.js", "lib/oct2026.js", "lib/jspdf.umd.min.js", "lib/jspdf.plugin.autotable.min.js", "lib/nav.js", "lib/ui.js", "lib/fleet.css",
@@ -11,7 +11,7 @@ const FILES = ["./", "index.html", "style.css", "manifest.webmanifest",
   "attendance/", "attendance/index.html", "attendance/att.css", "attendance/app.js",
   "stores/", "stores/index.html", "stores/st.css", "stores/app.js",
   "hr/", "hr/index.html", "hr/hr.css", "hr/app.js",
-  "metres/", "metres/index.html", "metres/m.css", "metres/app.js", "lib/metres-xlsx.js",
+  "metres/", "metres/index.html", "metres/m.css", "metres/app.js", "lib/metres-xlsx.js", "lib/metres-chart.js",
   "control/", "control/index.html", "control/cc.css", "control/app.js"];
 
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES.map(f => new Request(f, { cache: "reload" }))))); self.skipWaiting(); });

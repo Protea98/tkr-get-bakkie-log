@@ -112,3 +112,11 @@ table.xl td.hc select{width:54px;height:30px;font-weight:700;text-align:center}
 table.xl select.ty.OP{background:#e2f0d9!important;color:#375623}
 table.xl td.tm{font-weight:700;white-space:nowrap}
 table.xl td.tm span{cursor:pointer;text-decoration:underline dotted}
+
+/* locked: filled on an earlier shift (grey, tap to ask the admin) */
+table.xl td.lk{background:#ececec!important;color:#8a8a8a;cursor:pointer}
+table.xl td.hc.lk .lkv,table.xl td.lk .lkv{display:inline-block;min-width:46px;line-height:28px;font-weight:700;border-radius:3px;background:#dedede;color:#6f6f6f}
+table.xl td.tm span.lk{color:#8a8a8a}
+table.xl input.lk,input.lk{background:#ececec!important;color:#8a8a8a!important;cursor:pointer}
+.tick.lk{filter:grayscale(1);opacity:.55}
+#who{display:flex;align-items:center;gap:4px;justify-content:flex-end;flex-wrap:wrap}

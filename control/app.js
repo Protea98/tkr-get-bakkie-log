@@ -28,7 +28,7 @@ function toast(m) { const t = $("toast"); t.textContent = m; t.hidden = false; c
 
 /* ---------- what the control room tracks (from the November control room workbook) ---------- */
 const TYPES = { BD: "Breakdown", SB: "Standby", PM: "Planned maintenance", NU: "Not in use" };
-const DEFAULT_FLEET = [["Drill rigs", ["TDR013", "TDR014", "TDR015", "TDR016", "TDR017", "TDR018", "TDR019"]], ["Rockbreakers", ["TKRH011", "TKRH012", "TKRH015", "TKRH017", "TKRH019", "TKRH020"]],
+const DEFAULT_FLEET = [["Drill rigs", ["TDR013", "TDR014", "TDR015"]], ["Rockbreakers", ["TKRH011", "TKRH012", "TKRH015", "TKRH017", "TKRH019", "TKRH020"]],
   ["Buses", ["TKR020", "TKR021", "TKR023", "TKR024", "TKR025", "TKR026"]], ["Lowbed", ["TKR06"]], ["Bakkies", ["LDV011", "LDV012"]]];
 const CHECK = [["Collect data", ["PTO", "Inspection reports", "SOP", "T Connect attendance", "Risk assessment", "Capture", "Pit licence expiring"]], ["Documents", ["Job cards", "Checklists", "Fleet reports", "Trip summary"]],
   ["Systems", ["Cartrack", "On / Off", "Planned maintenance"]], ["Cartrack", ["Predictive failures", "Mechanical inspections", "Operator behaviour", "Fuel consumption management system", "Geofences"]]];
@@ -55,8 +55,27 @@ const metaSet = (k, v) => tx("readwrite", t => t.objectStore("meta").put({ k, v 
 /* Every record: { id, kind, ym, editedAt, by, deleted?, ... } — kinds: user, ev, chk, day, log, inv, add, fleet */
 let recs = [], me = null, tab = "now", date = today(), month = today().slice(0, 7), pinFor = null, addingMe = false;
 const R = k => recs.filter(r => r.kind === k && !r.deleted);
+/* Locking: every filled box remembers the shift (session) that filled it. Once that controller logs out,
+   the box is grey and locked for everyone else; empty boxes stay open. Locked boxes change only with admin approval. */
+const CTRL_ADMIN = ["muneer@tkroperations.com"];
+const TRACK = new Set(["hr", "ev", "chk", "inv", "add"]);
+const META_K = new Set(["id", "kind", "ym", "editedAt", "by", "synced", "fs", "deleted", "date", "at", "group", "grid", "endBy", "sid", "item", "svc", "doc"]);
+const filled = v => v != null && v !== "";
+const fieldsOf = r => { const m = new Map(); for (const k in r) { if (META_K.has(k)) continue; if (k === "cells") { for (const h in r.cells || {}) m.set("h" + h, r.cells[h]); } else m.set(k, r[k]); } return m; };
+function stamp(rec, old) {
+  if (!TRACK.has(rec.kind) || !me) return rec;
+  const fs = { ...(old?.fs || {}) }, O = old ? fieldsOf(old) : new Map();
+  if (old && !old.fs) for (const [k, v] of O) if (filled(v)) fs[k] = "old";
+  for (const [k, v] of fieldsOf(rec)) if (JSON.stringify(v ?? "") !== JSON.stringify(O.get(k) ?? "")) fs[k] = me.sid;
+  return { ...rec, fs };
+}
+function lockedF(r, f) { if (!r || !me || me.admin) return false; const s = r.fs?.[f]; if (s) return s !== me.sid; return (r.editedAt || 0) < (me.start || 0); }
+const valOf = (r, f) => /^h\d+$/.test(f) && r?.cells ? r.cells[f.slice(1)] : r?.[f];
+const lockedV = (r, f) => !!r && filled(valOf(r, f)) && lockedF(r, f);
+const evLocked = e => ["machine", "type", "start"].some(f => lockedV(e, f));
 async function put(r, log) {
-  const rec = { ...r, editedAt: Date.now(), by: me?.name || r.by || "", synced: 0 };
+  const old = recs.find(x => x.id === r.id);
+  const rec = { ...stamp(r, old), editedAt: Date.now(), by: me?.name || r.by || "", synced: 0 };
   const L = log ? { id: "log_" + uid(), kind: "log", ym: (r.date || r.start || today()).slice(0, 7), date: (r.date || r.start || today()).slice(0, 10), at: Date.now(), by: me?.name || "", what: log, editedAt: Date.now(), synced: 0 } : null;
   await tx("readwrite", t => { t.objectStore("rec").put(rec); if (L) t.objectStore("rec").put(L); });
   const i = recs.findIndex(x => x.id === rec.id); if (i >= 0) recs[i] = rec; else recs.push(rec); if (L) recs.push(L);
@@ -82,31 +101,47 @@ async function pinHash(name, pin) {
   try { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join(""); }
   catch { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return "x" + h; }
 }
+const adminRec = () => R("admin").sort((a, b) => b.editedAt - a.editedAt)[0];
+let adminStep = "";
 function gateView() {
   const users = R("user").sort((a, b) => a.name.localeCompare(b.name));
-  if (addingMe || !users.length) return pageHead("Control Room", "Add yourself", "", "", "No wifi needed. Type your name and choose a 4-digit PIN you will remember.")
+  if (!adminStep && (addingMe || !users.length)) return pageHead("Control Room", "Add yourself", "", "", "No wifi needed. Type your name and choose a 4-digit PIN you will remember.")
     + `<form id="fAdd" class="card" style="max-width:460px" autocomplete="off"><label>Name and surname <input name="name" required autocapitalize="words"></label>
       <label style="margin-top:10px;display:block">Choose a 4-digit PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
       <label style="margin-top:10px;display:block">Type the PIN again <input name="pin2" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
       <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Add me</button>${users.length ? '<button type="button" class="ghost" id="cancelAdd">Back</button>' : ""}</div></form>`;
+  if (adminStep === "pin") { const a = adminRec();
+    return pageHead("Control Room", "Admin", "", "", "Type your admin PIN. No signal needed.")
+      + `<form id="fAdmPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="password" required>
+        <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p>
+        <p class="muted" style="margin-bottom:0">Forgot it? <button type="button" class="sm ghost" id="admReset">Sign in with your TKR email again</button></p></form>`; }
+  if (adminStep === "email") return pageHead("Control Room", "Admin sign-in", "", "", "Once only on this PC, with signal: sign in with your TKR admin email and password, then choose a 4-digit admin PIN. After that the PIN works with no signal.")
+    + `<form id="fAdm" class="card" style="max-width:460px" autocomplete="off"><label>TKR email <input name="e" type="email" autocapitalize="none" required></label>
+      <label style="margin-top:10px;display:block">Password <input name="p" type="password" required></label>
+      <label style="margin-top:10px;display:block">Choose a 4-digit admin PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
+      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Sign in</button><button type="button" class="ghost" id="cancelAdm">Back</button></div></form>`;
   if (pinFor) { const u = users.find(x => x.id === pinFor);
     return pageHead("Control Room", `Hello ${esc(u?.name || "")}`, "", "", "Type your PIN.")
       + `<form id="fPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="password" autofocus required>
         <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Start</button><button type="button" class="ghost" id="cancelPin">Not me</button></div><p class="flag" id="pinErr"></p></form>`; }
   return pageHead("Control Room", "Who is on shift?", "", `<button class="primary" id="addMe">+ Add yourself</button>`, "Tap your name. New controller? Tap Add yourself.")
-    + `<div class="who-pick">${users.map(u => `<button data-who="${u.id}"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></button>`).join("")}</div>`;
+    + `<div class="who-pick">${users.map(u => `<button data-who="${u.id}"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></button>`).join("")}</div>`
+    + `<p style="margin-top:22px"><button class="ghost sm" id="adminIn">Admin</button></p>`;
 }
 
 /* ---------- views ---------- */
 const TABS = [["now", "Live board and workbook", "deploy"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
+const pendingReqs = () => R("req").filter(q => q.status === "pending").length;
+const tabs = () => { const n = pendingReqs(); return [TABS[0], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(1)]; };
 function render() {
-  $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" id="swap" style="min-height:32px;padding:2px 10px">Change controller</button>` : "";
+  $("who").innerHTML = me ? `${esc(me.name)} <button class="sm danger" data-logout style="min-height:36px;padding:2px 12px;margin-left:6px">Log out</button>` : "";
   if (!me) { app.innerHTML = gateView(); return; }
   let body = "";
   if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView();
+  if (tab === "req") body = reqView();
   if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
   const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft;
-  app.innerHTML = tabBar(TABS, tab) + body; afterRender(app);
+  app.innerHTML = tabBar(tabs(), tab) + body; afterRender(app);
   const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; }
 }
 const dateBar = () => `<div class="dnav"><button data-dnav="-1" aria-label="Day before">‹</button><input type="date" id="dPick" value="${date}" max="${today()}"><button data-dnav="1" aria-label="Next day" ${date >= today() ? "disabled" : ""}>›</button>${date !== today() ? '<button data-today class="sm">Today</button>' : ""}</div>`;
@@ -115,7 +150,8 @@ function statusBar() {
   const dueAt = last ? last.at + 36e5 : 0, due = !last || Date.now() > dueAt, w = waiting();
   return `<div class="statusbar"><span>Last update <b>${last ? `${new Date(last.at).toTimeString().slice(0, 5)}</b> by ${esc(last.by)}` : "–</b> today"}</span>
     <span>${last ? `Next update by <b>${new Date(dueAt).toTimeString().slice(0, 5)}</b> ` : ""}<span class="${due ? "due" : "ok"}">${due ? "Update due" : "Up to date"}</span></span>
-    <span>${w ? `${w} change${w === 1 ? "" : "s"} waiting for signal` : (sync.last ? `Sent to the TKR app ${new Date(sync.last).toTimeString().slice(0, 5)}` : "Saved on this PC")}</span></div>`;
+    <span>${w ? `${w} change${w === 1 ? "" : "s"} waiting for signal` : (sync.last ? `Sent to the TKR app ${new Date(sync.last).toTimeString().slice(0, 5)}` : "Saved on this PC")}</span>
+    <button class="danger" data-logout style="margin-left:auto;min-height:44px">Log out · end shift</button></div>`;
 }
 function nowView() {
   const F = fleet(), open = evs().filter(e => !e.end).sort((a, b) => toMs(a.start) - toMs(b.start));
@@ -126,7 +162,8 @@ function nowView() {
     + `<div class="tiles">${[["BD", "Breakdowns now"], ["SB", "On standby now"], ["PM", "In maintenance now"], ["NU", "Not in use now"]].map(([k, l]) => { const n = F.flatMap(([, L]) => L).filter(m => statusNow(m)?.type === k).length; return `<div class="tile ${k === "BD" && n ? "alert" : ""}"><div class="l">${l}</div><div class="n">${n}</div></div>`; }).join("")}
       <div class="tile good"><div class="l">Working now</div><div class="n">${F.flatMap(([, L]) => L).filter(m => !statusNow(m)).length}</div><div class="s">of ${F.flatMap(([, L]) => L).length} machines</div></div></div>`
     + `<div class="fleet">${F.map(([g, L]) => `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => !statusNow(m)).length}/${L.length} working</span></h3><div class="mlist">${L.map(m => { const s = statusNow(m);
-        return `<button class="mach ${s ? s.type : ""}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : "Working"}</small></button>`; }).join("")}</div></section>`).join("")}</div>`
+        return `<button class="mach ${s ? s.type : ""}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : "Working"}</small></button>`; }).join("")}</div>
+        <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`).join("")}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Every machine is working.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "Today's breakdowns and standby", `<div class="res">${todays.map(evLine).join("") || '<p class="muted">Nothing logged today.</p>'}</div>`, { icon: icon("bd"), count: todays.length, sub: "every event with its exact times" })}
       ${sheet("checks", "Data and documents checklist", checklist(today()), { icon: icon("docs"), sub: `${chkDone(today())} of ${CHECK.flatMap(([, i]) => i).length * COLS.length} ticked today` })}
@@ -142,8 +179,8 @@ const chkDone = d => R("chk").filter(c => c.date === d).reduce((n, c) => n + COL
 function checklist(d) {
   const get = item => recs.find(r => r.id === chkKey(d, item)) || {};
   return `<p class="muted" style="margin-top:0">Tap a box: empty → ✓ received → ✗ not received → empty. The time and your name are saved with it.</p><div class="tbl card" style="padding:0"><table class="chk"><thead><tr><th>Section</th><th>Item</th>${COLS.map(c => `<th>${c}</th>`).join("")}<th>Updated</th><th>Comment</th></tr></thead><tbody>
-    ${CHECK.flatMap(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr><td>${i ? "" : `<b>${esc(sec)}</b>`}</td><td>${esc(it)}</td>${COLS.map(k => `<td><button class="tick ${c[k] === "✓" ? "y" : c[k] === "✗" ? "n" : ""}" data-chk="${esc(d)}|${esc(it)}|${k}">${c[k] || " "}</button></td>`).join("")}
-      <td class="muted" style="white-space:nowrap">${c.editedAt ? `${new Date(c.editedAt).toTimeString().slice(0, 5)} ${esc(c.by)}` : ""}</td><td><input data-chkc="${esc(d)}|${esc(it)}" value="${esc(c.comment || "")}" placeholder="…" style="min-width:160px"></td></tr>`; })).join("")}</tbody></table></div>`;
+    ${CHECK.flatMap(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr><td>${i ? "" : `<b>${esc(sec)}</b>`}</td><td>${esc(it)}</td>${COLS.map(k => `<td><button class="tick ${c[k] === "✓" ? "y" : c[k] === "✗" ? "n" : ""}${lockedV(c, k) ? ` lk" data-lockf="${esc(c.id)}|${k}` : `" data-chk="${esc(d)}|${esc(it)}|${k}`}">${c[k] || " "}</button></td>`).join("")}
+      <td class="muted" style="white-space:nowrap">${c.editedAt ? `${new Date(c.editedAt).toTimeString().slice(0, 5)} ${esc(c.by)}` : ""}</td><td>${lockedV(c, "comment") ? `<input class="lk" readonly data-lockf="${esc(c.id)}|comment" value="${esc(c.comment)}" style="min-width:160px">` : `<input data-chkc="${esc(d)}|${esc(it)}" value="${esc(c.comment || "")}" placeholder="…" style="min-width:160px">`}</td></tr>`; })).join("")}</tbody></table></div>`;
 }
 function availView() {
   const F = fleet(), d = date, rowsFor = L => L.map(m => [m, daySum(m, d)]);
@@ -171,9 +208,9 @@ function invView() {
   const m = month, mb = `<div class="mbar"><button data-mnav="-1">‹</button><b>${monthName(m)}</b><button data-mnav="1" ${m >= today().slice(0, 7) ? "disabled" : ""}>›</button></div>`;
   const rec = id => recs.find(r => r.id === id) || {};
   const sup = SUPPORT.map(([svc, docs, person]) => { const D = docs.map(dc => ({ dc, r: rec(invKey(m, svc, dc)) })), ready = D.every(x => x.r.done === "✓");
-    return `<tr class="${ready ? "" : ""}"><td><b>${esc(svc)}</b><br><small class="muted">${esc(rec(invKey(m, svc, "_person")).person || person)}</small></td><td>${D.map(x => `<div class="row" style="gap:8px;margin:3px 0"><button class="tick ${x.r.done === "✓" ? "y" : x.r.done === "✗" ? "n" : ""}" data-inv="${esc(svc)}|${esc(x.dc)}">${x.r.done || " "}</button>${esc(x.dc)}</div>`).join("")}</td><td>${ready ? '<span class="tag OP">READY</span>' : ""}</td></tr>`; }).join("");
+    return `<tr class="${ready ? "" : ""}"><td><b>${esc(svc)}</b><br><small class="muted">${esc(rec(invKey(m, svc, "_person")).person || person)}</small></td><td>${D.map(x => `<div class="row" style="gap:8px;margin:3px 0"><button class="tick ${x.r.done === "✓" ? "y" : x.r.done === "✗" ? "n" : ""}${lockedV(x.r, "done") ? ` lk" data-lockf="${esc(x.r.id)}|done` : `" data-inv="${esc(svc)}|${esc(x.dc)}`}">${x.r.done || " "}</button>${esc(x.dc)}</div>`).join("")}</td><td>${ready ? '<span class="tag OP">READY</span>' : ""}</td></tr>`; }).join("");
   const add = ADDITIONAL.map(([it, person, note]) => { const r = rec(addKey(m, it));
-    return `<tr><td>${esc(it)}${note ? `<br><small class="muted">${esc(note)}</small>` : ""}</td><td><button class="tick ${r.done === "✓" ? "y" : r.done === "✗" ? "n" : ""}" data-add="${esc(it)}">${r.done || " "}</button></td><td>${esc(r.person || person)}</td><td><input data-addc="${esc(it)}|collector" value="${esc(r.collector || "")}" placeholder="name"></td><td><input data-addc="${esc(it)}|notes" value="${esc(r.notes || "")}" placeholder="…"></td></tr>`; }).join("");
+    return `<tr><td>${esc(it)}${note ? `<br><small class="muted">${esc(note)}</small>` : ""}</td><td><button class="tick ${r.done === "✓" ? "y" : r.done === "✗" ? "n" : ""}${lockedV(r, "done") ? ` lk" data-lockf="${esc(r.id)}|done` : `" data-add="${esc(it)}`}">${r.done || " "}</button></td><td>${esc(r.person || person)}</td>${["collector", "notes"].map(k => `<td>${lockedV(r, k) ? `<input class="lk" readonly data-lockf="${esc(r.id)}|${k}" value="${esc(r[k])}">` : `<input data-addc="${esc(it)}|${k}" value="${esc(r[k] || "")}" placeholder="${k === "collector" ? "name" : "…"}">`}</td>`).join("")}</tr>`; }).join("");
   const nDone = ADDITIONAL.filter(([it]) => rec(addKey(m, it)).done === "✓").length;
   return pageHead("Invoicing", "Supporting documents", monthName(m), "", "Tick each document when it is received. A service shows READY when all its documents are in.") + `<div class="mhead">${mb}</div>`
     + `<div class="tiles">${(() => { const r = SUPPORT.filter(([svc, docs]) => docs.every(dc => rec(invKey(m, svc, dc)).done === "✓")).length; return `<div class="tile ${r === SUPPORT.length ? "good" : ""}"><div class="l">Services ready to invoice</div><div class="n">${r} of ${SUPPORT.length}</div></div><div class="tile ${nDone === ADDITIONAL.length ? "good" : ""}"><div class="l">Additional documents</div><div class="n">${nDone} of ${ADDITIONAL.length}</div></div>`; })()}</div>`
@@ -189,10 +226,10 @@ function exportView() {
 }
 function settingsView() {
   const F = fleet(), users = R("user");
-  return pageHead("Settings", "Machines and controllers", "", "", "Changes here go to every control room device with the next sync.")
+  return pageHead("Settings", "Machines and controllers", "", "", "Changes here go to every control room device with the next sync. You can also add or remove a machine on the live board.")
     + `<section class="card"><h2>Machines</h2>${F.map(([g, L], gi) => `<div style="margin-bottom:12px"><b>${esc(g)}</b><div class="row" style="margin-top:6px">${L.map(m => `<span class="tag" style="font-size:13px;padding:4px 10px">${esc(m)} <button class="sm ghost" data-rmm="${gi}|${esc(m)}" style="min-height:28px;padding:0 6px">×</button></span>`).join("")}</div>
       <div class="row" style="margin-top:6px"><input data-newm="${gi}" placeholder="Add a machine to ${esc(g)}" style="max-width:260px"><button class="sm" data-addm="${gi}">+ Add</button></div></div>`).join("")}</section>
-    <section class="card"><h2>Controllers on this PC</h2><div class="res">${users.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div>${u.id === me.id ? `<button class="sm danger" data-rmu="${u.id}">Remove me</button>` : ""}</div>`).join("")}</div></section>`;
+    <section class="card"><h2>Controllers on this PC</h2><div class="res">${users.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div>${u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}</div>`).join("")}</div></section>`;
 }
 
 
@@ -257,19 +294,21 @@ function shiftTable(d, sh) {
   const tot = () => ({ avail: 0, BD: 0, PM: 0, down: 0 }), shT = tot(); let body = "";
   const opt = v => ["", "OP", "BD", "PM"].map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("");
   for (const [g, L] of fleet()) { const gt = tot(), opCount = H.map(() => 0);
-    L.forEach((mc, i) => { const C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
+    L.forEach((mc, i) => { const hr = recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted), C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
       const reason = [...new Set(E.map(e => e.reason).filter(Boolean))].join("; ");
-      const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++; return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}">${opt(v)}</select></td>`; }).join("");
+      const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
+        if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv">${v}</span></td>`;
+        return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}">${opt(v)}</select></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><b>${esc(mc)}</b></td>${cells}
-        <td class="tm">${E.map(e => `<span data-edit="${e.id}" title="Tap to correct">${tm(e)}</span>`).join("<br>")}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
-        <td><input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" ${E.length ? "" : "disabled"}></td><td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
+        <td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>")}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
+        <td>${(() => { const lr = E.find(e => lockedV(e, "reason")); return lr ? `<input readonly class="rsn lk" data-edit="${lr.id}" value="${esc(reason)}">` : `<input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" ${E.length ? "" : "disabled"}>`; })()}</td><td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
       for (const k of ["avail", "BD", "PM", "down"]) gt[k] += s[k]; });
     body += `<tr class="gt"><td colspan="2">${esc(g)} total</td>${opCount.map(n => `<td>${n}/${L.length}</td>`).join("")}<td></td><td></td><td></td><td>${n2(gt.avail)}</td><td>${n2(gt.BD)}</td><td>${n2(gt.PM)}</td><td>${n2(gt.down)}</td></tr>`;
     for (const k of ["avail", "BD", "PM", "down"]) shT[k] += gt[k]; }
   body += `<tr class="ft"><td colspan="${H.length + 5}">${sh} shift total</td><td>${n2(shT.avail)}</td><td>${n2(shT.BD)}</td><td>${n2(shT.PM)}</td><td>${n2(shT.down)}</td></tr>`;
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
-  return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operational / standby · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again</div>
+  return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operational / standby · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
     <div class="savebar"><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
@@ -279,6 +318,10 @@ async function setCell(d, mc, h, val) {
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else delete cells[h];
   await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
   if (a > now) return;
+  if (!current) for (const e of downEvs(mc).filter(e => e.grid && e.type !== val && toMs(e.start) < b && evEnd(e) > a)) {   // an hour box changed: take that hour off the old grid time
+    const s0 = toMs(e.start), e0 = evEnd(e);
+    if (s0 >= a && e0 <= b) await put({ ...e, deleted: true }); else if (s0 >= a) await put({ ...e, start: isoOf(b) }); else if (e0 <= b) await put({ ...e, end: isoOf(a) });
+    else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
   const open = downEvs(mc).filter(e => !e.end && toMs(e.start) <= now).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (val === "BD" || val === "PM") {
     if (current) { if (open && open.type === val) return; if (open) await put({ ...open, end: nowLocal(), endBy: me.name });
@@ -287,7 +330,7 @@ async function setCell(d, mc, h, val) {
     const E = downEvs(mc).filter(e => e.type === val);
     if (E.some(e => toMs(e.start) < b && evEnd(e) > a)) return;                                   // that hour is already inside a logged time
     const before = E.find(e => e.end && toMs(e.end) === a), after = E.find(e => toMs(e.start) === b);
-    if (before) await put({ ...before, end: isoOf(b) }); else if (after) await put({ ...after, start: isoOf(a) });
+    if (before && !lockedV(before, "end")) await put({ ...before, end: isoOf(b) }); else if (after && !lockedV(after, "start")) await put({ ...after, start: isoOf(a) });
     else await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: isoOf(a), end: isoOf(b), reason: "", grid: 1 });
     toast(`${mc}: tap Down at or Back up to type the exact time.`); return;
   }
@@ -298,7 +341,7 @@ async function setCell(d, mc, h, val) {
 }
 async function setReason(mc, d, sh, reason) {
   const [a, b] = shiftWin(d, sh), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
-  for (const e of E) if ((e.reason || "") !== reason) await put({ ...e, reason }, `${mc}: ${reason}`);
+  for (const e of E) if ((e.reason || "") !== reason && !lockedV(e, "reason")) await put({ ...e, reason }, `${mc}: ${reason}`);
 }
 function shiftMessage(d, sh) {
   const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me.name;
@@ -336,7 +379,7 @@ function daySheet(d) {
       <label>Status <input value="${d !== today() ? "" : !last ? "Not started" : Date.now() - last.at > 36e5 ? "Update due" : "Up to date"}" readonly></label></div>
     <div class="xlband">Data and documents</div>
     <div class="xlwrap"><table class="xl"><thead><tr><th>Section</th><th>Item</th>${COLS.map(c => `<th>${c}</th>`).join("")}<th>Time updated</th><th>Updated by</th><th>Comments</th></tr></thead><tbody>
-      ${CHECK.map(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr data-item="${esc(it)}">${i ? "" : `<td rowspan="${items.length}" class="grpc">${esc(sec)}</td>`}<td class="lt">${esc(it)}</td>${COLS.map(k => `<td><select data-c="${k}" class="tk">${opt(c[k])}</select></td>`).join("")}<td>${c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : ""}</td><td>${esc(c.by || "")}</td><td><input data-c="comment" value="${esc(c.comment || "")}"></td></tr>`; }).join("")).join("")}
+      ${CHECK.map(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr data-item="${esc(it)}">${i ? "" : `<td rowspan="${items.length}" class="grpc">${esc(sec)}</td>`}<td class="lt">${esc(it)}</td>${COLS.map(k => lockedV(c, k) ? `<td class="lk" data-lockf="${esc(c.id)}|${k}"><span class="lkv">${c[k]}</span></td>` : `<td><select data-c="${k}" class="tk">${opt(c[k])}</select></td>`).join("")}<td>${c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : ""}</td><td>${esc(c.by || "")}</td><td>${lockedV(c, "comment") ? `<input class="lk" readonly data-lockf="${esc(c.id)}|comment" value="${esc(c.comment)}">` : `<input data-c="comment" value="${esc(c.comment || "")}">`}</td></tr>`; }).join("")).join("")}
       <tr class="gt"><td colspan="2">Captured</td>${COLS.map(k => `<td>${CHECK.flatMap(([, i]) => i).filter(it => get(it)[k] === "✓").length} of ${CHECK.flatMap(([, i]) => i).length}</td>`).join("")}<td colspan="3"></td></tr></tbody></table></div>
     ${shiftTable(d, "Day")}${shiftTable(d, "Night")}
     <div class="xlband">24-hour availability summary per machine</div>
@@ -368,8 +411,9 @@ function popupMsg(title, text) {
 function evForm(e = {}, machine = "") {
   const M = fleet().flatMap(([, L]) => L), isNew = !e.id, open = machine ? statusNow(machine) : null;
   if (isNew && open) { e = open; }                                 // the machine is already down: open that event to close or change it
-  const st = e.start || nowLocal(), en = e.end || "";
+  const st = e.start || nowLocal(), en = e.end || "", lk = !!e.id && !me.admin && ["machine", "type", "start", "end", "reason"].some(f => lockedV(e, f));
   return `<form id="fEv" class="card" autocomplete="off" style="max-width:640px;margin:0 auto">
+    ${lk ? `<div class="notice warn" style="margin-bottom:10px">Logged by <b>${esc(e.by)}</b> on an earlier shift, so it is locked.${e.end ? "" : " You can still log <b>Back up</b>."} Anything left empty you can fill in. A change to what was already filled in goes to the admin for approval.</div>` : ""}
     ${!isNew || open ? `<div class="info">${esc(e.machine)} is logged as <b>${TYPES[e.type]}</b> since ${fmt(st.slice(0, 10))} ${hhmm(st)}.${e.end ? "" : " Tap <b>Back up now</b> when it works again."}</div>` : ""}
     <input type="hidden" name="eid" value="${esc(e.id || "")}">
     <label>Machine <select name="machine" required>${M.map(m => `<option ${m === (e.machine || machine) ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></label>
@@ -377,8 +421,9 @@ function evForm(e = {}, machine = "") {
     <div class="grid" style="margin-top:12px"><label>Started (exact time) <input type="datetime-local" name="start" value="${st}" max="${nowLocal()}" required></label>
       <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}" max="${nowLocal()}"></label></div>
     <label style="display:block;margin-top:12px">Reason / what happened <input name="reason" value="${esc(e.reason || "")}" placeholder="e.g. hydraulic pipe burst"></label>
+    ${lk ? `<label style="display:block;margin-top:12px">Why must it change? (for the admin) <input name="why" placeholder="e.g. wrong time typed"></label>` : ""}
     <div class="formbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">${e.id && !e.end ? `<button type="button" class="primary" data-up="${e.id}" style="flex:1 1 200px;min-height:52px">Back up now (${new Date().toTimeString().slice(0, 5)})</button>` : ""}
-      <button class="${e.id && !e.end ? "" : "primary"}" style="flex:1 1 200px;min-height:52px">Save</button>${e.id ? `<button type="button" class="danger" data-delev="${e.id}">Delete</button>` : ""}</div></form>`;
+      <button class="${e.id && !e.end ? "" : "primary"}" style="flex:1 1 200px;min-height:52px">Save</button>${e.id ? `<button type="button" class="danger" data-delev="${e.id}">${lk && evLocked(e) ? "Ask admin to delete" : "Delete"}</button>` : ""}</div></form>`;
 }
 function openEv(html, title) {
   document.getElementById("evPanel")?.remove();
@@ -394,9 +439,75 @@ async function backUp(id) {
   closeEv(); render(); toast(`${e.machine} is back up at ${new Date().toTimeString().slice(0, 5)}. Saved.`);
 }
 
+/* ---------- sessions: log in, log out ---------- */
+let admApp = null;
+async function startSession(u) { const sid = "s_" + uid(), start = Date.now(); me = { ...u, sid, start }; await metaSet("me", { id: u.id, admin: !!u.admin, sid, start, until: start + (u.admin ? 12 : 14) * 36e5 }); }
+async function logout() {
+  if (!me) return;
+  if (!me.admin && !confirm(`Log out ${me.name} and end your shift?\n\nYour entries are saved and turn grey (locked). Hour boxes you left empty stay open for the next controller. To change a locked entry later, ask the admin.`)) return;
+  await put({ id: "log_" + uid(), kind: "log", ym: today().slice(0, 7), date: today(), at: Date.now(), what: `${me.name} logged out${me.admin ? "" : " – end of shift"}` });
+  me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
+  toast("Logged out. Everything is saved on this PC."); syncNow(false);
+}
+
+/* ---------- change requests: locked entries change only once the admin approves ---------- */
+const evTxt = e => `${e.machine} ${TYPES[e.type] || ""} ${e.start ? fmt(e.start.slice(0, 10)).slice(0, 5) + " " + hhmm(e.start) : ""}–${e.end ? hhmm(e.end) : "still going"}${e.reason ? " · " + e.reason : ""}`;
+const FLAB = { done: "done", comment: "comment", collector: "collector", notes: "notes" };
+function reqTarget(t) {
+  if (t.type === "cell") return { what: `${t.mc} · ${hLabel(t.h)} · ${dow(t.d)} ${fmt(t.d)}`, now: cellsOf(t.d, t.mc)[t.h] || "", opts: ["", "OP", "BD", "PM"] };
+  const r = recs.find(x => x.id === t.id) || {}, f = t.field;
+  const what = r.kind === "chk" ? `${r.item} · ${FLAB[f] || f} · ${fmt(r.date)}` : r.kind === "inv" ? `${r.svc} – ${r.doc} · ${monthName(r.ym)}` : `${r.item} · ${FLAB[f] || f} · ${monthName(r.ym || today().slice(0, 7))}`;
+  return { what, now: r[f] || "", opts: [...COLS, "done"].includes(f) ? ["", "✓", "✗"] : null };
+}
+function reqForm(t) {
+  const x = reqTarget(t), r = t.type === "cell" ? recs.find(q => q.id === `hr_${t.d}_${t.mc}`) : recs.find(q => q.id === t.id);
+  return `<form id="fReq" class="card" autocomplete="off" style="max-width:520px;margin:0 auto"><input type="hidden" name="t" value="${esc(JSON.stringify(t))}">
+    <div class="notice warn" style="margin-bottom:12px">Filled in by <b>${esc(r?.by || "an earlier controller")}</b> on an earlier shift, so it is locked. The admin approves or declines the change.</div>
+    <p style="margin-top:0"><b>${esc(x.what)}</b><br>Now: <b>${esc(x.now || "empty")}</b></p>
+    <label>Change to ${x.opts ? `<select name="to">${x.opts.map(o => `<option value="${o}" ${o === x.now ? "selected" : ""}>${o || "(empty)"}</option>`).join("")}</select>` : `<input name="to" value="${esc(x.now)}">`}</label>
+    <label style="display:block;margin-top:12px">Why must it change? <input name="why" required placeholder="e.g. picked the wrong hour"></label>
+    <button class="primary" style="width:100%;min-height:52px;margin-top:14px">Send to the admin</button></form>`;
+}
+async function addReq(o) {
+  await put({ id: "req_" + uid(), kind: "req", ym: today().slice(0, 7), date: today(), status: "pending", askedBy: me.name, askedAt: Date.now(), ...o }, `Asked the admin: ${o.what}: ${o.fromTxt} → ${o.toTxt}`);
+  closeEv(); render(); popupMsg("Sent to the admin", "The admin sees the request under Change requests. Once it is approved the change shows here by itself (when the PC has signal).");
+}
+async function decide(id, ok) {
+  const q = recs.find(r => r.id === id); if (!q || q.status !== "pending") return;
+  if (ok) { const t = q.target;
+    if (t.type === "cell") await setCell(t.d, t.mc, t.h, q.to);
+    else if (t.type === "ev") { const e = recs.find(r => r.id === t.id); if (e) await put(q.del ? { ...e, deleted: true } : { ...e, ...q.to, group: groupOf(q.to.machine) }, `Admin approved: ${q.what} → ${q.toTxt}`); }
+    else { const r = recs.find(x => x.id === t.id); if (r) await put({ ...r, [t.field]: q.to }, `Admin approved: ${q.what} → ${q.toTxt}`); } }
+  await put({ ...q, status: ok ? "approved" : "declined", decidedBy: me.name, decidedAt: Date.now() });
+  render(); toast(ok ? "Approved. The change is made." : "Declined.");
+}
+function reqView() {
+  const Q = R("req").sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.askedAt - a.askedAt), P = Q.filter(q => q.status === "pending");
+  const when = t => `${fmt(ymd(new Date(t))).slice(0, 5)} ${new Date(t).toTimeString().slice(0, 5)}`;
+  return pageHead("Control room", "Change requests", `${P.length} waiting`, "", me.admin ? "Changes asked for entries from an earlier shift. Approve makes the change; decline leaves it as it is." : "Grey boxes were filled in on an earlier shift and are locked. Tap a grey box to ask the admin to change it.")
+    + `<div class="res">${Q.map(q => `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${esc(q.what)}</b><small>${esc(q.fromTxt)} → <b>${esc(q.toTxt)}</b></small><small>Why: ${esc(q.why)}</small><small class="muted">asked by ${esc(q.askedBy)} ${when(q.askedAt)}${q.decidedBy ? ` · ${q.status} by ${esc(q.decidedBy)} ${when(q.decidedAt)}` : ""}</small></div>
+      ${q.status === "pending" ? (me.admin ? `<div class="row" style="gap:6px"><button class="sm primary" data-appr="${q.id}">Approve</button><button class="sm danger" data-decl="${q.id}">Decline</button></div>` : '<span class="tag SB">WAITING</span>') : `<span class="tag ${q.status === "approved" ? "OP" : "BD"}">${q.status.toUpperCase()}</span>`}</div>`).join("") || '<p class="muted">No change requests.</p>'}</div>`;
+}
+
+/* ---------- add / remove a machine ---------- */
+async function addMachine(gi, raw) {
+  const v = String(raw || "").trim().toUpperCase().replace(/\s+/g, ""); if (!v) { toast("Type the machine number."); return false; }
+  const G = fleet().map(([g, L]) => [g, [...L]]); if (G.some(([, L]) => L.includes(v))) { toast(v + " is already on the list."); return false; }
+  G[gi][1].push(v); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Added machine ${v} to ${G[gi][0]}`); toast(v + " added."); return true;
+}
+async function removeMachine(m) { const G = fleet().map(([g, L]) => [g, L.filter(x => x !== m)]); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Removed machine ${m}`); }
+function machForm(gi, mode) {
+  const [g, L] = fleet()[gi];
+  return `<form id="fMach" data-gi="${gi}" data-mode="${mode}" class="card" autocomplete="off" style="max-width:440px;margin:0 auto">${mode === "add"
+    ? `<label>New machine in ${esc(g)} <input name="m" required autocapitalize="characters" placeholder="e.g. ${esc(L[0] || "TDR020")}"></label><button class="primary" style="width:100%;min-height:52px;margin-top:14px">Add machine</button>`
+    : `<label>Machine to take off ${esc(g)} <select name="m">${L.map(m => `<option>${esc(m)}</option>`).join("")}</select></label><p class="muted">Its logged times are kept.</p><button class="danger" style="width:100%;min-height:52px">Remove machine</button>`}</form>`;
+}
+
 /* ---------- events ---------- */
 async function clickH(ev) {
   if (sheetClick(ev, app)) return;
+  const lc = ev.target.closest("[data-lockcell]"); if (lc) { const [mc, h] = lc.dataset.lockcell.split("|"); openEv(reqForm({ type: "cell", d: $("fDay").dataset.date, mc, h: +h }), "Ask the admin to change it"); return; }
+  const lf = ev.target.closest("[data-lockf]"); if (lf) { const [id, field] = lf.dataset.lockf.split("|"); openEv(reqForm({ type: "field", id, field }), "Ask the admin to change it"); return; }
   const cell = ev.target.closest("[data-edit]:not(button)"); if (cell) { const e = recs.find(r => r.id === cell.dataset.edit); if (e) openEv(evForm(e), `${e.machine} · correct the times`); return; }
   const b = ev.target.closest("button"); if (!b) return;
   if (b.hasAttribute("data-x")) { closeEv(); return; }
@@ -404,7 +515,13 @@ async function clickH(ev) {
   if (b.id === "cancelAdd") { addingMe = false; render(); return; }
   if (b.id === "cancelPin") { pinFor = null; render(); return; }
   if (b.dataset.who) { pinFor = b.dataset.who; render(); setTimeout(() => app.querySelector("input[name=pin]")?.focus(), 50); return; }
-  if (b.id === "swap") { me = null; pinFor = null; closeSheet(app); await metaSet("me", null); render(); return; }
+  if (b.hasAttribute("data-logout")) { logout(); return; }
+  if (b.id === "adminIn") { adminStep = adminRec() ? "pin" : "email"; render(); return; }
+  if (b.id === "cancelAdm") { adminStep = ""; render(); return; }
+  if (b.id === "admReset") { adminStep = "email"; render(); return; }
+  if (b.dataset.appr || b.dataset.decl) { b.disabled = true; await decide(b.dataset.appr || b.dataset.decl, !!b.dataset.appr); return; }
+  if (b.dataset.addmg) { openEv(machForm(+b.dataset.addmg, "add"), "Add a machine"); return; }
+  if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; closeSheet(app); render(); scrollTo(0, 0); return; }
   if (b.dataset.dnav) { date = addDays(date, +b.dataset.dnav); render(); return; }
   if (b.hasAttribute("data-today")) { date = today(); render(); return; }
@@ -417,6 +534,9 @@ async function clickH(ev) {
   if (b.dataset.log !== undefined) { openEv(evForm(), "Log breakdown or standby"); return; }
   if (b.dataset.edit) { const e = recs.find(r => r.id === b.dataset.edit); openEv(evForm(e), `${e.machine} · change`); return; }
   if (b.dataset.up) { backUp(b.dataset.up); return; }
+  if (b.dataset.delev && !me.admin && evLocked(recs.find(r => r.id === b.dataset.delev))) { const e = recs.find(r => r.id === b.dataset.delev), why = document.querySelector("#fEv [name=why]")?.value.trim();
+    if (!why) { toast("Type why it must be deleted, then tap again."); document.querySelector("#fEv [name=why]")?.focus(); return; }
+    await addReq({ target: { type: "ev", id: e.id }, del: true, what: evTxt(e), fromTxt: evTxt(e), toTxt: "Delete it", to: null, why }); return; }
   if (b.dataset.delev) { const e = recs.find(r => r.id === b.dataset.delev); if (!confirm(`Delete this ${TYPES[e.type].toLowerCase()} of ${e.machine}?`)) return; await put({ ...e, deleted: true }, `Deleted ${e.machine} ${TYPES[e.type]} from ${hhmm(e.start)}`); closeEv(); render(); toast("Deleted"); return; }
   if (b.dataset.chk) { const [d, it, k] = b.dataset.chk.split("|"), id = chkKey(d, it), c = recs.find(r => r.id === id) || { id, kind: "chk", ym: d.slice(0, 7), date: d, item: it };
     const v = c[k] === "✓" ? "✗" : c[k] === "✗" ? "" : "✓"; await put({ ...c, [k]: v }, `${it} (${k}): ${v || "cleared"}`); const keep = app.querySelector(".sheet:not([hidden]) .sheet-body")?.scrollTop; render(); if (keep != null) { const sb = app.querySelector(".sheet:not([hidden]) .sheet-body"); if (sb) sb.scrollTop = keep; } return; }
@@ -424,10 +544,8 @@ async function clickH(ev) {
     const v = c.done === "✓" ? "✗" : c.done === "✗" ? "" : "✓"; await put({ ...c, done: v }, `${svc} – ${dc}: ${v || "cleared"}`); render(); return; }
   if (b.dataset.add) { const it = b.dataset.add, id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it };
     const v = c.done === "✓" ? "✗" : c.done === "✗" ? "" : "✓"; await put({ ...c, done: v }, `${it}: ${v || "cleared"}`); render(); return; }
-  if (b.dataset.addm) { const gi = +b.dataset.addm, inp = app.querySelector(`[data-newm="${gi}"]`), v = inp.value.trim().toUpperCase().replace(/\s+/g, ""); if (!v) return;
-    const G = fleet().map(([g, L]) => [g, [...L]]); if (G.some(([, L]) => L.includes(v))) { toast(v + " is already on the list."); return; }
-    G[gi][1].push(v); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Added machine ${v}`); render(); toast(v + " added."); return; }
-  if (b.dataset.rmm) { const [gi, m] = b.dataset.rmm.split("|"); if (!confirm(`Take ${m} off the list? Its logged times stay.`)) return; const G = fleet().map(([g, L]) => [g, L.filter(x => x !== m)]); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Removed machine ${m}`); render(); return; }
+  if (b.dataset.addm) { const gi = +b.dataset.addm, inp = app.querySelector(`[data-newm="${gi}"]`); if (await addMachine(gi, inp.value)) render(); return; }
+  if (b.dataset.rmm) { const [, m] = b.dataset.rmm.split("|"); if (!confirm(`Take ${m} off the list? Its logged times stay.`)) return; await removeMachine(m); render(); return; }
   if (b.dataset.rmu) { if (!confirm("Remove yourself from this PC?")) return; const u = recs.find(r => r.id === b.dataset.rmu); await put({ ...u, deleted: true }); me = null; await metaSet("me", null); render(); return; }
   if (b.id === "xl") { b.disabled = true; try { await exportXlsx(month); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; return; }
   if (b.id === "bk") { const blob = new Blob([JSON.stringify({ kind: "tkr-control-backup", at: Date.now(), recs })], { type: "application/json" }); const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_backup_${today()}.json`); return; }
@@ -440,12 +558,30 @@ async function submitH(ev) {
     if (name.length < 3) { toast("Type your name and surname."); return; } if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; } if (p !== p2) { toast("The two PINs are not the same."); return; }
     if (R("user").some(u => u.name.toLowerCase() === name.toLowerCase())) { toast("That name is already on this PC. Tap it to sign in."); addingMe = false; render(); return; }
     const u = await put({ id: "user_" + uid(), kind: "user", ym: "setup", name, pin: await pinHash(name, p), addedAt: Date.now() });
-    me = u; addingMe = false; await metaSet("me", { id: u.id, until: Date.now() + 14 * 36e5 }); tab = "now"; render(); toast(`Welcome ${name}. You are on shift.`); return; }
-  if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && u.pin === await pinHash(u.name, f.elements.pin.value)) { me = u; pinFor = null; await metaSet("me", { id: u.id, until: Date.now() + 14 * 36e5 }); render(); }
+    await startSession(u); addingMe = false; tab = "now"; render(); toast(`Welcome ${name}. You are on shift.`); return; }
+  if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && u.pin === await pinHash(u.name, f.elements.pin.value)) { await startSession(u); pinFor = null; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
+  if (f.id === "fAdm") { if (!navigator.onLine) { toast("The first admin sign-in needs signal."); return; } const p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; }
+    try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); const auth = m.getAuth(admApp);
+      const c = await m.signInWithEmailAndPassword(auth, toLogin(f.elements.e.value), f.elements.p.value), em = String(c?.user?.email || "").toLowerCase(); await m.signOut(auth).catch(() => {});
+      if (!CTRL_ADMIN.includes(em)) { toast("Only the Control Room admin can sign in here."); return; }
+      const a = await put({ id: "admin_" + em.replace(/\W+/g, ""), kind: "admin", ym: "setup", email: em, name: "Muneer (admin)", pin: await pinHash("admin|" + em, p) });
+      await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); toast("Signed in as admin. Next time your PIN is enough."); }
+    catch (x) { console.warn(x); toast("Email or password is wrong."); } return; }
+  if (f.id === "fAdmPin") { const a = adminRec(); if (a && a.pin === await pinHash("admin|" + a.email, f.elements.pin.value)) { await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); }
+    else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
+  if (f.id === "fReq") { const t = JSON.parse(f.elements.t.value), x = reqTarget(t), to = f.elements.to.value.trim(), why = f.elements.why.value.trim();
+    if (to === (x.now || "")) { toast("That is the same as now."); return; } if (!why) { toast("Say why it must change."); return; }
+    await addReq({ target: t, what: x.what, fromTxt: x.now || "empty", toTxt: to || "empty", to, why }); return; }
+  if (f.id === "fMach") { const gi = +f.dataset.gi, v = f.elements.m.value;
+    if (f.dataset.mode === "add") { if (await addMachine(gi, v)) { closeEv(); render(); } } else { if (!confirm(`Take ${v} off the list? Its logged times are kept.`)) return; await removeMachine(v); closeEv(); render(); toast(v + " removed."); } return; }
   if (f.id === "fEv") { const v = k => f.elements[k].value, s = v("start"), e = v("end");
     if (e && toMs(e) <= toMs(s)) { toast("The end time must be after the start time."); return; }
     const old = v("eid") ? recs.find(r => r.id === v("eid")) : null;
+    if (old && !me.admin) { const prop = { machine: v("machine"), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim() };
+      if (Object.keys(prop).some(k => (old[k] || "") !== (prop[k] || "") && lockedV(old, k))) { const why = f.elements.why?.value.trim();
+        if (!why) { toast("Say why it must change, for the admin."); f.elements.why?.focus(); return; }
+        await addReq({ target: { type: "ev", id: old.id }, what: evTxt(old), fromTxt: evTxt(old), toTxt: evTxt(prop), to: prop, why }); return; } }
     const rec = { ...(old || {}), id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), endBy: e && !old?.end ? me.name : old?.endBy || "" };
     await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}`);
     closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`); return; }
@@ -464,7 +600,7 @@ async function changeH(ev) {
   if (t.dataset.addc) { const [it, k] = t.dataset.addc.split("|"), id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it }; await put({ ...c, [k]: t.value.trim() }, `${it}: ${k}`); toast("Saved"); return; }
   if (t.id === "rs" && t.files[0]) { try { const d = JSON.parse(await t.files[0].text()); let n = 0; for (const r of d.recs || []) { const have = recs.find(x => x.id === r.id); if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { await tx("readwrite", tt => tt.objectStore("rec").put({ ...r, synced: 0 })); n++; } } recs = await all(); render(); toast(`Backup loaded: ${n} changes added.`); } catch { toast("That file is not a Control Room backup."); } }
 }
-app.addEventListener("click", clickH); app.addEventListener("submit", submitH); app.addEventListener("change", changeH);
+app.addEventListener("click", clickH); app.addEventListener("submit", submitH); app.addEventListener("change", changeH); $("who").addEventListener("click", clickH);
 
 /* ---------- sync with the TKR app when there is signal ---------- */
 const FB_CFG = { apiKey: "AIzaSyALzOBLObrONGVD1bS0Tz02aNKhQ40TRoI", authDomain: "tkr-operations-app.firebaseapp.com", projectId: "tkr-operations-app",
@@ -577,7 +713,14 @@ async function exportXlsx(m) {
 (async () => {
   try { recs = await all(); } catch (e) { app.innerHTML = '<div class="notice warn"><b class="t">This browser can\'t store the control room data</b>Open the app in a normal (not private) window.</div>'; return; }
   sync.last = await metaGet("syncLast") || 0;
-  const s = await metaGet("me"); if (s && s.until > Date.now()) me = R("user").find(u => u.id === s.id) || null;
+  if (!(await metaGet("fix113"))) {               // once: drill rigs are TDR013, TDR014, TDR015 only; Muneer's example controller login removed
+    const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
+    if (f) { const G = f.groups.map(([g, L]) => [g, g === "Drill rigs" ? L.filter(m => !["TDR016", "TDR017", "TDR018", "TDR019"].includes(m)) : L]); if (JSON.stringify(G) !== JSON.stringify(f.groups)) await put({ ...f, groups: G }); }
+    for (const u of R("user").filter(u => /^muneer\b/i.test(u.name))) await put({ ...u, deleted: true });
+    await metaSet("fix113", 1); }
+  const s = await metaGet("me");
+  if (s && s.until > Date.now()) { const u = s.admin ? R("admin").find(a => a.id === s.id) : R("user").find(u => u.id === s.id);
+    if (u) { me = { ...u, admin: !!s.admin, sid: s.sid || "s_" + uid(), start: s.start || s.until - 14 * 36e5 }; if (!s.sid) await metaSet("me", { ...s, sid: me.sid, start: me.start }); } }
   try { navigator.storage?.persist?.(); } catch {}
   render(); if (navigator.onLine) fire().catch(() => {});
 })();
