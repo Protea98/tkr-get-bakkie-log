@@ -1,0 +1,45 @@
+/* Drilling Metres (offline capture) */
+.rigcards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(360px,100%),1fr));margin:12px 0}
+.rigcard{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px;border-top:4px solid var(--gold)}
+.rigcard h3{margin:0 0 10px;font-size:20px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.rigcard .grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg label{flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:6px 10px;cursor:pointer;color:var(--fg);font-weight:600;font-size:14.5px;text-transform:none;letter-spacing:0;background:var(--panel)}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){border-color:var(--gold);background:#2a2a1c;color:var(--gold)}
+.seg label.bad:has(input:checked){border-color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,var(--panel));color:var(--bad)}
+.seg label.ok:has(input:checked){border-color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,var(--panel));color:var(--ok)}
+.drow{display:grid;grid-template-columns:minmax(150px,1.3fr) 58px 64px 2fr 44px;gap:6px;margin-bottom:6px}
+@media (max-width:620px){.drow{grid-template-columns:1fr 60px 66px 44px}.drow [data-k=text]{grid-column:1/-1;grid-row:2}}
+.docs{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:6px}
+.pick{display:flex;flex-direction:column;gap:4px;border:1px dashed color-mix(in srgb,var(--gold) 60%,transparent);border-radius:10px;padding:8px 10px;font-size:13.5px;font-weight:600;color:var(--fg);text-transform:none;letter-spacing:0;cursor:pointer;background:var(--panel)}
+.pick input{font-size:12.5px;max-width:100%;color:var(--muted)}
+.pick.req{border-style:solid}
+.flist{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.fchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px 4px 2px 2px;font-size:13px}
+.fchip img{width:40px;height:40px;object-fit:cover;border-radius:8px;background:#fff}
+.fchip .pdf{width:40px;height:40px;border-radius:8px;display:grid;place-items:center;background:#3a1f1a;color:#ffb4a4;font-weight:700;font-size:11px}
+.fchip button{min-height:36px;padding:4px 10px;font-size:13px}
+.fchip.gone{opacity:.4;text-decoration:line-through}
+.formbar{position:sticky;bottom:0;background:var(--bg);padding:12px 0 calc(12px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:16px}
+.formbar button{min-height:52px;flex:1 1 160px;font-size:16.5px}
+.done{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px}
+.done>div{background:var(--panel);border:1px solid var(--ok);border-radius:16px;padding:22px;max-width:460px;width:100%}
+.done.del>div{border-color:var(--bad)}
+.done .big{display:flex;align-items:center;gap:12px;font-size:21px;font-weight:700;margin-bottom:10px}
+.done .big i{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--ok) 20%,transparent);color:var(--ok);font-style:normal;font-size:26px}
+.done.del .big i{background:color-mix(in srgb,var(--bad) 20%,transparent);color:var(--bad)}
+.done ul{margin:0 0 14px;padding-left:20px;line-height:1.6;color:var(--fg)}
+.done .acts{display:flex;flex-direction:column;gap:8px}
+.done .acts button{min-height:50px;font-size:16px}
+.reg td,.reg th{white-space:nowrap}
+.reg td.wrap{white-space:normal;min-width:220px;font-size:13.5px;color:var(--muted)}
+.reg td.ok{color:var(--ok);font-weight:600}.reg td.bad{color:var(--bad);font-weight:600}
+.reg .act{display:flex;gap:6px}
+.reg .act button{min-height:38px;padding:4px 12px;font-size:13.5px}
+.reg tr.day1 td{border-top:2px solid var(--line)}
+.miss-list .ri{flex-wrap:wrap}
+.sizebar{height:8px;border-radius:99px;background:var(--panel2);overflow:hidden;margin-top:8px}.sizebar i{display:block;height:100%;background:var(--gold)}
+.photo{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;padding:12px;overflow:auto}
+.photo .bar{display:flex;gap:8px;justify-content:space-between;align-items:center;width:100%;max-width:900px;margin-bottom:10px;color:#f2efe8}
+.photo img{max-width:min(900px,100%);height:auto;background:#fff;border-radius:8px}
