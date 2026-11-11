@@ -1,6 +1,7 @@
 /* TKR drilling: metres per shift, documents by date (tally sheets, job cards, checklists, breakdown reports, supporting documents),
    breakdown report and the metres Excel. Documents are filed in SharePoint when it is connected; a light copy stays in the app. */
-import { spConfigured, spInit, spReady, spWho, spSignIn, spSignOut, spUpload, spDelete, spFolderUrl, spRoot } from "../lib/sharepoint.js";
+import { spConfigured, spInit, spReady as spSigned, spWho, spSignIn, spSignOut, spUpload, spDelete, spFolderUrl, spRoot, spPlace, spLinked, spLinkOneDrive } from "../lib/sharepoint.js";
+const spReady = () => spSigned() && spLinked();
 
 export const DOC_TYPES = ["Tally sheet", "Job card", "Checklist", "Breakdown report", "Supporting document"];
 const FOLDER = { "Tally sheet": "Tally sheets", "Job card": "Job cards", "Checklist": "Checklists", "Breakdown report": "Breakdown reports", "Supporting document": "Supporting documents" };
@@ -117,31 +118,40 @@ export function makeDrill(ctx) {
   const spFolder = (date, type, shift) => `${monthFolder(date)}/${date.slice(8, 10)} ${shift ? shift.toUpperCase() : "DAY AND NIGHT"}`;
   function spStrip() {
     if (!spCfg) return "";
-    if (!spConfigured(spCfg)) return `<div class="spbar off"><b>SharePoint is not linked yet.</b> Files are kept in the app for now. ${isAdmin() ? "The link is set up once under Settings → SharePoint." : ""}</div>`;
-    if (!spReady()) return `<div class="spbar off"><b>SharePoint: not signed in on this device.</b> Files you add now stay in the app only. <button class="primary sm" data-sp="in">Sign in to Microsoft</button> <span class="muted">${esc(spState)}</span></div>`;
-    return `<div class="spbar on"><b>SharePoint is linked</b> · signed in as ${esc(spWho())}. New files go to <b>${esc(spRoot())} › ${monthFolder(month + "-01").replace("/", " › ")} › 01 DAY, 01 NIGHT, 02 DAY…</b> <button class="sm" data-sp="open">Open the folder</button></div>`;
+    const P = spPlace();
+    if (!spConfigured(spCfg)) return `<div class="spbar off"><b>OneDrive is not linked yet.</b> Files are kept in the app for now.${isAdmin() ? " It is set up once under Settings → OneDrive." : ""}</div>`;
+    if (!spSigned()) return `<div class="spbar off"><b>${P}: not signed in on this device.</b> Files you add now stay in the app only. <button class="primary sm" data-sp="in">Sign in with your TKR Microsoft account</button> <span class="muted">${esc(spState)}</span></div>`;
+    if (!spLinked()) return `<div class="spbar off"><b>Signed in as ${esc(spWho())}, but the OneDrive folder is not made yet.</b> ${isAdmin() ? `<button class="primary sm" data-sp="link">Make the TKR App folder in my OneDrive</button>` : "Ask Muneer to link it."} <span class="muted">${esc(spState)}</span></div>`;
+    return `<div class="spbar on"><b>Saving to ${P}</b>${P === "OneDrive" && spCfg.owner ? ` (${esc(spCfg.owner)})` : ""} · signed in as ${esc(spWho())}. New files go to <b>${esc(spRoot())} › ${monthFolder(month + "-01").replace("/", " › ")} › 01 DAY, 01 NIGHT, 02 DAY…</b> <button class="sm" data-sp="open">Open the folder</button></div>`;
   }
   function spCard() {
-    ensureIndex(); const c = spCfg || {};
-    return `<section class="card" id="spCard"><h2>SharePoint</h2>
-      <p class="muted" style="margin-top:0">When this is filled in, every tally sheet, job card, checklist, breakdown report and supporting document added in the app is also saved in SharePoint: a folder per month ("November 2026 Metres") with a folder per day and shift inside ("01 DAY", "01 NIGHT"). Your Microsoft 365 administrator gives you the three values below.</p>
+    ensureIndex(); const c = spCfg || {}, redirect = new URL("../auth.html", location.href).href;
+    return `<section class="card" id="spCard"><h2>OneDrive</h2>
+      <p class="muted" style="margin-top:0">Every tally sheet, job card, checklist, breakdown report and supporting document added in the app is also saved in your TKR OneDrive (1 TB): <b>TKR App › Drilling › November 2026 Metres › 01 DAY, 01 NIGHT…</b>, with the Excel reports in the month folder.</p>
       <form id="fSp" class="grid" autocomplete="off">
-        <label>Tenant ID <input name="tenant" value="${esc(c.tenant || "")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+        <label>Directory (tenant) ID <input name="tenant" value="${esc(c.tenant || "")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
         <label>Application (client) ID <input name="clientId" value="${esc(c.clientId || "")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
-        <label style="grid-column:1/-1">SharePoint site address <input name="site" value="${esc(c.site || "")}" placeholder="https://yourcompany.sharepoint.com/sites/Operations"></label>
-        <label>Main folder in the site's Documents <input name="folder" value="${esc(c.folder || "TKR App")}"></label>
-        <div style="display:flex;align-items:flex-end"><button class="primary" style="width:100%">Save SharePoint settings</button></div>
+        <label>Main folder name <input name="folder" value="${esc(c.folder || "TKR App")}"></label>
+        <label style="grid-column:1/-1">SharePoint site address (leave empty to use OneDrive) <input name="site" value="${esc(c.site || "")}" placeholder="empty = OneDrive"></label>
+        <div style="display:flex;align-items:flex-end"><button class="primary" style="width:100%">Save</button></div>
       </form>
       <div style="margin-top:12px">${spStrip()}</div>
-      ${spConfigured(c) && spReady() ? `<div class="row" style="margin-top:8px"><button data-sp="move">Send the files already in the app to SharePoint</button><button class="ghost" data-sp="out">Sign out of Microsoft</button> <span id="spMsg" class="muted"></span></div>` : ""}
-      <details style="margin-top:12px"><summary><b>What to ask your Microsoft 365 administrator for</b></summary>
-        <ol style="margin:8px 0 0;padding-left:20px;line-height:1.6">
-          <li>In Microsoft Entra (Azure) → App registrations → New registration. Name: TKR Operations App. Accounts in this organisation only.</li>
-          <li>Platform: Single-page application. Redirect address: <b>${esc(new URL("../auth.html", location.href).href)}</b></li>
-          <li>API permissions → Microsoft Graph → Delegated → <b>Sites.ReadWrite.All</b>, then Grant admin consent.</li>
-          <li>Send back the <b>Directory (tenant) ID</b> and the <b>Application (client) ID</b> from the app's Overview page.</li>
-          <li>Give the address of the SharePoint site the files must go to, and make sure the people who upload are members of that site.</li>
-        </ol></details></section>`;
+      ${spConfigured(c) && spReady() ? `<div class="row" style="margin-top:8px"><button data-sp="move">Send the files already in the app to ${spPlace()}</button><button class="ghost" data-sp="out">Sign out of Microsoft</button> <span id="spMsg" class="muted"></span></div>` : ""}
+      <details style="margin-top:12px" ${spConfigured(c) ? "" : "open"}><summary><b>How to set it up (once, about 10 minutes)</b></summary>
+        <ol style="margin:8px 0 0;padding-left:20px;line-height:1.7">
+          <li>On a computer, go to <b>entra.microsoft.com</b> and sign in with your TKR email.</li>
+          <li>Open <b>Applications → App registrations → New registration</b>. Name: <b>TKR Operations App</b>. Who can use it: <b>Accounts in this organizational directory only</b>.</li>
+          <li>Under Redirect URI choose <b>Single-page application (SPA)</b> and paste: <b style="overflow-wrap:anywhere">${esc(redirect)}</b>. Tap Register.</li>
+          <li>On the Overview page copy the <b>Application (client) ID</b> and the <b>Directory (tenant) ID</b> into the boxes above and tap Save.</li>
+          <li>Open <b>API permissions → Add a permission → Microsoft Graph → Delegated</b>, tick <b>Files.ReadWrite.All</b>, Add.</li>
+          <li>Back here, tap <b>Sign in with your TKR Microsoft account</b> and accept, then <b>Make the TKR App folder in my OneDrive</b>.</li>
+          <li>For Amogelang to save too: in OneDrive, share the <b>TKR App</b> folder with her (Can edit). She signs in once on her phone.</li>
+        </ol>
+        <p class="muted">If Microsoft says you don't have permission to register an app, or asks for administrator approval, send these steps to whoever looks after TKR's Microsoft 365. It is free.</p></details></section>`;
+  }
+  async function linkDrive() {
+    const L = await spLinkOneDrive(); spCfg = { ...spCfg, ...L, linkedAt: Date.now() };
+    await setDoc(doc(db, "fcSettings", "sharepoint"), spCfg); await spInit(spCfg);
   }
   async function moveAllToSp() {
     const say = t => { const el = $("spMsg"); if (el) el.textContent = t; else toast(t); };
@@ -152,7 +162,7 @@ export function makeDrill(ctx) {
         const sp = await spUpload(spFolder(d, x.type || "Tally sheet", x.shift), fileName(d, x.rig, x.shift, x.type || "Tally sheet", x.name || (/pdf/.test(x.mime || "") ? "x.pdf" : "x.jpg"), x.id.slice(-6)), blob);
         await setDoc(doc(db, "fcSettings", x.id), { sp }, { merge: true }); x.sp = sp; n++; ch = true; }
       if (ch) await indexDay(d, L); }
-    say(`Done: ${n} files sent to SharePoint${skip ? `, ${skip} were already there` : ""}.`); render();
+    say(`Done: ${n} files sent to ${spPlace()}${skip ? `, ${skip} were already there` : ""}.`); render();
   }
 
   /* ---------- saving files ---------- */
@@ -183,7 +193,7 @@ export function makeDrill(ctx) {
     if (isImg) { try { data = (await shrink(file, sp ? 1200 : 1400)).data; } catch { throw Object.assign(new Error("img"), { user: `${file.name}: this photo type can't be read here. Send it as JPG or PDF.` }); } }
     else { const d = await dataUrl(file);
       if (d.length <= 900000) data = d;
-      else if (!sp) { if (file.size > 8 * 1024 * 1024) throw Object.assign(new Error("big"), { user: `${file.name} is bigger than 8 MB. Make the PDF smaller, or link SharePoint.` });
+      else if (!sp) { if (file.size > 8 * 1024 * 1024) throw Object.assign(new Error("big"), { user: `${file.name} is bigger than 8 MB. Make the PDF smaller, or link OneDrive.` });
         for (let i = 0; i < d.length; i += CHUNK) rest.push(d.slice(i, i + CHUNK)); parts = rest.length; } }
     for (let i = 0; i < rest.length; i++) await setDoc(doc(db, "fcSettings", id + "_p" + i), { ev_kind: "part", parent: id, i, data: rest[i] });
     await setDoc(doc(db, "fcSettings", id), { ev_kind: "sheet", ev_date: date, rig, shift, type, name: file.name, mime: isPdf ? "application/pdf" : "image/jpeg", note, data, parts, sp, by: getEmail(), at: Date.now() });
@@ -194,7 +204,7 @@ export function makeDrill(ctx) {
     let n = 0, sp = 0, err = 0; const bad = [];
     for (const f of files) { toast(`Saving ${n + 1} of ${files.length}…`); try { const r = await addFile(f, meta, false); n++; if (r.sp) sp++; if (r.spErr) err++; } catch (e) { console.warn(e); bad.push(e.user || `${f.name} didn't save.`); } }
     if (n) await indexDay(meta.date);
-    toast(bad.length ? bad[0] : `${n} file${n === 1 ? "" : "s"} saved${sp ? " and filed in SharePoint" : ""}${err ? ". SharePoint didn't take " + err + "; they are kept in the app" : ""}`);
+    toast(bad.length ? bad[0] : `${n} file${n === 1 ? "" : "s"} saved${sp ? " and filed in " + spPlace() : ""}${err ? ". " + spPlace() + " didn't take " + err + "; they are kept in the app" : ""}`);
     return n;
   }
   async function removeFile(id, date) {
@@ -283,7 +293,7 @@ export function makeDrill(ctx) {
       <h3>Documents for this shift</h3>
       ${files.length ? `<div class="files">${files.map(f => `<div class="file"><span><b>${esc(f.type)}</b>${f.name ? " · " + esc(f.name) : ""}</span><button type="button" class="sm" data-open="${f.id}">View</button></div>`).join("")}</div>` : '<p class="muted" style="margin:0 0 6px">Nothing attached yet.</p>'}
       ${isAdmin() ? `<div class="upl">${DOC_TYPES.map(t => `<label class="pick"><span>${t}${t === "Tally sheet" ? "" : "s"}</span><input type="file" data-type="${t}" accept="image/*,application/pdf" multiple><em></em></label>`).join("")}</div>
-      <p class="muted" style="margin:6px 0 0">Photos or PDF. ${spReady() ? "They are filed in SharePoint under the month, the date and the shift." : ""}</p>` : ""}
+      <p class="muted" style="margin:6px 0 0">Photos or PDF. ${spReady() ? "They are filed in ${spPlace()} under the month, the date and the shift." : ""}</p>` : ""}
       <div class="acts"><button type="button" class="ghost" data-close>Close</button>${isAdmin() ? `<button class="primary">${ro ? "Save documents" : "Save shift"}</button>` : ""}</div></form>`;
     document.body.appendChild(ov);
     ov.addEventListener("click", async e => {
@@ -335,7 +345,7 @@ export function makeDrill(ctx) {
         <div><button class="primary" style="width:100%">Save documents</button></div></form></section>` : ""}
       ${dates.map(d => { const L = list.filter(x => x.date === d);
         return `<section class="day"><header><div><b>${dow(d)} ${fmt(d)}</b></div><div class="dt"><span>${idx[d].n} file${idx[d].n === 1 ? "" : "s"}</span><button class="sm primary" data-day="${d}">Open the day</button></div></header>
-          ${L.length ? DOC_TYPES.filter(t => L.some(x => x.type === t)).map(t => `<div class="dgrp"><div class="dg">${FOLDER[t]}</div><div class="dfiles">${L.filter(x => x.type === t).map(x => `<span class="dfile"><button class="lnk" data-open="${x.id}">${x.pdf ? "PDF" : "Photo"} · ${esc(x.rig || "All machines")}${x.shift ? " " + esc(x.shift) : ""}</button>${x.sp ? `<a href="${esc(x.sp)}" target="_blank" rel="noopener" title="Open in SharePoint">SharePoint</a>` : ""}${x.note ? `<small>${esc(x.note)}</small>` : ""}</span>`).join("")}</div></div>`).join("")
+          ${L.length ? DOC_TYPES.filter(t => L.some(x => x.type === t)).map(t => `<div class="dgrp"><div class="dg">${FOLDER[t]}</div><div class="dfiles">${L.filter(x => x.type === t).map(x => `<span class="dfile"><button class="lnk" data-open="${x.id}">${x.pdf ? "PDF" : "Photo"} · ${esc(x.rig || "All machines")}${x.shift ? " " + esc(x.shift) : ""}</button>${x.sp ? `<a href="${esc(x.sp)}" target="_blank" rel="noopener" title="Open in OneDrive">OneDrive</a>` : ""}${x.note ? `<small>${esc(x.note)}</small>` : ""}</span>`).join("")}</div></div>`).join("")
             : '<div class="muted" style="padding:10px 14px">Tally sheets. Tap Open the day to see them.</div>'}</section>`; }).join("") || `<div class="card muted">No documents for ${monthName(month)} yet.</div>`}`;
   }
   /* everything filed for one day, with the photos */
@@ -349,14 +359,14 @@ export function makeDrill(ctx) {
           <select name="type">${DOC_TYPES.map(t => `<option>${t}</option>`).join("")}</select><select name="rig">${RIGS.map(r => `<option>${r}</option>`).join("")}<option value="">All machines</option></select>
           <select name="shift"><option>Day</option><option>Night</option><option value="">Whole day</option></select><input type="file" name="files" accept="image/*,application/pdf" multiple required><button class="primary">Save</button></div></form>` : ""}
       ${DOC_TYPES.filter(t => L.some(x => (x.type || "Tally sheet") === t)).map(t => `<h3>${FOLDER[t]}</h3>` + L.filter(x => (x.type || "Tally sheet") === t).map(x => `<figure><figcaption><span><b>${esc(x.rig || "All machines")}</b>${x.shift ? " · " + esc(x.shift) + " shift" : ""}${x.note ? " – " + esc(x.note) : ""}${x.name ? ` <small>${esc(x.name)}</small>` : ""}</span>
-          <span class="row">${x.sp?.url ? `<a class="btn" href="${esc(x.sp.url)}" target="_blank" rel="noopener">SharePoint</a>` : ""}${/pdf/.test(x.mime || "") || !x.data ? `<button data-open="${x.id}">Open ${/pdf/.test(x.mime || "") ? "PDF" : "file"}</button>` : ""}${adm ? `<button class="danger" data-rm="${x.id}">Remove</button>` : ""}</span></figcaption>
+          <span class="row">${x.sp?.url ? `<a class="btn" href="${esc(x.sp.url)}" target="_blank" rel="noopener">${spPlace()}</a>` : ""}${/pdf/.test(x.mime || "") || !x.data ? `<button data-open="${x.id}">Open ${/pdf/.test(x.mime || "") ? "PDF" : "file"}</button>` : ""}${adm ? `<button class="danger" data-rm="${x.id}">Remove</button>` : ""}</span></figcaption>
           ${x.data && !/pdf/.test(x.mime || "") ? `<img src="${x.data}" alt="${esc(t)} ${esc(x.rig)} ${esc(x.shift)}" loading="lazy">` : ""}</figure>`).join("")).join("") || '<p class="none">Nothing filed for this day yet.</p>'}</div>`;
     document.body.appendChild(ov);
     ov.addEventListener("click", async e => { const b = e.target.closest("button"); if (!b) return;
       if (b.hasAttribute("data-x")) { ov.remove(); return; }
       if (b.hasAttribute("data-pdf")) { b.disabled = true; try { await evidencePdf(date); } catch (x) { console.warn(x); toast("The PDF couldn't be made."); } b.disabled = false; return; }
       if (b.dataset.open) { try { await openFile(b.dataset.open); } catch (x) { console.warn(x); toast("The file couldn't open."); } return; }
-      if (b.dataset.rm) { if (!confirm("Remove this document from " + fmt(date) + "?" + (spReady() ? " It is also removed from SharePoint." : ""))) return; b.disabled = true;
+      if (b.dataset.rm) { if (!confirm("Remove this document from " + fmt(date) + "?" + (spReady() ? " It is also removed from " + spPlace() + "." : ""))) return; b.disabled = true;
         try { await removeFile(b.dataset.rm, date); toast("Removed"); render(); await showDay(date); } catch (x) { b.disabled = false; fail(x); } } });
     ov.querySelector("#fDayAdd")?.addEventListener("submit", async e => { e.preventDefault(); e.stopPropagation(); const f = e.target, btn = f.querySelector("button");
       btn.disabled = true; try { await addFiles([...f.elements.files.files], { date, type: f.elements.type.value, rig: f.elements.rig.value, shift: f.elements.shift.value }); render(); await showDay(date); } catch (x) { btn.disabled = false; fail(x); } });
@@ -391,7 +401,7 @@ export function makeDrill(ctx) {
         <h2 style="margin-top:16px">By cause</h2><div class="tbl"><table><thead><tr><th>Cause</th>${B.rigs.map(r => `<th>${r} h</th>`).join("")}<th>Total h</th><th>Times</th></tr></thead><tbody>
         ${B.cats.map(c => `<tr><td>${esc(c.cat)}</td>${c.per.map(v => `<td class="num">${H1(v)}</td>`).join("")}<td class="num"><b>${H1(c.total)}</b></td><td class="num">${c.times.reduce((a, b) => a + b, 0)}</td></tr>`).join("")}
         <tr class="tot"><td>Total</td>${B.mach.map(m => `<td class="num">${H1(m.hours)}</td>`).join("")}<td class="num">${H1(B.total)}</td><td class="num">${B.lines.length}</td></tr></tbody></table></div></section></div>
-      ${reports.length ? `<section class="card"><h2>Breakdown reports and job cards filed</h2><div class="dfiles">${reports.map(x => `<span class="dfile"><button class="lnk" data-open="${x.id}">${fmt(x.date)} · ${esc(x.type)} · ${esc(x.rig || "All machines")} ${esc(x.shift)}</button>${x.sp ? `<a href="${esc(x.sp)}" target="_blank" rel="noopener">SharePoint</a>` : ""}</span>`).join("")}</div></section>` : ""}
+      ${reports.length ? `<section class="card"><h2>Breakdown reports and job cards filed</h2><div class="dfiles">${reports.map(x => `<span class="dfile"><button class="lnk" data-open="${x.id}">${fmt(x.date)} · ${esc(x.type)} · ${esc(x.rig || "All machines")} ${esc(x.shift)}</button>${x.sp ? `<a href="${esc(x.sp)}" target="_blank" rel="noopener">OneDrive</a>` : ""}</span>`).join("")}</div></section>` : ""}
       <section class="card"><h2>Every breakdown and delay</h2><div class="tbl"><table><thead><tr><th>Date</th><th>Shift</th><th>Machine</th><th>What happened</th><th>Cause</th><th>Hours</th></tr></thead><tbody>
         ${B.lines.slice().reverse().map(l => `<tr><td style="white-space:nowrap">${fmt(l.date)}</td><td>${l.shift}</td><td style="white-space:nowrap">${l.rig}</td><td>${esc(l.text)}</td><td>${esc(l.cat)}</td><td class="num">${l.hours == null ? "" : l.hours.toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">Nothing written.</td></tr>'}</tbody></table></div>
         <p class="muted">Hours are as written on the shift. A delay with no time written counts in Times, not in Hours.</p></section>`;
@@ -546,7 +556,7 @@ export function makeDrill(ctx) {
       const sup = files.filter(f => f.type !== "Tally sheet");
       ws = sheet("Supporting documents", [34, 34, 34, 34, 20], "SUPPORTING DOCUMENTS", "Job cards, checklists, breakdown reports and other documents filed for these dates"); r = 7;
       r = head(ws, r, ["Document", "Date", "Machine and shift", "File", "Note"]);
-      sup.forEach((f, k) => { r = line(ws, r, [f.type, D(f.date), `${f.rig || "All machines"}${f.shift ? " · " + f.shift : ""}`, f.sp ? { text: f.name || "Open in SharePoint", hyperlink: f.sp } : f.name || (f.pdf ? "PDF in the app" : "Photo in the app"), f.note], k); });
+      sup.forEach((f, k) => { r = line(ws, r, [f.type, D(f.date), `${f.rig || "All machines"}${f.shift ? " · " + f.shift : ""}`, f.sp ? { text: f.name || "Open the file", hyperlink: f.sp } : f.name || (f.pdf ? "PDF in the app" : "Photo in the app"), f.note], k); });
       if (!sup.length) r = text(ws, r, "No job cards, checklists, breakdown reports or other documents filed for these dates."); r++;
       const pics = sup.filter(f => f.img);
       for (let k = 0; k < pics.length; k += 4) { const row = pics.slice(k, k + 4); ws.getRow(r).height = 18; row.forEach((f, j) => { const x = ws.getCell(r, j + 1); x.value = `${f.type} · ${fmt(f.date)} · ${f.rig || "All machines"} ${f.shift}`; x.font = F({ bold: true, size: 9 }); }); r++;
@@ -565,7 +575,7 @@ export function makeDrill(ctx) {
     const buf = await wb.xlsx.writeBuffer(), blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const tag = `${fmt(from).replace(/\//g, "-")}${from === to ? "" : "_to_" + fmt(to).replace(/\//g, "-")}`;
     const name = only ? `TKR_Drilling_Breakdown_Report_${tag}.xlsx` : `TKR_Drilling_Metres_and_Tally_Sheets_${tag}.xlsx`;
-    if (spReady()) { try { await spUpload(`${monthFolder(to)}/Reports`, name, blob); toast(`A copy of the report is in SharePoint › ${monthFolder(to).replace("/", " › ")} › Reports.`); } catch (e) { console.warn(e); } }
+    if (spReady()) { try { await spUpload(`${monthFolder(to)}/Reports`, name, blob); toast(`A copy of the report is in ${spPlace()} › ${monthFolder(to).replace("/", " › ")} › Reports.`); } catch (e) { console.warn(e); } }
     const { deliver } = await import("../lib/deliver.js"); deliver(blob, name);
     return blob;
   }
@@ -580,11 +590,12 @@ export function makeDrill(ctx) {
     if (b.id === "xGo" || b.id === "bdGo") { const bd = b.id === "bdGo", f = $(bd ? "bdFrom" : "xFrom").value, t = $(bd ? "bdTo" : "xTo").value; if (!f || !t || f > t) { toast("Choose a From date before the To date."); return true; }
       if (!bd) tharisa = $("xTh").value.trim(); b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportMetres(f, t, bd); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } render(); return true; }
     if (b.dataset.sp) { const a = b.dataset.sp;
-      try { if (a === "in") { await spSignIn(); toast("Signed in to Microsoft. New files now go to SharePoint."); }
+      try { if (a === "in") { await spSignIn(); if (!spLinked() && isAdmin() && !spCfg.site) await linkDrive(); toast(spReady() ? `Signed in. New files now go to ${spPlace()}.` : "Signed in."); }
+        if (a === "link") { await linkDrive(); toast("The TKR App folder is in your OneDrive. New files now go there."); }
         if (a === "out") { await spSignOut(); }
         if (a === "open") { window.open(await spFolderUrl(monthFolder(month + "-01")), "_blank", "noopener"); }
-        if (a === "move") { if (!confirm("Send every file that is in the app and not yet in SharePoint? Keep the app open until it says Done.")) return true; b.disabled = true; await moveAllToSp(); } }
-      catch (x) { console.warn(x); spState = "Microsoft didn't sign in: " + String(x?.errorMessage || x?.message || x).slice(0, 140); toast("SharePoint: that didn't work. " + spState); }
+        if (a === "move") { if (!confirm("Send every file that is in the app and not yet in " + spPlace() + "? Keep the app open until it says Done.")) return true; b.disabled = true; await moveAllToSp(); } }
+      catch (x) { console.warn(x); spState = "Microsoft said no: " + String(x?.errorMessage || x?.message || x).slice(0, 140); toast(spState); }
       render(); return true; }
     return false;
   }
@@ -599,8 +610,9 @@ export function makeDrill(ctx) {
     if (f.id === "fDocs") { e.preventDefault(); const v = k => f.elements[k].value, btn = f.querySelector("button"); btn.disabled = true; upDate = v("date");
       try { await addFiles([...f.elements.files.files], { date: v("date"), type: v("type"), rig: v("rig"), shift: v("shift"), note: v("note").trim() }); month = v("date").slice(0, 7); } catch (x) { fail(x); } render(); return true; }
     if (f.id === "fSp") { e.preventDefault(); const v = k => f.elements[k].value.trim();
-      try { spCfg = { tenant: v("tenant"), clientId: v("clientId"), site: v("site").replace(/\/+$/, ""), folder: v("folder") || "TKR App", by: getEmail(), at: Date.now() };
-        await setDoc(doc(db, "fcSettings", "sharepoint"), spCfg); if (spConfigured(spCfg)) await spInit(spCfg); toast(spConfigured(spCfg) ? "SharePoint settings saved. Now tap Sign in to Microsoft." : "Saved. Fill in all three values to link SharePoint."); } catch (x) { fail(x); } render(); return true; }
+      try { const keep = spCfg && spCfg.tenant === v("tenant") && spCfg.clientId === v("clientId") && (spCfg.folder || "TKR App") === (v("folder") || "TKR App") && !v("site") ? { driveId: spCfg.driveId || "", rootId: spCfg.rootId || "", owner: spCfg.owner || "", webUrl: spCfg.webUrl || "" } : {};
+        spCfg = { tenant: v("tenant"), clientId: v("clientId"), site: v("site").replace(/\/+$/, ""), folder: v("folder") || "TKR App", by: getEmail(), at: Date.now(), ...keep };
+        await setDoc(doc(db, "fcSettings", "sharepoint"), spCfg); if (spConfigured(spCfg)) await spInit(spCfg); toast(spConfigured(spCfg) ? "Saved. Now tap Sign in with your TKR Microsoft account." : "Saved. Fill in both IDs to link OneDrive."); } catch (x) { fail(x); } render(); return true; }
     return false;
   }
   return { metresView, docsView, bdView, spCard, onClick, onChange, onSubmit, indexDay, showDay, addFile, exportMetres, _bd: bdData };
