@@ -75,7 +75,7 @@ onAuthStateChanged(auth, u => {
   if (!u || u.isAnonymous || email.endsWith("@staff.tkroperations.app")) { showGate(); return; }
   subs.push(onSnapshot(doc(db, "config", "roles"), s => { managers = ((s.exists() && s.data().managers) || []).map(x => String(x).toLowerCase()); gateOrApp(); }, () => gateOrApp()));
 });
-function showGate(msg = "", html = false) { $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; $("who").textContent = ""; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("signForm").querySelectorAll(":scope > label, :scope > button, :scope > p.muted").forEach(el => el.hidden = html); }
+function showGate(msg = "", html = false) { if ($("mWrap")) $("mWrap").hidden = true; $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; $("who").textContent = ""; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("signForm").querySelectorAll(":scope > label, :scope > button, :scope > p.muted").forEach(el => el.hidden = html); }
 function gateOrApp() {
   if (!isManager()) { showGate(`<span style="color:var(--fg);font-weight:500;display:block">Sorry ${esc(showName(email))}, you don't have access to the GET Forecast with this account. Please ask admin.</span>
     <span style="display:flex;flex-direction:column;gap:10px;margin-top:14px"><button type="button" class="primary" id="naSwitch">Sign in with a different account</button><button type="button" id="naHome">Back to the home page</button></span>`, true);
@@ -189,7 +189,7 @@ function render() {
   const head = `<div class="tabs" role="tablist">${tabs.filter(([k]) => isAdmin() || ["dash"].includes(k)).map(([k, t]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${t}</button>`).join("")}</div>`;
   let body = "";
   if (tab === "dash") body = dash(c);
-  if (tab === "metres") body = drill.metresView();
+  if (tab === "metres") body = "";
   if (tab === "docs") body = drill.docsView();
   if (tab === "bd") body = drill.bdView();
   if (tab === "issues") body = issuesView();
@@ -197,6 +197,13 @@ function render() {
   if (tab === "settings") body = settingsView() + drill.spCard();
   if (tab === "import") body = importView();
   app.innerHTML = head + body;
+  metresFrame(tab === "metres");
+}
+/* The Metres tab is the shift capture (works with no signal); it is kept open while you move between tabs */
+function metresFrame(show) {
+  let w = $("mWrap");
+  if (!w) { if (!show) return; w = document.createElement("div"); w.id = "mWrap"; w.innerHTML = '<iframe id="mFrame" src="../metres/?embed=1" title="Metres" style="display:block;width:100%;height:max(640px,calc(100dvh - 190px));border:0;border-radius:12px;background:var(--bg)"></iframe>'; app.after(w); }
+  w.hidden = !show || app.hidden;
 }
 function tile(l, n, s, cls = "") { return `<div class="tile ${cls}"><div class="l">${l}</div><div class="n">${n}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`; }
 function dash(c) {

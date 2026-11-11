@@ -2,6 +2,9 @@
    Everything is kept on this PC or phone (IndexedDB). Every few days: Export → the Excel (same tabs as the
    metres workbook) and a ZIP with the documents in month and shift folders, plus a backup to restore anywhere. */
 import { tabBar, pageHead, matches, icon } from "../lib/ui.js";
+import { OCT_2026_LINES } from "../lib/oct2026.js";
+const EMBED = new URLSearchParams(location.search).has("embed");
+if (EMBED) document.body.classList.add("embed");
 import { buildMetresWorkbook, bdData, daysOf } from "../lib/metres-xlsx.js";
 import { spConfigured, spInit, spReady, spWho, spSignIn, spSignOut, spUpload, spLinked, spLinkOneDrive, spFolderUrl } from "../lib/sharepoint.js";
 /* TKR's Microsoft 365 app registration (TKR Operations App). These two IDs are not secret. */
@@ -54,6 +57,13 @@ const metaSet = (k, v) => tx(["meta"], "readwrite", t => { t.objectStore("meta")
 let shifts = [], files = [], cfg = { rigs: ["TDR 013", "TDR 015"], device: "" }, lastExport = null, ms = { ...MS_DEFAULT }, msState = "";
 let tab = "home", month = today().slice(0, 7), q = "", xFrom = "", xTo = "", tharisa = "", est = null;
 const rigs = () => ALL_RIGS.filter(r => cfg.rigs.includes(r));
+/* October 2026 is closed in GET Forecast: its shift register is built into the app. Bring it in once. */
+async function ensureOctober() {
+  if (await metaGet("oct2026")) return;
+  const by = new Map(); for (const x of OCT_2026_LINES) { const k = x.date + "|" + x.shift; (by.get(k) || by.set(k, []).get(k)).push(x); }
+  await tx(["shifts"], "readwrite", t => { for (const [k, L] of by) if (!shifts.some(s => s.id === k)) { const s = fromForecast(L); s.savedAt = s.editedAt = 1; s.fcAt = 9e15; s.device = "GET Forecast (October closed)"; t.objectStore("shifts").put(s); } });
+  await metaSet("oct2026", 1);
+}
 async function load() {
   try { [shifts, files] = await Promise.all([getAll("shifts"), getAll("files")]); cfg = { ...cfg, ...(await metaGet("cfg") || {}) }; lastExport = await metaGet("lastExport") || null; ms = { ...MS_DEFAULT, ...(await metaGet("ms") || {}) }; fcLast = await metaGet("fcLast") || 0; }
   catch (e) { console.warn(e); app.innerHTML = `<div class="notice warn"><b class="t">This browser can't store the metres</b>It may be in private mode. Open the app in a normal window.</div>`; return false; }
@@ -91,7 +101,7 @@ function render() {
   let body = "";
   if (tab === "home") body = homeView(); if (tab === "register") body = registerView(); if (tab === "missing") body = missingView();
   if (tab === "search") body = searchView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
-  app.innerHTML = tabBar(TABS, tab) + body;
+  app.innerHTML = (EMBED ? `<p class="muted" style="margin:0 0 6px;font-size:12.5px">${esc($("store").textContent)}</p>` : "") + tabBar(TABS, tab) + body;
   if (tab === "search") { const i = $("q"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
 function homeView() {
@@ -187,7 +197,7 @@ const delayRow = (d = {}) => { const t = d.h == null || d.h === "" ? "" : Math.r
     <input data-k="hh" inputmode="numeric" placeholder="h" value="${t === "" ? "" : Math.floor(t / 60)}" aria-label="Hours"><input data-k="mm" inputmode="numeric" placeholder="min" value="${t === "" ? "" : t % 60}" aria-label="Minutes">
     <input data-k="text" placeholder="What happened" value="${esc(d.text || "")}"><button type="button" class="danger" data-drm aria-label="Remove this delay">×</button></div>`; };
 async function fileChips(list) {
-  return list.map(f => `<span class="fchip" data-fid="${f.id}">${f.thumb ? `<img src="${f.thumb}" alt="">` : `<span class="pdf">${/pdf/.test(f.mime) ? "PDF" : "FILE"}</span>`}<span>${esc(f.type)}</span><button type="button" data-view="${f.id}">View</button><button type="button" class="danger" data-frm="${f.id}">Remove</button></span>`).join("");
+  return list.map(f => `<span class="fchip" data-fid="${f.id}">${f.thumb ? `<img src="${f.thumb}" alt="">` : `<span class="pdf">${/pdf/.test(f.mime) ? "PDF" : "PHOTO"}</span>`}<span>${esc(f.type)}</span><button type="button" data-view="${f.id}">View</button><button type="button" class="danger" data-frm="${f.id}">Remove</button></span>`).join("");
 }
 async function openForm(id, preset) {
   let s = id ? shifts.find(x => x.id === id) : null;
@@ -329,8 +339,22 @@ function askDelete(id) {
       popup("del", `<div class="big"><i>✓</i>Deleted</div><p class="muted">${dow(s.date)} ${fmt(s.date)} ${s.shift} shift is removed.</p><div class="acts"><button class="primary" data-a="redo">Capture it again</button><button data-a="ok">Done</button></div>`,
         b => { if (b === "redo") openForm(null, { date: s.date, shift: s.shift }); }); });
 }
+async function blobOf(f) {
+  const have = (await getOne("blobs", f.id))?.blob; if (have || !f.remote) return have || null;
+  if (!navigator.onLine) return null;
+  await fire(); const { db, doc, getDoc, getDocs, query, where, collection } = fb;
+  const v = (await getDoc(doc(db, "fcSettings", f.fcId))).data(); if (!v) return null;
+  let data = v.data || "";
+  if (v.parts) { const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "part"), where("parent", "==", f.fcId))); data = s.docs.map(d => d.data()).sort((a, b) => a.i - b.i).map(p => p.data).join(""); }
+  if (!data) return null;
+  const b = await (await fetch(data)).blob(); let thumb = f.thumb; if (!thumb && !/pdf/.test(f.mime)) { try { thumb = (await shrink(b, 160, 0.6)).data; } catch {} }
+  await tx(["files", "blobs"], "readwrite", t => { t.objectStore("blobs").put({ id: f.id, blob: b }); t.objectStore("files").put({ ...f, thumb, size: b.size }); });
+  f.thumb = thumb; f.size = b.size; return b;
+}
 async function viewFile(id) {
-  const m = files.find(f => f.id === id), b = (await getOne("blobs", id))?.blob; if (!b) { toast("That document isn't on this device."); return; }
+  const m = files.find(f => f.id === id); if (!m) return; toast("Opening…");
+  let b = null; try { b = await blobOf(m); } catch (e) { console.warn(e); }
+  if (!b) { toast(m.remote ? "This photo is in GET Forecast. Open it once with signal to keep it on this device." : "That document isn't on this device."); return; }
   const url = URL.createObjectURL(b);
   if (/pdf/.test(m?.mime || "")) { window.open(url, "_blank"); return; }
   const ov = document.createElement("div"); ov.className = "photo"; ov.innerHTML = `<div class="bar"><b>${esc(m.type)} · ${fmt(m.date)} ${esc(m.shift)} · ${esc(m.rig)}</b><button class="primary" data-x>Close</button></div><img src="${url}" alt="">`;
@@ -353,7 +377,7 @@ async function makeExcel(from, to, say) {
   const F = files.filter(f => f.date >= from && f.date <= to).sort((a, b) => (a.date + a.shift + a.rig).localeCompare(b.date + b.shift + b.rig));
   const list = []; let k = 0;
   for (const f of F) { say(`Adding the documents to the Excel… ${++k} of ${F.length}`); let img = null;
-    if (!/pdf/.test(f.mime)) { try { const b = (await getOne("blobs", f.id))?.blob; if (b) img = await shrink(b, 1100, 0.6); } catch {} }
+    if (!/pdf/.test(f.mime)) { try { const b = await blobOf(f); if (b) img = await shrink(b, 1100, 0.6); } catch {} }
     list.push({ type: f.type, date: f.date, shift: f.shift, rig: f.rig, name: f.name, note: f.note || "", pdf: /pdf/.test(f.mime), img }); }
   say("Making the Excel…");
   let logoBuf = null; try { logoBuf = await (await fetch("../icons/icon-512.png")).arrayBuffer(); } catch {}
@@ -375,7 +399,7 @@ async function doExport(kind) {
       const F = files.filter(f => f.date >= from && f.date <= to), used = new Set(), back = [];
       let k = 0;
       for (const f of F) { say(`Putting the documents in folders… ${++k} of ${F.length}`);
-        const b = (await getOne("blobs", f.id))?.blob; if (!b) continue;
+        const b = await blobOf(f).catch(() => null); if (!b) continue;
         let base = `${folderOf(f)}/${f.rig} - ${f.type}`, p = `${base}.${ext(f)}`, n = 2; while (used.has(p)) p = `${base} ${n++}.${ext(f)}`; used.add(p);
         zip.file(`${root}/${p}`, b); back.push({ ...f, thumb: undefined, path: p }); }
       const S = shifts.filter(s => s.date >= from && s.date <= to);
@@ -459,6 +483,25 @@ function fromForecast(L) {
   const t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
   return { id: s0.date + "|" + (s0.shift || "Day"), date: s0.date, shift: s0.shift || "Day", supervisor: L.map(x => x.supervisor).find(Boolean) || "", report: L.map(x => x.report).find(Boolean) || "", rigs: rigsOut, savedAt: t, editedAt: t, fcAt: t, device: "GET Forecast" };
 }
+/* GET Forecast's documents list (no photos): every document shows here; the photo is fetched when opened or exported */
+async function fcPullDocs(from, to) {
+  const { db, collection, getDocs, query, where } = fb;
+  const snap = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "day")));
+  const days = snap.docs.map(d => d.data()).filter(v => v.ev_date >= from && v.ev_date <= to);
+  const items = days.filter(v => Array.isArray(v.items)).flatMap(v => v.items.map(it => ({ ...it, date: v.ev_date })));
+  for (const v of days.filter(v => !Array.isArray(v.items))) {      // older days filed before the documents list existed
+    const L = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "sheet"), where("ev_date", "==", v.ev_date)));
+    L.docs.forEach(d => { const x = d.data(); items.push({ id: d.id, type: x.type || "Tally sheet", rig: x.rig || "", shift: x.shift || "", name: x.name || "", note: x.note || "", pdf: /pdf/i.test(x.mime || "") ? 1 : 0, at: x.at || 0, date: v.ev_date }); }); }
+  const known = new Set(files.map(f => f.fcId).filter(Boolean)), live = new Set(items.map(it => it.id));
+  const add = items.filter(it => !known.has(it.id)), drop = files.filter(f => f.remote && f.date >= from && f.date <= to && !live.has(f.fcId));
+  if (!add.length && !drop.length) return 0;
+  await tx(["files", "blobs"], "readwrite", t => {
+    for (const it of add) t.objectStore("files").put({ id: "r_" + it.id, fcId: it.id, remote: 1, shiftId: it.date + "|" + (it.shift || "Day"), date: it.date, shift: it.shift || "Day", rig: it.rig || "", type: it.type || "Tally sheet",
+      name: it.name || it.type || "Document", mime: it.pdf ? "application/pdf" : "image/jpeg", size: 0, thumb: "", note: it.note || "", savedAt: it.at || 0 });
+    for (const f of drop) { t.objectStore("files").delete(f.id); t.objectStore("blobs").delete(f.id); }
+  });
+  return add.length;
+}
 async function fcPull(from, to) {
   const { db, collection, getDocs, query, where } = fb;
   const snap = await getDocs(query(collection(db, "fcMetres"), where("date", ">=", from), where("date", "<=", to)));
@@ -522,7 +565,7 @@ async function fcSync(manual, say) {
   fcBusy = true; fcMsg = "Checking GET Forecast…"; render();
   try {
     const t = today(), m0 = (month < t.slice(0, 7) ? month : t.slice(0, 7)) + "-01", from = m0 < FC_FROM ? FC_FROM : m0;
-    const pulled = await fcPull(from, t); await load();
+    const pulled = await fcPull(from, t); try { await fcPullDocs("2026-10-01", t); } catch (e) { console.warn(e); } await load();
     if (fcAdmin()) { await fcPush(x => { fcMsg = x; const el = $("fcMsg"); if (el) el.textContent = x; }); await load(); }
     fcLast = Date.now(); await metaSet("fcLast", fcLast);
     fcMsg = `Up to date with GET Forecast (${when(fcLast)})${pulled ? ` · ${pulled} shift${pulled === 1 ? "" : "s"} brought in` : ""}.`;
@@ -576,5 +619,5 @@ app.addEventListener("change", e => {
 });
 addEventListener("keydown", e => { if (e.key === "Escape" && form) closeForm(); });
 
-(async () => { if (await load()) { render(); if (navigator.onLine) fire().catch(e => console.warn(e)); if (navigator.onLine && ms.driveId) { try { await spInit(ms); render(); } catch (e) { console.warn(e); } } } })();
+(async () => { if (await load()) { try { await ensureOctober(); await load(); } catch (e) { console.warn(e); } render(); if (navigator.onLine) fire().catch(e => console.warn(e)); if (navigator.onLine && ms.driveId) { try { await spInit(ms); render(); } catch (e) { console.warn(e); } } } })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("../sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});

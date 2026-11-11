@@ -43,3 +43,8 @@
 .photo{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;padding:12px;overflow:auto}
 .photo .bar{display:flex;gap:8px;justify-content:space-between;align-items:center;width:100%;max-width:900px;margin-bottom:10px;color:#f2efe8}
 .photo img{max-width:min(900px,100%);height:auto;background:#fff;border-radius:8px}
+
+/* inside GET Forecast */
+body.embed .band{display:none}
+body.embed .wrap{padding-top:4px}
+body.embed .tkr-back{display:none}
