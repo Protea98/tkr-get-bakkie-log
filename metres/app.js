@@ -55,7 +55,7 @@ let shifts = [], files = [], cfg = { rigs: ["TDR 013", "TDR 015"], device: "" },
 let tab = "home", month = today().slice(0, 7), q = "", xFrom = "", xTo = "", tharisa = "", est = null;
 const rigs = () => ALL_RIGS.filter(r => cfg.rigs.includes(r));
 async function load() {
-  try { [shifts, files] = await Promise.all([getAll("shifts"), getAll("files")]); cfg = { ...cfg, ...(await metaGet("cfg") || {}) }; lastExport = await metaGet("lastExport") || null; ms = { ...MS_DEFAULT, ...(await metaGet("ms") || {}) }; }
+  try { [shifts, files] = await Promise.all([getAll("shifts"), getAll("files")]); cfg = { ...cfg, ...(await metaGet("cfg") || {}) }; lastExport = await metaGet("lastExport") || null; ms = { ...MS_DEFAULT, ...(await metaGet("ms") || {}) }; fcLast = await metaGet("fcLast") || 0; }
   catch (e) { console.warn(e); app.innerHTML = `<div class="notice warn"><b class="t">This browser can't store the metres</b>It may be in private mode. Open the app in a normal window.</div>`; return false; }
   try { est = await navigator.storage?.estimate?.(); } catch {}
   return true;
@@ -86,7 +86,8 @@ const changedSinceExport = () => shifts.filter(s => !lastExport || (s.editedAt |
 const TABS = [["home", "Metres", "metres"], ["register", "Shift register", "shifts"], ["missing", "What's missing", "missing"], ["search", "Search", "search"], ["export", "Export & backup", "import"], ["settings", "Settings", "settings"]];
 function render() {
   const n = shifts.length, used = files.reduce((a, f) => a + (f.size || 0), 0);
-  $("store").textContent = `Kept on this device · ${n} shift${n === 1 ? "" : "s"} · ${files.length} document${files.length === 1 ? "" : "s"} (${mb(used)})`;
+  const w = fbUser ? fcWaiting() : 0;
+  $("store").textContent = `Kept on this device · ${n} shift${n === 1 ? "" : "s"} · ${files.length} document${files.length === 1 ? "" : "s"} (${mb(used)})` + (fbUser ? (w ? ` · ${w} waiting for GET Forecast` : " · GET Forecast up to date") : "");
   let body = "";
   if (tab === "home") body = homeView(); if (tab === "register") body = registerView(); if (tab === "missing") body = missingView();
   if (tab === "search") body = searchView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
@@ -153,7 +154,7 @@ function exportView() {
   xFrom = xFrom || (lastExport ? (lastExport.to < today() ? addDays(lastExport.to, 1) : today()) : month + "-01"); if (xFrom < first && !lastExport) xFrom = first; xTo = xTo || today();
   const used = files.reduce((a, f) => a + (f.size || 0), 0), q2 = est?.quota || 0;
   return pageHead("Export and backup", "Take the metres off this device", "", "", "Do this every few days. The ZIP has the Excel, every document in month and shift folders (November 2026 Metres › 01 DAY), and a backup that can be loaded on any other PC or phone.")
-    + `<section class="card dl-card"><h2>Export</h2><div class="rangebar"><label>From <input type="date" id="xFrom" value="${xFrom}" max="${today()}"></label><label>To <input type="date" id="xTo" value="${xTo}" max="${today()}"></label>
+    + fcCard() + `<section class="card dl-card"><h2>Export</h2><div class="rangebar"><label>From <input type="date" id="xFrom" value="${xFrom}" max="${today()}"></label><label>To <input type="date" id="xTo" value="${xTo}" max="${today()}"></label>
         <label style="flex:1 1 200px">Tharisa's metres for these dates (if you have it) <input id="xTh" inputmode="decimal" value="${esc(tharisa)}" placeholder="optional"></label></div>
       <div class="openers" style="margin:0"><button class="opener" data-x="zip"><span class="oi">${icon("import")}</span><span class="ot"><b>Download everything (ZIP)</b><small>Excel + all documents in folders + backup</small></span><span class="oa">›</span></button>
       <button class="opener" data-x="xlsx"><span class="oi">${icon("docs")}</span><span class="ot"><b>Download the Excel only</b><small>Same tabs as the metres workbook, tally sheets inside</small></span><span class="oa">›</span></button></div>
@@ -286,8 +287,12 @@ async function saveForm(e) {
     });
     try { navigator.storage?.persist?.(); } catch {}
     const removed = form.drop.size;
+    const gone = files.filter(x => form.drop.has(x.id) && x.fcId).map(x => ({ fcId: x.fcId, date: x.date }));
+    if (old && old.id !== id && old.fcAt) await metaSet("fcDel", [...((await metaGet("fcDel")) || []), { date: old.date, shift: old.shift }]);
+    if (gone.length) await metaSet("fcGone", [...((await metaGet("fcGone")) || []), ...gone]);
     await load(); closeForm(); render();
     savedPopup(rec, newFiles.map(n => n.meta), removed, !!old);
+    if (fbUser && navigator.onLine) fcSync(false);
   } catch (x) { console.warn(x); btn.disabled = false; btn.textContent = "Save shift"; toast("It didn't save: " + (x?.name === "QuotaExceededError" ? "this device is full. Export and free up space." : "try again.")); }
 }
 function popup(cls, html, on) {
@@ -317,6 +322,9 @@ function askDelete(id) {
     <div class="acts"><button class="danger" data-a="yes" style="border-color:var(--bad)">Yes, delete it</button><button data-a="no">Keep it</button></div>`,
     async a => { if (a !== "yes") return;
       await tx(["shifts", "files", "blobs"], "readwrite", t => { t.objectStore("shifts").delete(id); for (const f of F) { t.objectStore("files").delete(f.id); t.objectStore("blobs").delete(f.id); } });
+      if (s.fcAt) await metaSet("fcDel", [...((await metaGet("fcDel")) || []), { date: s.date, shift: s.shift }]);
+      const gone = F.filter(f => f.fcId).map(f => ({ fcId: f.fcId, date: f.date })); if (gone.length) await metaSet("fcGone", [...((await metaGet("fcGone")) || []), ...gone]);
+      if (fbUser && navigator.onLine) fcSync(false);
       await load(); closeForm(); render();
       popup("del", `<div class="big"><i>✓</i>Deleted</div><p class="muted">${dow(s.date)} ${fmt(s.date)} ${s.shift} shift is removed.</p><div class="acts"><button class="primary" data-a="redo">Capture it again</button><button data-a="ok">Done</button></div>`,
         b => { if (b === "redo") openForm(null, { date: s.date, shift: s.shift }); }); });
@@ -416,6 +424,124 @@ async function restore(file) {
   } catch (e) { console.warn(e); say("The backup couldn't be read."); }
 }
 
+
+/* ---------- link with GET Forecast (needs signal; admins send, managers can bring in) ---------- */
+const FB_CFG = { apiKey: "AIzaSyALzOBLObrONGVD1bS0Tz02aNKhQ40TRoI", authDomain: "tkr-operations-app.firebaseapp.com", projectId: "tkr-operations-app",
+  storageBucket: "tkr-operations-app.firebasestorage.app", messagingSenderId: "158080247079", appId: "1:158080247079:web:7cb7786d2b7f9ee172b502" };
+const FC_ADMINS = ["muneer@tkroperations.com", "amogelang@tkroperations.com"];
+const FC_FROM = "2026-11-01";                 // October is closed in GET Forecast; the link starts with November
+const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };
+let fb = null, fbUser = null, fcBusy = false, fcMsg = "", fcLast = 0;
+async function fire() {
+  if (fb) return fb;
+  const m = await import("../lib/firebase.js"), a = m.initializeApp(FB_CFG), auth = m.getAuth(a), db = m.initializeFirestore(a, {});
+  fb = { ...m, auth, db };
+  m.onAuthStateChanged(auth, u => { fbUser = u; render(); if (u && navigator.onLine) fcSync(false); });
+  return fb;
+}
+const fcAdmin = () => !!fbUser && FC_ADMINS.includes((fbUser.email || "").toLowerCase());
+const fcWaiting = () => shifts.filter(s => s.date >= FC_FROM && (!s.fcAt || s.editedAt > s.fcAt)).length + files.filter(f => f.date >= FC_FROM && !f.fcId).length;
+const CAT_RX = [["Waiting for GET / drill bits", /get|\bbits?|drill bit/], ["Stuck rods / retrieving rods", /stuck|retriev|recover/], ["Service and maintenance", /service|maint|weekly|daily|drifter/],
+  ["Ground conditions", /uneven|loose ground|surface/], ["Breakdowns", /breakdown|burst|broke|leak|cylinder|engine|chain|compressor|pipe|hose|shank|starter|gauge|power|radio|hydr|oil|percussion|percation/],
+  ["Tramming", /tram/], ["Blasting", /blast/], ["Diesel / refuelling", /diesel|refuel|refill/], ["Waiting for block access / bench", /access|bench|pattern|barricad/],
+  ["Meetings, transport, safety and weather", /meeting|transport|safety|sheq|lightning|incident/], ["No operator", /operator/]];
+const catOf = t => (CAT_RX.find(([, rx]) => rx.test(String(t).toLowerCase())) || ["Other"])[0];
+const hoursIn = t => { const m = String(t).toLowerCase().replace(/,/g, ".").match(/(\d+(?:\.\d+)?)\s*(?:hrs?|hours?|h)\b/); if (m) return +m[1]; const n = String(t).match(/(\d+)\s*min/i); return n ? Math.round(+n[1] / 60 * 100) / 100 : null; };
+/* GET Forecast lines for one date and shift → one shift on this device */
+function fromForecast(L) {
+  const s0 = L[0], rigsOut = {};
+  for (const x of L) { if (!ALL_RIGS.includes(x.rig)) continue; const g = rigsOut[x.rig] || (rigsOut[x.rig] = { status: "", metres: 0, block: "", hrsFrom: "", hrsTo: "", delays: [] });
+    g.metres = r1(num(g.metres) + num(x.metres));
+    g.status = x.status || g.status || (/^\s*not working/i.test(x.note || "") ? "Not working" : num(x.metres) > 0 || /^\s*working/i.test(x.note || "") ? "Working" : "");
+    g.block = g.block || x.block || ""; g.hrsFrom = g.hrsFrom || x.hrsFrom || ""; g.hrsTo = g.hrsTo || x.hrsTo || "";
+    if (Array.isArray(x.delays)) g.delays.push(...x.delays.map(d => ({ cat: d.cat || "Other", h: d.h ?? null, text: d.text || "" })));
+    else String(x.note || "").replace(/^\s*(not working|working)\s*[–-]?\s*/i, "").split(/\s*·\s*|;\s*/).map(t => t.trim()).filter(Boolean).forEach(t => g.delays.push({ cat: catOf(t), h: hoursIn(t), text: t })); }
+  const t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
+  return { id: s0.date + "|" + (s0.shift || "Day"), date: s0.date, shift: s0.shift || "Day", supervisor: L.map(x => x.supervisor).find(Boolean) || "", report: L.map(x => x.report).find(Boolean) || "", rigs: rigsOut, savedAt: t, editedAt: t, fcAt: t, device: "GET Forecast" };
+}
+async function fcPull(from, to) {
+  const { db, collection, getDocs, query, where } = fb;
+  const snap = await getDocs(query(collection(db, "fcMetres"), where("date", ">=", from), where("date", "<=", to)));
+  const by = new Map(); snap.docs.forEach(d => { const x = { id: d.id, ...d.data() }; const k = x.date + "|" + (x.shift || "Day"); (by.get(k) || by.set(k, []).get(k)).push(x); });
+  let n = 0;
+  for (const [k, L] of by) { const loc = shifts.find(s => s.id === k), t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
+    if (loc && ((loc.fcAt || 0) >= t || (loc.editedAt || 0) >= t)) continue;
+    const s = fromForecast(L); if (!Object.keys(s.rigs).length) continue;
+    if (loc) s.savedAt = loc.savedAt;
+    await tx(["shifts"], "readwrite", tt => { tt.objectStore("shifts").put(s); }); n++; }
+  return n;
+}
+const shrinkData = async (blob) => { let q = 0.7; let r = await shrink(blob, 1400, q); while (r.data.length > 900000 && q > 0.35) { q -= 0.1; r = await shrink(blob, 1400, q); } return r.data; };
+async function fcIndexDay(date) {
+  const { db, collection, getDocs, query, where, doc, setDoc, deleteDoc } = fb;
+  const s = await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "sheet"), where("ev_date", "==", date)));
+  const items = s.docs.map(d => { const v = d.data(); return { id: d.id, type: v.type || "Tally sheet", rig: v.rig || "", shift: v.shift || "", name: v.name || "", note: v.note || "", pdf: /pdf/i.test(v.mime || "") ? 1 : 0, sp: v.sp?.url || "", at: v.at || 0, by: v.by || "" }; });
+  const ref = doc(db, "fcSettings", "evday_" + date);
+  if (items.length) await setDoc(ref, { ev_kind: "day", ev_date: date, n: items.length, items }); else await deleteDoc(ref);
+}
+async function fcPush(say) {
+  const { db, collection, getDocs, query, where, doc, setDoc, deleteDoc } = fb, me = fbUser.email || "";
+  const lineId = (d, sh, r) => `sh-${d}-${sh}-${r.replace(/\s/g, "")}`;
+  const remote = {}, getDay = async d => remote[d] || (remote[d] = (await getDocs(query(collection(db, "fcMetres"), where("date", "==", d)))).docs.map(x => ({ id: x.id, ...x.data() })));
+  const days = new Set(); let ns = 0, nf = 0;
+  // shifts deleted on this device
+  for (const g of (await metaGet("fcDel")) || []) { for (const x of await getDay(g.date)) if ((x.shift || "Day") === g.shift && cfg.rigs.includes(x.rig)) await deleteDoc(doc(db, "fcMetres", x.id)); }
+  await metaSet("fcDel", []);
+  for (const s of shifts.filter(s => s.date >= FC_FROM && (!s.fcAt || s.editedAt > s.fcAt))) {
+    say?.(`Sending shifts to GET Forecast… ${++ns}`);
+    const R = await getDay(s.date);
+    for (const r of cfg.rigs) { const g = s.rigs[r], mine = lineId(s.date, s.shift, r);
+      for (const x of R.filter(x => (x.shift || "Day") === s.shift && x.rig === r && x.id !== mine)) await deleteDoc(doc(db, "fcMetres", x.id));
+      if (!g) { if (R.some(x => x.id === mine)) await deleteDoc(doc(db, "fcMetres", mine)); continue; }
+      const note = (g.status || "") + (g.delays.length ? " – " + g.delays.map(d => (d.text || d.cat) + (d.h ? ` (${hm(d.h)})` : "")).join(" · ") : "");
+      await setDoc(doc(db, "fcMetres", mine), { date: s.date, shift: s.shift, rig: r, metres: num(g.metres), block: g.block || "", supervisor: s.supervisor || "", status: g.status || "", delays: g.delays, note,
+        hrsFrom: g.hrsFrom || "", hrsTo: g.hrsTo || "", report: s.report || "", by: me, src: "metres", createdAt: s.savedAt || Date.now(), editedAt: s.editedAt || Date.now() }); }
+    await tx(["shifts"], "readwrite", t => { t.objectStore("shifts").put({ ...s, fcAt: s.editedAt }); });
+  }
+  // documents removed on this device
+  for (const g of (await metaGet("fcGone")) || []) { try { const v = (await fb.getDoc(doc(db, "fcSettings", g.fcId))).data(); for (let i = 0; i < (v?.parts || 0); i++) await deleteDoc(doc(db, "fcSettings", g.fcId + "_p" + i)); await deleteDoc(doc(db, "fcSettings", g.fcId)); days.add(g.date); } catch (e) { console.warn(e); } }
+  await metaSet("fcGone", []);
+  // new documents
+  for (const f of files.filter(f => f.date >= FC_FROM && !f.fcId)) {
+    say?.(`Sending documents to GET Forecast… ${++nf}`);
+    const b = (await getOne("blobs", f.id))?.blob; if (!b) continue;
+    const isPdf = /pdf/.test(f.mime); let data = "", parts = [];
+    if (isPdf) { if (b.size > 8 * 1024 * 1024) continue; const d = await dataUrl(b); if (d.length <= 900000) data = d; else for (let i = 0; i < d.length; i += 700000) parts.push(d.slice(i, i + 700000)); }
+    else { try { data = await shrinkData(b); } catch { continue; } }
+    const id = ("ev_" + f.date + "_" + f.rig.replace(/\s/g, "") + "_" + (f.shift || "NA") + "_" + f.type.replace(/\s/g, "") + "_m" + f.id.slice(-6)).replace(/[^\w-]/g, "_");
+    for (let i = 0; i < parts.length; i++) await setDoc(doc(db, "fcSettings", id + "_p" + i), { ev_kind: "part", parent: id, i, data: parts[i] });
+    await setDoc(doc(db, "fcSettings", id), { ev_kind: "sheet", ev_date: f.date, rig: f.rig, shift: f.shift, type: f.type, name: f.name, mime: isPdf ? "application/pdf" : "image/jpeg", note: f.note || "", data, parts: parts.length, sp: null, by: me, at: f.savedAt || Date.now(), src: "metres" });
+    await tx(["files"], "readwrite", t => { t.objectStore("files").put({ ...f, fcId: id }); }); days.add(f.date);
+  }
+  for (const d of days) { say?.("Updating the documents list…"); await fcIndexDay(d); }
+}
+async function fcSync(manual, say) {
+  if (fcBusy || !navigator.onLine) { if (manual && !navigator.onLine) toast("No signal now. It sends by itself when there is signal."); return; }
+  try { await fire(); } catch (e) { console.warn(e); return; }
+  if (!fbUser) { if (manual) toast("Sign in first (Export & backup → GET Forecast)."); return; }
+  fcBusy = true; fcMsg = "Checking GET Forecast…"; render();
+  try {
+    const t = today(), m0 = (month < t.slice(0, 7) ? month : t.slice(0, 7)) + "-01", from = m0 < FC_FROM ? FC_FROM : m0;
+    const pulled = await fcPull(from, t); await load();
+    if (fcAdmin()) { await fcPush(x => { fcMsg = x; const el = $("fcMsg"); if (el) el.textContent = x; }); await load(); }
+    fcLast = Date.now(); await metaSet("fcLast", fcLast);
+    fcMsg = `Up to date with GET Forecast (${when(fcLast)})${pulled ? ` · ${pulled} shift${pulled === 1 ? "" : "s"} brought in` : ""}.`;
+    if (manual) toast(fcAdmin() ? "GET Forecast is up to date." : `Brought in ${pulled} shifts. Only an admin can send shifts to GET Forecast.`);
+  } catch (e) { console.warn(e); fcMsg = e?.code === "permission-denied" ? "This account can't change GET Forecast. Sign in as an admin." : "Couldn't reach GET Forecast. It tries again when there is signal."; if (manual) toast(fcMsg); }
+  fcBusy = false; render();
+}
+function fcCard() {
+  const w = fcWaiting();
+  if (!fbUser) return `<section class="card" id="fcCard"><h2>GET Forecast link</h2><p class="muted" style="margin-top:0">Sign in once on this device with your app email (an admin). After that, whenever there is signal, new shifts and their documents go to GET Forecast by themselves, and metres captured in GET Forecast come in here. ${navigator.onLine ? "" : "<b>No signal now.</b>"}</p>
+    <form id="fcSign" class="grid" autocomplete="on" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"><label>Email or username <input name="e" autocapitalize="none" autocomplete="username" required></label><label>Password <input name="p" type="password" autocomplete="current-password" required></label><div style="display:flex;align-items:flex-end"><button class="primary" style="width:100%">Sign in</button></div></form>
+    <p class="muted" id="fcMsg">${esc(fcMsg)}</p></section>`;
+  return `<section class="card" id="fcCard"><h2>GET Forecast link</h2>
+    <p style="margin-top:0">Signed in as <b>${esc(fbUser.email)}</b>${fcAdmin() ? "" : " (can bring in, can't send)"} · ${w ? `<b>${w}</b> shifts or documents waiting to go` : "nothing waiting"}${fcLast ? ` · last checked ${when(fcLast)}` : ""}.</p>
+    <div class="row"><button class="primary" id="fcNow" ${fcBusy ? "disabled" : ""}>${fcBusy ? "Working…" : "Send and bring in now"}</button><button class="ghost" id="fcOut">Sign out</button></div>
+    <p class="muted" id="fcMsg">${esc(fcMsg)}</p></section>`;
+}
+addEventListener("online", () => { if (fbUser) fcSync(false); else render(); });
+
 /* ---------- events ---------- */
 app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -425,6 +551,8 @@ app.addEventListener("click", async e => {
   if (b.dataset.del) { askDelete(b.dataset.del); return; }
   if (b.dataset.view) { viewFile(b.dataset.view); return; }
   if (b.dataset.x) { b.blur(); doExport(b.dataset.x); return; }
+  if (b.id === "fcNow") { fcSync(true); return; }
+  if (b.id === "fcOut") { await fire(); await fb.signOut(fb.auth); fcMsg = ""; render(); return; }
   if (b.id === "msSave") { ms = { ...ms, tenant: $("msTenant").value.trim(), clientId: $("msClient").value.trim(), folder: $("msFolder").value.trim() || "TKR App" }; await metaSet("ms", ms); toast("Saved"); render(); return; }
   if (b.dataset.ms) { try { if (b.dataset.ms === "in") { await msReady(); msState = ""; toast("OneDrive is linked on this device."); }
       if (b.dataset.ms === "out") { await spSignOut(); }
@@ -432,6 +560,13 @@ app.addEventListener("click", async e => {
     catch (x) { console.warn(x); msState = "Microsoft said: " + String(x?.errorMessage || x?.message || x).slice(0, 160); toast("OneDrive isn't linked yet."); } render(); return; }
   if (b.id === "cfgSave") { const r = [...app.querySelectorAll("input[name=rig]:checked")].map(i => i.value); if (!r.length) { toast("Choose at least one rig."); return; }
     cfg = { ...cfg, rigs: r, device: $("devName").value.trim() }; await metaSet("cfg", cfg); toast("Saved"); render(); }
+});
+app.addEventListener("submit", async e => {
+  if (e.target.id !== "fcSign") return; e.preventDefault(); const f = e.target, btn = f.querySelector("button");
+  if (!navigator.onLine) { toast("Signing in needs signal."); return; }
+  btn.disabled = true; fcMsg = "Signing in…";
+  try { await fire(); await fb.signInWithEmailAndPassword(fb.auth, toLogin(f.elements.e.value), f.elements.p.value); fcMsg = ""; }
+  catch (x) { fcMsg = String(x?.code || "").includes("network") ? "No signal. Signing in needs signal." : "Email or password is wrong."; const el = $("fcMsg"); if (el) el.textContent = fcMsg; btn.disabled = false; return; }
 });
 app.addEventListener("input", e => { if (e.target.id === "q") { q = e.target.value; render(); } });
 app.addEventListener("change", e => {
@@ -441,5 +576,5 @@ app.addEventListener("change", e => {
 });
 addEventListener("keydown", e => { if (e.key === "Escape" && form) closeForm(); });
 
-(async () => { if (await load()) { render(); if (navigator.onLine && spConfigured(ms)) { try { await spInit(ms); render(); } catch (e) { console.warn(e); } } } })();
+(async () => { if (await load()) { render(); if (navigator.onLine) fire().catch(e => console.warn(e)); if (navigator.onLine && ms.driveId) { try { await spInit(ms); render(); } catch (e) { console.warn(e); } } } })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("../sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});
