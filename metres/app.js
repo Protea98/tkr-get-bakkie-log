@@ -35,7 +35,8 @@ const DOC_TYPES = ["Tally sheet", "Job card", "Checklist", "Breakdown report", "
 const PLURAL = { "Tally sheet": "tally sheets", "Job card": "job cards", "Checklist": "checklists", "Breakdown report": "breakdown reports", "Supporting document": "supporting documents" };
 const DELAY_CATS = ["Breakdowns", "Service and maintenance", "Waiting for GET / drill bits", "Stuck rods / retrieving rods", "Tramming", "Diesel / refuelling", "Blasting",
   "Waiting for block access / bench", "No operator", "Meetings, transport, safety and weather", "Ground conditions", "Other"];
-const ALL_RIGS = ["TDR 013", "TDR 015", "TDR 014"];
+const BASE_RIGS = ["TDR 013", "TDR 015", "TDR 014"];
+const allRigs = () => [...new Set([...BASE_RIGS, ...(cfg.extraRigs || [])])];
 
 /* ---------- storage on this device ---------- */
 let dbp = null;
@@ -56,7 +57,7 @@ const metaSet = (k, v) => tx(["meta"], "readwrite", t => { t.objectStore("meta")
 /* ---------- state ---------- */
 let shifts = [], files = [], cfg = { rigs: ["TDR 013", "TDR 015"], device: "" }, lastExport = null, ms = { ...MS_DEFAULT }, msState = "";
 let tab = "home", month = today().slice(0, 7), q = "", xFrom = "", xTo = "", tharisa = "", est = null;
-const rigs = () => ALL_RIGS.filter(r => cfg.rigs.includes(r));
+const rigs = () => allRigs().filter(r => cfg.rigs.includes(r));
 /* October 2026 is closed in GET Forecast: its shift register is built into the app. Bring it in once. */
 async function ensureOctober() {
   if (await metaGet("oct2026")) return;
@@ -92,6 +93,47 @@ function monthStats(m) {
 }
 const changedSinceExport = () => shifts.filter(s => !lastExport || (s.editedAt || s.savedAt) > lastExport.at).length;
 
+
+/* ---------- metres chart: Day / Week / Month / Year, like the timeframes on a trading chart ---------- */
+const TF = [["D", "Day"], ["W", "Week"], ["M", "Month"], ["Y", "Year"]];
+const SER_COL = ["#efc75e", "#6fb3ff", "#8fd1a6", "#ec8f7b", "#c39bff", "#ffb86b"];
+let ch = (() => { try { return { tf: "D", off: 0, hide: [], ...JSON.parse(localStorage.getItem("tkr-metres-chart") || "{}") }; } catch { return { tf: "D", off: 0, hide: [] }; } })();
+const saveCh = () => { try { localStorage.setItem("tkr-metres-chart", JSON.stringify({ tf: ch.tf, hide: ch.hide })); } catch {} };
+const monday = d => { const x = parse(d), w = (x.getDay() + 6) % 7; x.setDate(x.getDate() - w); return ymd(x); };
+function chartBuckets() {
+  const t = today(), keyOf = { D: d => d, W: monday, M: d => d.slice(0, 7), Y: d => d.slice(0, 4) }[ch.tf], keys = [];
+  if (ch.tf === "D") { const end = addDays(t, -ch.off * 31); for (let i = 30; i >= 0; i--) keys.push(addDays(end, -i)); }
+  if (ch.tf === "W") { const end = addDays(monday(t), -ch.off * 16 * 7); for (let i = 15; i >= 0; i--) keys.push(addDays(end, -i * 7)); }
+  if (ch.tf === "M") { const end = shiftMonth(t.slice(0, 7), -ch.off * 12); for (let i = 11; i >= 0; i--) keys.push(shiftMonth(end, -i)); }
+  if (ch.tf === "Y") { const first = Math.min(+t.slice(0, 4), ...shifts.map(s => +s.date.slice(0, 4))); for (let y = first; y <= +t.slice(0, 4); y++) keys.push(String(y)); }
+  const R = rigs(), val = new Map(keys.map(k => [k, Object.fromEntries(R.map(r => [r, 0]))]));
+  for (const s of shifts) { const k = keyOf(s.date), v = val.get(k); if (!v) continue; for (const r of R) v[r] += num(rigOn(s, r)?.metres); }
+  const label = k => ch.tf === "D" ? `${k.slice(8)}/${k.slice(5, 7)}` : ch.tf === "W" ? `wk ${k.slice(8)}/${k.slice(5, 7)}` : ch.tf === "M" ? MONTHS[+k.slice(5, 7) - 1].slice(0, 3) + " " + k.slice(2, 4) : k;
+  const title = k => ch.tf === "D" ? `${dow(k)} ${fmt(k)}` : ch.tf === "W" ? `Week of ${fmt(k)} to ${fmt(addDays(k, 6))}` : ch.tf === "M" ? monthName(k + "-01") : k;
+  return { keys, R, rows: keys.map(k => ({ k, l: label(k), t: title(k), v: val.get(k), tot: r1(R.reduce((n, r) => n + val.get(k)[r], 0)) })) };
+}
+function chartCard() {
+  const { rows, R } = chartBuckets(), series = [["Total", rows.map(x => x.tot)], ...R.map(r => [r, rows.map(x => r1(x.v[r]))])].map(([n, v], i) => ({ n, v, c: SER_COL[i % SER_COL.length], off: ch.hide.includes(n) }));
+  const on = series.filter(s => !s.off), max = Math.max(10, ...on.flatMap(s => s.v)), W = 1000, H = 300, l = 52, rr = 34, top = 14, bot = 34, n = rows.length;
+  const x = i => l + (n === 1 ? (W - l - rr) / 2 : i * (W - l - rr) / (n - 1)), y = v => top + (H - top - bot) * (1 - v / max);
+  const step = Math.pow(10, Math.floor(Math.log10(max / 4))), tick = Math.ceil(max / 4 / step) * step;
+  let g = ""; for (let v = 0; v <= max; v += tick) g += `<line x1="${l}" x2="${W - rr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${l - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v)}</text>`;
+  const every = Math.ceil(n / (ch.tf === "D" ? 11 : 12));
+  rows.forEach((r, i) => { if (i % every === 0 || i === n - 1) g += `<text x="${x(i)}" y="${H - 12}" text-anchor="middle">${r.l}</text>`; });
+  for (const s of on) { g += `<polyline fill="none" stroke="${s.c}" stroke-width="${s.n === "Total" ? 3 : 2}" stroke-linejoin="round" points="${s.v.map((v, i) => `${x(i)},${y(v)}`).join(" ")}"/>`;
+    if (n <= 40) g += s.v.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="${s.n === "Total" ? 3.5 : 2.5}" fill="${s.c}"/>`).join(""); }
+  const bw = n > 1 ? (W - l - rr) / (n - 1) : W - l - rr;
+  rows.forEach((r, i) => { g += `<rect class="hov" x="${x(i) - bw / 2}" y="${top}" width="${bw}" height="${H - top - bot}" fill="transparent"><title>${esc(r.t)}\nTotal: ${M1(r.tot)} m${R.map(k => `\n${k}: ${M1(r.v[k])} m`).join("")}</title></rect>`; });
+  const tot = r1(rows.reduce((a, r) => a + r.tot, 0)), withM = rows.filter(r => r.tot > 0), avg = withM.length ? r1(tot / withM.length) : 0, best = rows.reduce((b, r) => r.tot > (b?.tot || 0) ? r : b, null);
+  const unit = { D: "day", W: "week", M: "month", Y: "year" }[ch.tf];
+  return `<section class="card chartc"><div class="chead"><h2>Metres drilled</h2>
+      <div class="tfs" role="group" aria-label="Timeframe">${TF.map(([k, t]) => `<button data-tf="${k}" aria-pressed="${ch.tf === k}" title="Per ${t.toLowerCase()}">${k === "D" ? "D1" : k === "W" ? "W1" : k === "M" ? "MN" : "Y1"}<span>${t}</span></button>`).join("")}</div>
+      ${ch.tf !== "Y" ? `<div class="tfs"><button data-coff="1" aria-label="Earlier">‹</button><button data-coff="-1" aria-label="Later" ${ch.off ? "" : "disabled"}>›</button></div>` : ""}</div>
+    <div class="cstats"><span>${ch.tf === "W" ? `${fmt(rows[0].k)} – ${fmt(addDays(rows[n - 1].k, 6))}` : ch.tf === "D" ? `${fmt(rows[0].k)} – ${fmt(rows[n - 1].k)}` : `${rows[0].t} – ${rows[n - 1].t}`}</span><span>Total <b>${M1(tot)} m</b></span><span>Average per ${unit} drilled <b>${M1(avg)} m</b></span>${best && best.tot ? `<span>Best ${unit} <b>${esc(best.t.replace(/^Week of /, "wk "))} · ${M1(best.tot)} m</b></span>` : ""}</div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Metres drilled per ${unit}">${g}</svg>
+    <div class="legend">${series.map(s => `<button class="ser" data-ser="${esc(s.n)}" aria-pressed="${!s.off}"><i style="background:${s.c}"></i>${esc(s.n)}</button>`).join("")}</div></section>`;
+}
+
 /* ---------- render ---------- */
 const TABS = [["home", "Metres", "metres"], ["register", "Shift register", "shifts"], ["missing", "What's missing", "missing"], ["search", "Search", "search"], ["export", "Export & backup", "import"], ["settings", "Settings", "settings"]];
 function render() {
@@ -114,6 +156,7 @@ function homeView() {
       ${tile("Shifts captured", `${S.L.length} <small style="font-size:16px;color:var(--muted)">of ${S.sofar}</small>`, `${S.expected} shifts in ${MONTHS[+month.slice(5, 7) - 1]} (day and night)`, S.L.length < S.sofar ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Shifts without a tally sheet", String(S.noTally.length), S.noTally.length ? "tap to see which" : "every shift with metres has one", S.noTally.length ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Not exported yet", String(ch), lastExport ? `last export ${when(lastExport.at)}` : "nothing exported yet", ch && (days === null || days >= 3) ? "alert" : "", 'data-tab="export"')}</div>`
+    + chartCard()
     + `<div class="sect">Last shifts captured</div><div class="res">${latest.map(shiftLine).join("") || '<div class="card muted">Nothing captured yet. Tap + Capture a shift.</div>'}</div>`;
 }
 function shiftLine(s) {
@@ -176,7 +219,9 @@ function exportView() {
 }
 function settingsView() {
   return pageHead("Settings", "This device", "", "", "")
-    + `<section class="card"><h2>Drill rigs on the shift form</h2><div class="seg" style="max-width:520px">${ALL_RIGS.map(r => `<label class="ok"><input type="checkbox" name="rig" value="${r}" ${cfg.rigs.includes(r) ? "checked" : ""}>${r}</label>`).join("")}</div>
+    + `<section class="card"><h2>Drill rigs on the shift form</h2><div class="seg" style="max-width:520px">${allRigs().map(r => `<label class="ok"><input type="checkbox" name="rig" value="${r}" ${cfg.rigs.includes(r) ? "checked" : ""}>${r}</label>`).join("")}</div>
+      <div class="row" style="margin-top:12px;max-width:520px"><input id="newRig" placeholder="New rig, e.g. TDR 016" style="flex:1 1 200px"><button id="addRig">+ Add rig</button></div>
+      <p class="muted" style="margin:6px 0 0">Ticked rigs show on the shift form, the register, the chart and the Excel.</p>
       <label style="display:block;margin-top:14px;max-width:420px">Name of this device (shows on exports) <input id="devName" value="${esc(cfg.device)}" placeholder="e.g. Control room PC"></label>
       <button class="primary" id="cfgSave" style="margin-top:12px">Save</button></section>
     <section class="card" id="msCard"><h2>OneDrive</h2>
@@ -474,7 +519,7 @@ const hoursIn = t => { const m = String(t).toLowerCase().replace(/,/g, ".").matc
 /* GET Forecast lines for one date and shift → one shift on this device */
 function fromForecast(L) {
   const s0 = L[0], rigsOut = {};
-  for (const x of L) { if (!ALL_RIGS.includes(x.rig)) continue; const g = rigsOut[x.rig] || (rigsOut[x.rig] = { status: "", metres: 0, block: "", hrsFrom: "", hrsTo: "", delays: [] });
+  for (const x of L) { if (!x.rig || x.rig === "Not allocated") continue; const g = rigsOut[x.rig] || (rigsOut[x.rig] = { status: "", metres: 0, block: "", hrsFrom: "", hrsTo: "", delays: [] });
     g.metres = r1(num(g.metres) + num(x.metres));
     g.status = x.status || g.status || (/^\s*not working/i.test(x.note || "") ? "Not working" : num(x.metres) > 0 || /^\s*working/i.test(x.note || "") ? "Working" : "");
     g.block = g.block || x.block || ""; g.hrsFrom = g.hrsFrom || x.hrsFrom || ""; g.hrsTo = g.hrsTo || x.hrsTo || "";
@@ -601,6 +646,12 @@ app.addEventListener("click", async e => {
       if (b.dataset.ms === "out") { await spSignOut(); }
       if (b.dataset.ms === "open") { await spInit(ms); window.open(await spFolderUrl("Drilling"), "_blank", "noopener"); } }
     catch (x) { console.warn(x); msState = "Microsoft said: " + String(x?.errorMessage || x?.message || x).slice(0, 160); toast("OneDrive isn't linked yet."); } render(); return; }
+  if (b.dataset.tf) { ch.tf = b.dataset.tf; ch.off = 0; saveCh(); render(); return; }
+  if (b.dataset.coff) { ch.off = Math.max(0, ch.off + +b.dataset.coff); render(); return; }
+  if (b.dataset.ser) { const n = b.dataset.ser; ch.hide = ch.hide.includes(n) ? ch.hide.filter(x => x !== n) : [...ch.hide, n]; saveCh(); render(); return; }
+  if (b.id === "addRig") { let r = $("newRig").value.trim().toUpperCase().replace(/^([A-Z]+)\s*0*(\d+)$/, (m, a, d) => `${a} ${d.padStart(3, "0")}`); if (!r) { toast("Type the rig name."); return; }
+    if (allRigs().includes(r)) { toast(r + " is already on the list."); return; }
+    cfg = { ...cfg, extraRigs: [...(cfg.extraRigs || []), r], rigs: [...cfg.rigs, r] }; await metaSet("cfg", cfg); toast(r + " added. It shows on the shift form now."); render(); return; }
   if (b.id === "cfgSave") { const r = [...app.querySelectorAll("input[name=rig]:checked")].map(i => i.value); if (!r.length) { toast("Choose at least one rig."); return; }
     cfg = { ...cfg, rigs: r, device: $("devName").value.trim() }; await metaSet("cfg", cfg); toast("Saved"); render(); }
 });
