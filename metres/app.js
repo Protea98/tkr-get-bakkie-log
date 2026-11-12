@@ -203,10 +203,10 @@ function settingsView() {
 
 /* ---------- capture / edit a shift ---------- */
 let form = null;   // { id, isNew, date, shift, keep: Set(fileIds kept), drop: Set }
-const delayRow = (d = {}) => { const t = d.h == null || d.h === "" ? "" : Math.round(+d.h * 60);
-  return `<div class="drow"><select data-k="cat" aria-label="Type of delay">${DELAY_CATS.map(c => `<option ${c === (d.cat || "Breakdowns") ? "selected" : ""}>${c}</option>`).join("")}</select>
-    <input data-k="hh" inputmode="numeric" placeholder="h" value="${t === "" ? "" : Math.floor(t / 60)}" aria-label="Hours"><input data-k="mm" inputmode="numeric" placeholder="min" value="${t === "" ? "" : t % 60}" aria-label="Minutes">
-    <input data-k="text" placeholder="What happened" value="${esc(d.text || "")}"><button type="button" class="danger" data-drm aria-label="Remove this delay">×</button></div>`; };
+const delayRow = (d = {}) => { const t = d.h == null || d.h === "" ? "" : Math.round(+d.h * 60), ro = d.ctrl ? ' readonly title="From the Control Room"' : "";
+  return `<div class="drow${d.ctrl ? " ctrl" : ""}" ${d.ctrl ? `data-ctrl="${esc(d.ctrl)}"` : ""}><select data-k="cat" aria-label="Type of delay">${DELAY_CATS.map(c => `<option ${c === (d.cat || "Breakdowns") ? "selected" : ""}>${c}</option>`).join("")}</select>
+    <input data-k="hh" inputmode="numeric" placeholder="h" value="${t === "" ? "" : Math.floor(t / 60)}" aria-label="Hours"${ro}><input data-k="mm" inputmode="numeric" placeholder="min" value="${t === "" ? "" : t % 60}" aria-label="Minutes"${ro}>
+    <input data-k="text" placeholder="What happened" value="${esc(d.text || "")}">${d.ctrl ? '<span class="ctag" title="Hours and minutes come from the Control Room">CR</span>' : '<button type="button" class="danger" data-drm aria-label="Remove this delay">×</button>'}</div>`; };
 async function fileChips(list) {
   return list.map(f => `<span class="fchip" data-fid="${f.id}">${f.thumb ? `<img src="${f.thumb}" alt="">` : `<span class="pdf">${/pdf/.test(f.mime) ? "PDF" : "PHOTO"}</span>`}<span>${esc(f.type)}</span><button type="button" data-view="${f.id}">View</button><button type="button" class="danger" data-frm="${f.id}">Remove</button></span>`).join("");
 }
@@ -217,12 +217,12 @@ async function openForm(id, preset) {
   form = { id: s?.id || null, date, shift: sh, drop: new Set() };
   const sups = [...new Set(shifts.map(x => x.supervisor).filter(Boolean))].sort();
   const F = s ? filesOf(s.id) : [];
-  const rigCard = async r => { const g = rigOn(s, r) || {}, st = g.status || "";
+  const rigCard = async r => { const g0 = rigOn(s, r) || {}, st = g0.status || "", g = s ? g0 : { ...g0, delays: ctrlDelays(date, sh, r) };
     return `<div class="rigcard" data-rig="${r}"><h3>${r}<span class="muted" style="font-size:13px;font-weight:500">${st ? "" : "leave empty if not used"}</span></h3>
       <div class="seg" style="margin-bottom:10px">${[["Working", "ok"], ["Not working", "bad"], ["", ""]].map(([v, c]) => `<label class="${c}"><input type="radio" name="st-${r}" value="${v}" ${st === v ? "checked" : ""}>${v || "Not used"}</label>`).join("")}</div>
       <div class="grid"><label>Metres drilled <input data-f="metres" inputmode="decimal" value="${g.metres ?? ""}"></label><label>Block <input data-f="block" value="${esc(g.block || "")}"></label>
         <label>Machine hours start <input data-f="hrsFrom" inputmode="decimal" value="${esc(g.hrsFrom || "")}"></label><label>Machine hours end <input data-f="hrsTo" inputmode="decimal" value="${esc(g.hrsTo || "")}"></label></div>
-      <div class="sect" style="margin:14px 0 6px">Breakdowns and delays</div><div data-delays>${(g.delays || []).map(delayRow).join("")}</div><button type="button" class="sm" data-dadd>+ Add a breakdown or delay</button>
+      <div class="sect" style="margin:14px 0 6px">Breakdowns and delays <span class="muted" style="font-weight:500;text-transform:none;letter-spacing:0">· CR = hours and minutes from the Control Room</span></div><div data-delays>${(g.delays || []).map(delayRow).join("")}</div><button type="button" class="sm" data-dadd>+ Add a breakdown or delay</button>
       <div class="sect" style="margin:14px 0 6px">Documents</div><div class="flist">${await fileChips(F.filter(f => f.rig === r))}</div>
       <div class="docs">${DOC_TYPES.map(t => `<label class="pick ${t === "Tally sheet" ? "req" : ""}">${t}<input type="file" data-type="${t}" accept="image/*,application/pdf" multiple><em class="muted" style="font-style:normal"></em></label>`).join("")}</div></div>`; };
   const cards = (await Promise.all(rigs().map(rigCard))).join("");
@@ -281,7 +281,7 @@ async function saveForm(e) {
   for (const card of f.querySelectorAll(".rigcard")) {
     const r = card.dataset.rig, v = k => card.querySelector(`[data-f=${k}]`).value.trim(), st = card.querySelector(`input[name="st-${r}"]:checked`)?.value || "";
     const delays = [...card.querySelectorAll(".drow")].map(x => { const g = k => x.querySelector(`[data-k=${k}]`).value.trim(), hh = g("hh"), mm = g("mm");
-      return { cat: g("cat"), h: hh === "" && mm === "" ? null : Math.round((num(hh) + num(mm) / 60) * 100) / 100, text: g("text") }; });
+      return { cat: g("cat"), h: hh === "" && mm === "" ? null : Math.round((num(hh) + num(mm) / 60) * 100) / 100, text: g("text"), ...(x.dataset.ctrl ? { ctrl: x.dataset.ctrl } : {}) }; });
     const rp = [...card.querySelectorAll("input[type=file]")].flatMap(i => [...i.files].map(file => ({ file, type: i.dataset.type, rig: r })));
     picks.push(...rp);
     const keepFiles = form.id ? filesOf(form.id).filter(x => x.rig === r && !form.drop.has(x.id)).length : 0;
@@ -489,7 +489,7 @@ function fromForecast(L) {
     g.metres = r1(num(g.metres) + num(x.metres));
     g.status = x.status || g.status || (/^\s*not working/i.test(x.note || "") ? "Not working" : num(x.metres) > 0 || /^\s*working/i.test(x.note || "") ? "Working" : "");
     g.block = g.block || x.block || ""; g.hrsFrom = g.hrsFrom || x.hrsFrom || ""; g.hrsTo = g.hrsTo || x.hrsTo || "";
-    if (Array.isArray(x.delays)) g.delays.push(...x.delays.map(d => ({ cat: d.cat || "Other", h: d.h ?? null, text: d.text || "" })));
+    if (Array.isArray(x.delays)) g.delays.push(...x.delays.map(d => ({ cat: d.cat || "Other", h: d.h ?? null, text: d.text || "", ...(d.ctrl ? { ctrl: d.ctrl } : {}) })));
     else String(x.note || "").replace(/^\s*(not working|working)\s*[–-]?\s*/i, "").split(/\s*·\s*|;\s*/).map(t => t.trim()).filter(Boolean).forEach(t => g.delays.push({ cat: catOf(t), h: hoursIn(t), text: t })); }
   const t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
   return { id: s0.date + "|" + (s0.shift || "Day"), date: s0.date, shift: s0.shift || "Day", supervisor: L.map(x => x.supervisor).find(Boolean) || "", report: L.map(x => x.report).find(Boolean) || "", rigs: rigsOut, savedAt: t, editedAt: t, fcAt: t, device: "GET Forecast" };
@@ -576,7 +576,7 @@ async function fcSync(manual, say) {
   fcBusy = true; fcMsg = "Checking GET Forecast…"; render();
   try {
     const t = today(), m0 = (month < t.slice(0, 7) ? month : t.slice(0, 7)) + "-01", from = m0 < FC_FROM ? FC_FROM : m0;
-    const pulled = await fcPull(from, t); try { await fcPullDocs("2026-10-01", t); } catch (e) { console.warn(e); } await load();
+    const pulled = await fcPull(from, t); try { await fcPullDocs("2026-10-01", t); } catch (e) { console.warn(e); } await load(); await linkCtrl();
     if (fcAdmin()) { await fcPush(x => { fcMsg = x; const el = $("fcMsg"); if (el) el.textContent = x; }); await load(); }
     fcLast = Date.now(); await metaSet("fcLast", fcLast);
     fcMsg = `Up to date with GET Forecast (${when(fcLast)})${pulled ? ` · ${pulled} shift${pulled === 1 ? "" : "s"} brought in` : ""}.`;
@@ -595,6 +595,48 @@ function fcCard() {
     <p class="muted" id="fcMsg">${esc(fcMsg)}</p></section>`;
 }
 addEventListener("online", () => { if (fbUser) fcSync(false); else render(); });
+
+/* ---------- link with the Control Room: its breakdown, standby and maintenance times for the drill rigs
+   come in as delays (hours and minutes only) on the matching shift. Read from the Control Room on this PC and,
+   with signal, from the TKR app. ---------- */
+const CTRL_CAT = { BD: "Breakdowns", PM: "Service and maintenance", SB: "Other" }, CTRL_NAME = { BD: "Breakdown", PM: "Planned maintenance", SB: "Standby" };
+let ctrlEvs = new Map();
+const ctMs = s => { if (!s) return 0; const [d, t] = s.split("T"), [y, m, dd] = d.split("-").map(Number), [h, mi] = (t || "00:00").split(":").map(Number); return new Date(y, m - 1, dd, h, mi).getTime(); };
+function takeCtrl(L) { for (const r of L) { if (r.kind !== "ev") continue; const o = ctrlEvs.get(r.id); if (!o || (r.editedAt || 0) > (o.editedAt || 0)) ctrlEvs.set(r.id, r); } }
+async function readCtrlLocal() {
+  try { const L = await indexedDB.databases?.(); if (!L || !L.some(d => d.name === "tkr-control")) return; } catch { return; }
+  const d = await new Promise((res, rej) => { const r = indexedDB.open("tkr-control"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  try { if (!d.objectStoreNames.contains("rec")) return; takeCtrl(await req(d.transaction("rec").objectStore("rec").getAll())); } finally { d.close(); }
+}
+async function readCtrlRemote() {
+  if (!navigator.onLine || !fbUser) return; const { db, collection, getDocs, query, where } = fb, t = today().slice(0, 7);
+  const months = [...new Set([shiftMonth(t, -1), t, month])];
+  takeCtrl((await getDocs(query(collection(db, "ctrl"), where("ym", "in", months)))).docs.map(x => ({ id: x.id, ...x.data() })));
+}
+function ctrlDelays(date, sh, rig) {
+  const mc = rig.replace(/\s+/g, ""), a = ctMs(date + "T" + (sh === "Day" ? "06:00" : "18:00")), b = a + 12 * 36e5, now = Date.now();
+  return [...ctrlEvs.values()].filter(e => !e.deleted && e.machine === mc && CTRL_CAT[e.type])
+    .map(e => { const s0 = Math.max(a, ctMs(e.start)), e0 = Math.min(b, e.end ? ctMs(e.end) : now), min = Math.round((e0 - s0) / 6e4); return { e, min }; })
+    .filter(x => x.min > 0).sort((x, y) => ctMs(x.e.start) - ctMs(y.e.start))
+    .map(({ e, min }) => ({ cat: CTRL_CAT[e.type], h: Math.round(min / 60 * 100) / 100, text: `${e.reason || CTRL_NAME[e.type]} (Control Room${e.end ? "" : ", still going"})`, ctrl: e.id }));
+}
+async function linkCtrl() {
+  try { await readCtrlLocal(); } catch (e) { console.warn(e); }
+  try { await readCtrlRemote(); } catch (e) { console.warn("control room not reachable", e?.code || e); }
+  if (!ctrlEvs.size) return 0;
+  const now = Date.now(), changed = [];
+  for (const s of shifts) { if (s.date < FC_FROM) continue; const R2 = { ...(s.rigs || {}) }; let ch = false;
+    for (const r of allRigs()) { const g = R2[r], cd = ctrlDelays(s.date, s.shift, r), own = (g?.delays || []).filter(d => !d.ctrl), nd = [...own, ...cd];
+      if (JSON.stringify(nd) === JSON.stringify(g?.delays || [])) continue;
+      if (!g && !cd.length) continue;
+      R2[r] = { ...(g || { status: "", metres: "", block: "", hrsFrom: "", hrsTo: "" }), delays: nd }; ch = true; }
+    if (ch) changed.push({ ...s, rigs: R2, editedAt: now }); }
+  if (changed.length) { await tx(["shifts"], "readwrite", t => { for (const s of changed) t.objectStore("shifts").put(s); }); await load(); }
+  return changed.length;
+}
+let linking = false;
+async function relink() { if (linking) return; linking = true; try { if (await linkCtrl()) render(); } finally { linking = false; } }
+addEventListener("focus", relink); document.addEventListener("visibilitychange", () => { if (!document.hidden) relink(); });
 
 /* ---------- events ---------- */
 app.addEventListener("click", async e => {
@@ -634,5 +676,5 @@ app.addEventListener("change", e => {
 });
 addEventListener("keydown", e => { if (e.key === "Escape" && form) closeForm(); });
 
-(async () => { if (await load()) { try { await ensureOctober(); await load(); } catch (e) { console.warn(e); } render(); if (navigator.onLine) fire().catch(e => console.warn(e)); if (navigator.onLine && ms.driveId) { try { await spInit(ms); render(); } catch (e) { console.warn(e); } } } })();
+(async () => { if (await load()) { try { await ensureOctober(); await load(); } catch (e) { console.warn(e); } try { await linkCtrl(); } catch (e) { console.warn(e); } render(); if (navigator.onLine) fire().catch(e => console.warn(e)); if (navigator.onLine && ms.driveId) { try { await spInit(ms); render(); } catch (e) { console.warn(e); } } } })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("../sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});

@@ -49,3 +49,5 @@ body.embed .band{display:none}
 body.embed .wrap{padding-top:4px}
 body.embed .tkr-back{display:none}
 
+.drow.ctrl input[readonly]{background:color-mix(in srgb,#6fb3ff 14%,var(--panel));color:#9fcbff;font-weight:700}
+.ctag{display:grid;place-items:center;border:1px solid #6fb3ff;color:#6fb3ff;border-radius:8px;font-size:12px;font-weight:800}
