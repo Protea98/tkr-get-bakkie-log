@@ -6,7 +6,7 @@ import { tabBar, pageHead, matches, icon } from "../lib/ui.js";
 import { OCT_2026_LINES } from "../lib/oct2026.js";
 const EMBED = new URLSearchParams(location.search).has("embed");
 if (EMBED) document.body.classList.add("embed");
-import { buildMetresWorkbook, bdData, daysOf } from "../lib/metres-xlsx.js";
+import { buildMetresWorkbook, buildMachinesWorkbook, bdData, daysOf } from "../lib/metres-xlsx.js";
 import { spConfigured, spInit, spReady, spWho, spSignIn, spSignOut, spUpload, spLinked, spLinkOneDrive, spFolderUrl } from "../lib/sharepoint.js";
 /* TKR's Microsoft 365 app registration (TKR Operations App). These two IDs are not secret. */
 const MS_DEFAULT = { tenant: "7897d56e-74c6-47b7-a13d-e9335a8e9c86", clientId: "c11659ac-24c0-47b2-ba78-1dbb58a3b106", folder: "TKR App" };
@@ -75,7 +75,7 @@ async function load() {
 const shiftOf = (d, sh) => shifts.find(s => s.id === d + "|" + sh);
 const filesOf = id => files.filter(f => f.shiftId === id);
 const rigOn = (s, r) => s?.rigs?.[r];
-const delayText = rg => (rg?.delays || []).map(d => (d.text || d.cat) + (d.h ? ` (${hm(d.h)})` : "")).join(" · ");
+const delayText = rg => [rg?.problem ? "Problem: " + rg.problem : "", ...(rg?.delays || []).map(d => (d.text || d.cat) + (d.h && !/\d\s*(h|hr|hrs|hours?|min|mins|minutes?)\b/i.test(d.text || "") ? ` (${hm(d.h)})` : ""))].filter(Boolean).join(" · ");
 const hasTally = (s, r) => files.some(f => f.shiftId === s.id && f.rig === r && f.type === "Tally sheet");
 /* every rig that drilled metres on a shift needs its tally sheet attached, whatever its status says */
 const needsTally = s => rigs().filter(r => { const g = rigOn(s, r); return g && num(g.metres) > 0 && !hasTally(s, r); });
@@ -175,8 +175,9 @@ function exportView() {
   return pageHead("Export and backup", "Take the metres off this device", "", "", "Do this every few days. The ZIP has the Excel, every document in month and shift folders (November 2026 Metres › 01 DAY), and a backup that can be loaded on any other PC or phone.")
     + fcCard() + `<section class="card dl-card"><h2>Export</h2><div class="rangebar"><label>From <input type="date" id="xFrom" value="${xFrom}" max="${today()}"></label><label>To <input type="date" id="xTo" value="${xTo}" max="${today()}"></label>
         <label style="flex:1 1 200px">Tharisa's metres for these dates (if you have it) <input id="xTh" inputmode="decimal" value="${esc(tharisa)}" placeholder="optional"></label></div>
-      <div class="openers" style="margin:0"><button class="opener" data-x="zip"><span class="oi">${icon("import")}</span><span class="ot"><b>Download everything (ZIP)</b><small>Excel + all documents in folders + backup</small></span><span class="oa">›</span></button>
-      <button class="opener" data-x="xlsx"><span class="oi">${icon("docs")}</span><span class="ot"><b>Download the Excel only</b><small>Same tabs as the metres workbook, tally sheets inside</small></span><span class="oa">›</span></button></div>
+      <div class="openers" style="margin:0"><button class="opener" data-x="zip"><span class="oi">${icon("import")}</span><span class="ot"><b>Download everything (ZIP)</b><small>both Excels + all documents in folders + backup</small></span><span class="oa">›</span></button>
+      <button class="opener" data-x="xlsx"><span class="oi">${icon("docs")}</span><span class="ot"><b>Download the Excel only</b><small>Same tabs as the metres workbook, tally sheets inside</small></span><span class="oa">›</span></button>
+      <button class="opener" data-x="mm"><span class="oi">${icon("docs")}</span><span class="ot"><b>Download Drilling Machines and Metres</b><small>Metres per day · Per machine · Shift detail, with the problem and delays per machine</small></span><span class="oa">›</span></button></div>
       ${ms.driveId ? `<div class="openers" style="margin:10px 0 0"><button class="opener good" data-x="od"><span class="oi">${icon("import")}</span><span class="ot"><b>Send to OneDrive</b><small>${files.filter(f => !f.odAt).length} documents not sent yet · needs signal</small></span><span class="oa">›</span></button></div>` : ""}
       <p class="muted" id="xMsg" style="margin:10px 0 0">${lastExport ? `Last export: <b>${when(lastExport.at)}</b> (${fmt(lastExport.from)} to ${fmt(lastExport.to)}) · ${changedSinceExport()} shifts captured or changed since then.` : "Nothing exported from this device yet."}</p></section>
     <section class="card"><h2>Load a backup</h2><p class="muted" style="margin-top:0">Choose a ZIP exported from this page (from this or another device). Shifts and documents not on this device are added; a shift saved on both keeps the newer one.</p>
@@ -222,6 +223,7 @@ async function openForm(id, preset) {
       <div class="seg" style="margin-bottom:10px">${[["Working", "ok"], ["Not working", "bad"], ["", ""]].map(([v, c]) => `<label class="${c}"><input type="radio" name="st-${r}" value="${v}" ${st === v ? "checked" : ""}>${v || "Not used"}</label>`).join("")}</div>
       <div class="grid"><label>Metres drilled <input data-f="metres" inputmode="decimal" value="${g.metres ?? ""}"></label><label>Block <input data-f="block" value="${esc(g.block || "")}"></label>
         <label>Machine hours start <input data-f="hrsFrom" inputmode="decimal" value="${esc(g.hrsFrom || "")}"></label><label>Machine hours end <input data-f="hrsTo" inputmode="decimal" value="${esc(g.hrsTo || "")}"></label></div>
+      <label style="display:block;margin-top:12px">What was the problem on ${r}? <textarea data-f="problem" rows="2" style="width:100%" placeholder="Describe the breakdown or problem on this machine, e.g. drifter leaking oil, hydraulic hose burst at the boom">${esc(g.problem || "")}</textarea></label>
       <div class="sect" style="margin:14px 0 6px">Breakdowns and delays <span class="muted" style="font-weight:500;text-transform:none;letter-spacing:0">· CR = hours and minutes from the Control Room</span></div><div data-delays>${(g.delays || []).map(delayRow).join("")}</div><button type="button" class="sm" data-dadd>+ Add a breakdown or delay</button>
       <div class="sect" style="margin:14px 0 6px">Documents</div><div class="flist">${await fileChips(F.filter(f => f.rig === r))}</div>
       <div class="docs">${DOC_TYPES.map(t => `<label class="pick ${t === "Tally sheet" ? "req" : ""}">${t}<input type="file" data-type="${t}" accept="image/*,application/pdf" multiple><em class="muted" style="font-style:normal"></em></label>`).join("")}</div></div>`; };
@@ -285,8 +287,8 @@ async function saveForm(e) {
     const rp = [...card.querySelectorAll("input[type=file]")].flatMap(i => [...i.files].map(file => ({ file, type: i.dataset.type, rig: r })));
     picks.push(...rp);
     const keepFiles = form.id ? filesOf(form.id).filter(x => x.rig === r && !form.drop.has(x.id)).length : 0;
-    if (!st && v("metres") === "" && !delays.length && !rp.length && !keepFiles && !v("block")) continue;
-    rigData[r] = { status: st || (num(v("metres")) > 0 ? "Working" : ""), metres: v("metres") === "" ? "" : num(v("metres")), block: v("block"), hrsFrom: v("hrsFrom"), hrsTo: v("hrsTo"), delays };
+    if (!st && v("metres") === "" && !delays.length && !rp.length && !keepFiles && !v("block") && !v("problem")) continue;
+    rigData[r] = { status: st || (num(v("metres")) > 0 ? "Working" : ""), metres: v("metres") === "" ? "" : num(v("metres")), block: v("block"), hrsFrom: v("hrsFrom"), hrsTo: v("hrsTo"), problem: v("problem"), delays };
   }
   if (!Object.keys(rigData).length && !picks.length) { toast("Fill in at least one drill rig."); return; }
   btn.disabled = true; btn.textContent = "Saving…";
@@ -396,6 +398,15 @@ async function makeExcel(from, to, say) {
   const tag = `${fmt(from).replace(/\//g, "-")}${from === to ? "" : "_to_" + fmt(to).replace(/\//g, "-")}`;
   return { blob, name: `TKR_Drilling_Metres_and_Tally_Sheets_${tag}.xlsx`, tag };
 }
+async function makeMachines(from, to) {
+  await loadLib("../lib/exceljs.min.js");
+  let logoBuf = null; try { logoBuf = await (await fetch("../icons/icon-512.png")).arrayBuffer(); } catch {}
+  const list = shifts.filter(s => s.date >= from && s.date <= to).flatMap(s => Object.entries(s.rigs || {}).map(([r, g]) => { const dt = delayText(g);
+    return { date: s.date, shift: s.shift, rig: r, block: g.block || "", metres: r1(num(g.metres)), supervisor: s.supervisor || "", note: [g.status, dt].filter(Boolean).join(" – ") }; }));
+  const R0 = [...new Set([...allRigs(), ...list.map(x => x.rig)])];
+  const blob = await buildMachinesWorkbook(window.ExcelJS, { from, to, rigs: R0, list, logoBuf });
+  return { blob, name: `TKR_Drilling_Machines_and_Metres_${fmt(from).replace(/\//g, "-")}${from === to ? "" : "_to_" + fmt(to).replace(/\//g, "-")}.xlsx` };
+}
 async function doExport(kind) {
   const from = $("xFrom").value, to = $("xTo").value, msg = $("xMsg"), say = t => { if (msg) msg.textContent = t; };
   if (!from || !to || from > to) { toast("Choose a From date before the To date."); return; }
@@ -403,10 +414,11 @@ async function doExport(kind) {
   document.querySelectorAll("[data-x]").forEach(b => b.disabled = true);
   if (kind === "od") { try { await sendOneDrive(from, to, say); } catch (e) { console.warn(e); say("OneDrive: " + String(e?.errorMessage || e?.message || e).slice(0, 160)); toast("Sending to OneDrive didn't work."); } document.querySelectorAll("[data-x]").forEach(b => b.disabled = false); return; }
   try {
+    if (kind === "mm") { const x = await makeMachines(from, to); const { deliver } = await import("../lib/deliver.js"); deliver(x.blob, x.name); say(`Downloaded ${x.name}.`); toast("Downloaded."); document.querySelectorAll("[data-x]").forEach(b => b.disabled = false); return; }
     const x = await makeExcel(from, to, say); let out = x.blob, name = x.name;
     if (kind === "zip") {
       await loadLib("../lib/jszip.min.js"); const zip = new window.JSZip(), root = `TKR Drilling Metres ${x.tag}`;
-      zip.file(`${root}/${x.name}`, x.blob);
+      zip.file(`${root}/${x.name}`, x.blob); try { const y = await makeMachines(from, to); zip.file(`${root}/${y.name}`, y.blob); } catch (e) { console.warn(e); }
       const F = files.filter(f => f.date >= from && f.date <= to), used = new Set(), back = [];
       let k = 0;
       for (const f of F) { say(`Putting the documents in folders… ${++k} of ${F.length}`);
@@ -488,7 +500,7 @@ function fromForecast(L) {
   for (const x of L) { if (!x.rig || x.rig === "Not allocated") continue; const g = rigsOut[x.rig] || (rigsOut[x.rig] = { status: "", metres: 0, block: "", hrsFrom: "", hrsTo: "", delays: [] });
     g.metres = r1(num(g.metres) + num(x.metres));
     g.status = x.status || g.status || (/^\s*not working/i.test(x.note || "") ? "Not working" : num(x.metres) > 0 || /^\s*working/i.test(x.note || "") ? "Working" : "");
-    g.block = g.block || x.block || ""; g.hrsFrom = g.hrsFrom || x.hrsFrom || ""; g.hrsTo = g.hrsTo || x.hrsTo || "";
+    g.block = g.block || x.block || ""; g.problem = g.problem || x.problem || ""; g.hrsFrom = g.hrsFrom || x.hrsFrom || ""; g.hrsTo = g.hrsTo || x.hrsTo || "";
     if (Array.isArray(x.delays)) g.delays.push(...x.delays.map(d => ({ cat: d.cat || "Other", h: d.h ?? null, text: d.text || "", ...(d.ctrl ? { ctrl: d.ctrl } : {}) })));
     else String(x.note || "").replace(/^\s*(not working|working)\s*[–-]?\s*/i, "").split(/\s*·\s*|;\s*/).map(t => t.trim()).filter(Boolean).forEach(t => g.delays.push({ cat: catOf(t), h: hoursIn(t), text: t })); }
   const t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
@@ -547,8 +559,8 @@ async function fcPush(say) {
     for (const r of cfg.rigs) { const g = s.rigs[r], mine = lineId(s.date, s.shift, r);
       for (const x of R.filter(x => (x.shift || "Day") === s.shift && x.rig === r && x.id !== mine)) await deleteDoc(doc(db, "fcMetres", x.id));
       if (!g) { if (R.some(x => x.id === mine)) await deleteDoc(doc(db, "fcMetres", mine)); continue; }
-      const note = (g.status || "") + (g.delays.length ? " – " + g.delays.map(d => (d.text || d.cat) + (d.h ? ` (${hm(d.h)})` : "")).join(" · ") : "");
-      await setDoc(doc(db, "fcMetres", mine), { date: s.date, shift: s.shift, rig: r, metres: num(g.metres), block: g.block || "", supervisor: s.supervisor || "", status: g.status || "", delays: g.delays, note,
+      const dt = delayText(g), note = (g.status || "") + (dt ? " – " + dt : "");
+      await setDoc(doc(db, "fcMetres", mine), { date: s.date, shift: s.shift, rig: r, metres: num(g.metres), block: g.block || "", supervisor: s.supervisor || "", status: g.status || "", problem: g.problem || "", delays: g.delays, note,
         hrsFrom: g.hrsFrom || "", hrsTo: g.hrsTo || "", report: s.report || "", by: me, src: "metres", createdAt: s.savedAt || Date.now(), editedAt: s.editedAt || Date.now() }); }
     await tx(["shifts"], "readwrite", t => { t.objectStore("shifts").put({ ...s, fcAt: s.editedAt }); });
   }
