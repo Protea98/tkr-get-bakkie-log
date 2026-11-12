@@ -77,7 +77,9 @@ const filesOf = id => files.filter(f => f.shiftId === id);
 const rigOn = (s, r) => s?.rigs?.[r];
 const delayText = rg => (rg?.delays || []).map(d => (d.text || d.cat) + (d.h ? ` (${hm(d.h)})` : "")).join(" · ");
 const hasTally = (s, r) => files.some(f => f.shiftId === s.id && f.rig === r && f.type === "Tally sheet");
-const needsTally = s => rigs().filter(r => { const g = rigOn(s, r); return g && g.status === "Working" && num(g.metres) > 0 && !hasTally(s, r); });
+/* every rig that drilled metres on a shift needs its tally sheet attached, whatever its status says */
+const needsTally = s => rigs().filter(r => { const g = rigOn(s, r); return g && num(g.metres) > 0 && !hasTally(s, r); });
+const anyTally = s => files.some(f => f.shiftId === s.id && f.type === "Tally sheet");
 const shiftTotal = s => r1(Object.values(s.rigs || {}).reduce((n, g) => n + num(g.metres), 0));
 const sortKey = s => s.date + (s.shift === "Night" ? "2" : "1");
 
@@ -143,14 +145,14 @@ function registerView() {
 }
 function missingView() {
   const S = monthStats(month), days = daysOf(S.from, S.end), t = today();
-  const state = (d, sh) => { if (d > t) return "fut"; const s = shiftOf(d, sh); if (!s) return "miss"; return needsTally(s).length ? "part" : "ok"; };
+  const state = (d, sh) => { if (d > t) return "fut"; const s = shiftOf(d, sh); if (!s) return "miss"; return anyTally(s) && !needsTally(s).length ? "ok" : "part"; };
   const cells = days.flatMap(d => ["Day", "Night"].map(sh => ({ d, sh, st: state(d, sh) })));
   const notCap = cells.filter(c => c.st === "miss"), noTally = S.noTally;
-  const noDocs = S.L.filter(s => rigs().some(r => rigOn(s, r)?.status === "Working")).map(s => ({ s, miss: ["Job card", "Checklist"].filter(t => !filesOf(s.id).some(f => f.type === t)) })).filter(x => x.miss.length);
+  const noDocs = S.L.filter(s => rigs().some(r => /^Working/.test(rigOn(s, r)?.status || "") || num(rigOn(s, r)?.metres) > 0)).map(s => ({ s, miss: ["Job card", "Checklist"].filter(t => !filesOf(s.id).some(f => f.type === t)) })).filter(x => x.miss.length);
   return pageHead("What's missing", monthName(month), "", "", `${S.expected} shifts this month (day and night, every day). Tap a box to capture or open that shift.`)
     + `<div class="mhead">${monthBar()}</div>`
     + `<div class="tiles">${tile("Shifts captured", `${S.L.length} of ${S.sofar}`, `so far · ${S.expected} in the month`, notCap.length ? "alert" : "good")}${tile("Not captured", String(notCap.length), "up to today", notCap.length ? "alert" : "good")}${tile("Without a tally sheet", String(noTally.length), "shifts with metres", noTally.length ? "alert" : "good")}${tile("Without a job card or checklist", String(noDocs.length), "working shifts", noDocs.length ? "alert" : "good")}</div>`
-    + `<div class="legend2"><span><i style="background:var(--ok)"></i>Captured with tally sheets</span><span><i style="background:var(--gold)"></i>Captured, tally sheet missing</span><span><i style="background:var(--bad)"></i>Not captured</span></div>`
+    + `<div class="legend2"><span><i style="background:var(--ok)"></i>Captured, tally sheet attached for every rig that drilled</span><span><i style="background:var(--gold)"></i>Captured, no tally sheet attached</span><span><i style="background:var(--bad)"></i>Not captured</span></div>`
     + `<div class="mgrid">${cells.map(c => `<button class="mcell ${c.st}" data-cap="${c.d}|${c.sh}" ${c.st === "fut" ? "disabled" : ""}><b>${c.d.slice(8)}</b>${c.sh}</button>`).join("")}</div>`
     + `<div class="grid2c"><section class="card"><h2>Not captured (${notCap.length})</h2><div class="res miss-list">${notCap.slice().reverse().map(c => `<div class="ri"><div class="rt"><b>${dow(c.d)} ${fmt(c.d)} · ${c.sh} shift</b></div><button class="sm primary" data-cap="${c.d}|${c.sh}">Capture</button></div>`).join("") || '<p class="muted">Every shift up to today is captured.</p>'}</div></section>
       <section class="card"><h2>No tally sheet (${noTally.length})</h2><div class="res">${noTally.map(({ s, r }) => `<div class="ri"><div class="rt"><b>${dow(s.date)} ${fmt(s.date)} · ${s.shift} · ${r}</b><small>${M1(num(rigOn(s, r).metres))} m</small></div><button class="sm" data-cap="${s.id}">Add tally sheet</button></div>`).join("") || '<p class="muted">Every shift with metres has a tally sheet.</p>'}</div>
