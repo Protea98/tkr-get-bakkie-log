@@ -219,10 +219,9 @@ function dash(c) {
     <div class="row"><label>Report date <input type="date" id="rd" value="${c.rd}"></label>
       <button id="msgBtn">WhatsApp message</button><button class="primary" id="xlBtn">Export GET tracker (Excel)</button></div>
   </div>
-  <section class="card dl-card"><h2>GET consumption report (date to date)</h2>
-    <p class="muted" style="margin-top:0">Bits, rods and shanks: stock at the start and end, received, issued, cost, metres drilled, metres per item and cost per metre, per rig and per day, with every issue line.</p>
-    <div class="row" style="align-items:flex-end"><label style="flex:1 1 140px">From <input type="date" id="cFrom" value="${consFrom || c.rd.slice(0, 7) + "-01"}" max="${today()}"></label><label style="flex:1 1 140px">To <input type="date" id="cTo" value="${consTo || (c.rd > today() ? today() : c.rd)}" max="${today()}"></label>
-      <button class="primary" id="consGo" style="flex:1 1 220px;min-height:48px">Download consumption report (Excel)</button></div></section>
+  <div class="row" style="align-items:flex-end;margin:-4px 0 16px;gap:10px"><b style="flex:1 1 100%">Download from one date to another</b>
+    <label>From <input type="date" id="cFrom" value="${consFrom || c.rd.slice(0, 7) + "-01"}" max="${today()}"></label><label>To <input type="date" id="cTo" value="${consTo || (c.rd > today() ? today() : c.rd)}" max="${today()}"></label>
+    <button class="primary" id="consGo">GET consumption report (Excel)</button><button id="mmGo">Machines and metres (Excel)</button></div>
   ${empty ? `<div class="notice"><b class="t">No data yet</b>${isAdmin() ? "Tap Import and choose your GET tracker file to bring in October so far, or add the metres." : "Ask admin to import the GET tracker or add the metres."}</div>` : ""}
   <div class="notice"><b class="t">Why the forecast looks like this</b><ul>${ex.out.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
   ${ex.warn.length ? `<div class="notice warn"><b class="t">Check</b><ul>${ex.warn.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
@@ -402,8 +401,10 @@ app.addEventListener("click", async e => {
   if (await drill.onClick(e)) return;
   if (b.dataset.del) { const [c, id] = b.dataset.del.split("|"); if (confirm("Delete this line?")) deleteDoc(doc(db, c, id)).catch(fail); return; }
   if (b.id === "msgBtn") { const t = message(calc(reportDate)); try { await navigator.clipboard.writeText(t); toast("Message copied. Paste it into WhatsApp."); } catch { prompt("Copy the message:", t); } return; }
+  if (b.id === "mmGo") { const f = $("cFrom").value, t = $("cTo").value; if (!f || !t || t < f) { toast("Pick a From date and a later To date."); return; }
+    b.disabled = true; try { await drill.exportMetres(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; return; }
   if (b.id === "consGo") { const f = $("cFrom").value, t = $("cTo").value; if (!f || !t || t < f) { toast("Pick a From date and a later To date."); return; }
-    b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportConsumption(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; b.textContent = "Download consumption report (Excel)"; return; }
+    b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportConsumption(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; b.textContent = "GET consumption report (Excel)"; return; }
   if (b.id === "xlBtn") { b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportExcel(calc(reportDate)); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } render(); }
 });
 app.addEventListener("change", async e => {
