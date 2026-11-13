@@ -220,7 +220,7 @@ function invView() {
 function exportView() {
   const m = month, mb = `<div class="mbar"><button data-mnav="-1">‹</button><b>${monthName(m)}</b><button data-mnav="1" ${m >= today().slice(0, 7) ? "disabled" : ""}>›</button></div>`;
   return pageHead("Export and sync", "One file when you need it", "", "", "")
-    + `<section class="card dl-card"><h2>Download the month (Excel)</h2><div class="mhead">${mb}</div><p class="muted">The same sheets as the control room workbook: the invoicing lists, Monthly Availability and one sheet per day with the documents, the day and night shift times, the 24-hour summary and the hourly update log.</p><button class="primary" id="xl" style="min-height:52px">Download ${monthName(m)} Excel</button></section>`
+    + `<section class="card dl-card"><h2>Download Excel (date to date)</h2><div class="mhead">${mb}</div><p class="muted">The same sheets as the control room workbook: the invoicing lists, Monthly Availability and one sheet per day with the documents, the day and night shift times, the 24-hour summary and the hourly update log.</p><div class="row" style="align-items:flex-end;margin-top:10px"><label style="flex:1 1 150px">From <input type="date" id="cxFrom" value="${m}-01" max="${today()}"></label><label style="flex:1 1 150px">To <input type="date" id="cxTo" value="${monthEnd(m) < today() ? monthEnd(m) : today()}" max="${today()}"></label><button class="primary" id="xl" style="min-height:52px;flex:1 1 200px">Download Excel for these dates</button></div><p class="muted" style="margin-bottom:0">Pick a month with ‹ › or set your own From and To dates.</p></section>`
     + syncCard()
     + `<section class="card"><h2>Backup</h2><p class="muted" style="margin-top:0">Only needed if this PC never gets signal: save a backup file and load it on another PC.</p><div class="row"><button id="bk">Save a backup file</button><label class="btn" style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer">Load a backup <input type="file" id="rs" accept=".json" hidden></label></div></section>`;
 }
@@ -547,7 +547,8 @@ async function clickH(ev) {
   if (b.dataset.addm) { const gi = +b.dataset.addm, inp = app.querySelector(`[data-newm="${gi}"]`); if (await addMachine(gi, inp.value)) render(); return; }
   if (b.dataset.rmm) { const [, m] = b.dataset.rmm.split("|"); if (!confirm(`Take ${m} off the list? Its logged times stay.`)) return; await removeMachine(m); render(); return; }
   if (b.dataset.rmu) { if (!confirm("Remove yourself from this PC?")) return; const u = recs.find(r => r.id === b.dataset.rmu); await put({ ...u, deleted: true }); me = null; await metaSet("me", null); render(); return; }
-  if (b.id === "xl") { b.disabled = true; try { await exportXlsx(month); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; return; }
+  if (b.id === "xl") { const f = $("cxFrom")?.value || month + "-01", t = $("cxTo")?.value || monthEnd(month); if (t < f) { toast("The To date must be after the From date."); return; }
+    b.disabled = true; try { await exportXlsx(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; return; }
   if (b.id === "bk") { const blob = new Blob([JSON.stringify({ kind: "tkr-control-backup", at: Date.now(), recs })], { type: "application/json" }); const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_backup_${today()}.json`); return; }
   if (b.id === "syncNow") { syncNow(true); return; }
   if (b.id === "syncOut") { await fire(); await fb.signOut(fb.auth); render(); return; }
@@ -644,7 +645,8 @@ setInterval(() => { if (navigator.onLine && !sync.busy) syncNow(false).then(() =
 setInterval(() => { if (me && tab === "now" && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
-async function exportXlsx(m) {
+async function exportXlsx(from, to) {
+  const m = from.slice(0, 7), period = from === m + "-01" && to === monthEnd(m) ? monthName(m) : `${fmt(from)} to ${fmt(to)}`;
   toast("Making the Excel file…");
   await new Promise((res, rej) => { if (window.ExcelJS) return res(); const s = document.createElement("script"); s.src = "../lib/exceljs.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
   const wb = new window.ExcelJS.Workbook(); wb.creator = "TKR Operations";
@@ -661,7 +663,7 @@ async function exportXlsx(m) {
   const row = (ws, r, L, o = {}) => { L.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v === "" ? null : v; c.border = box; c.font = F({ bold: !!o.bold || (o.boldCol || []).includes(i) });
     c.alignment = { vertical: "middle", wrapText: !!o.wrap, horizontal: i < 2 || (o.left || []).includes(i) ? "left" : "center" }; if (typeof v === "number") c.numFmt = (o.fmt || {})[i] || "0.00"; if (o.fill) c.fill = fill(o.fill);
     const cc = COLR[v]; if (cc && !o.fill) { c.fill = fill(cc[0]); c.font = F({ bold: true, color: { argb: cc[1] } }); } }); };
-  const days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);
+  const days = []; for (let x = from; x <= to; x = addDays(x, 1)) days.push(x);
   const rec = id => recs.find(x => x.id === id && !x.deleted) || {};
   // 1. supporting documents per service
   let ws = wb.addWorksheet(monthName(m), { views: [{ showGridLines: false }] }); ws.columns = [20, 30, 9, 22, 16].map(w => ({ width: w }));
@@ -676,8 +678,8 @@ async function exportXlsx(m) {
   const nDone = ADDITIONAL.filter(([it]) => rec(addKey(m, it)).done === "✓").length; row(ws, r, ["All additional documents received", nDone === ADDITIONAL.length ? "Ready" : `${nDone} of ${ADDITIONAL.length}`, "", "", ""], { bold: true, fill: "FFFFF2CC" });
   // 3. monthly availability
   ws = wb.addWorksheet("Monthly Availability", { views: [{ state: "frozen", xSplit: 2, ySplit: 7, showGridLines: false }] }); ws.columns = [14, 11, ...days.map(() => 5.4), 11, 11, 11, 11, 11].map(w => ({ width: w }));
-  const nc = 2 + days.length + 5; top(ws, nc, `Monthly Availability – ${monthName(m)}`, "TKR OPERATIONS  ·  THARISA MINE", "Available hours per machine per day (06:00 to 06:00), with month totals");
-  head(ws, 7, ["Group", "Machine", ...days.map(x => +x.slice(8)), "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Down hrs", "Availability %"]); r = 8;
+  const nc = 2 + days.length + 5; top(ws, nc, `Monthly Availability – ${period}`, "TKR OPERATIONS  ·  THARISA MINE", "Available hours per machine per day (06:00 to 06:00), with month totals");
+  head(ws, 7, ["Group", "Machine", ...days.map(x => days.some(y => y.slice(0, 7) !== m) ? x.slice(8) + "/" + x.slice(5, 7) : +x.slice(8)), "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Down hrs", "Availability %"]); r = 8;
   const pct = (a, d) => a + d ? a / (a + d) : "";
   const fleetT = { per: days.map(() => 0), avail: 0, BD: 0, PM: 0, SB: 0, down: 0 };
   for (const [g, L] of fleet()) { const gt = { per: days.map(() => 0), avail: 0, BD: 0, PM: 0, SB: 0, down: 0 };
@@ -711,7 +713,7 @@ async function exportXlsx(m) {
       row(ws, r++, [`${pad(hh)}:00–${pad((hh + 1) % 24)}:00`, L.length ? "✓" : "", L[0] ? new Date(L[0].at).toTimeString().slice(0, 5) : "", [...new Set(L.map(l => l.by))].join(", "), L.map(l => l.what).slice(0, 4).join(" · ")], { left: [4] }); }
   }
   const blob = new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_${monthName(m).replace(" ", "_")}.xlsx`);
+  const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_${period === monthName(m) ? monthName(m).replace(" ", "_") : fmt(from).replace(/\//g, "-") + "_to_" + fmt(to).replace(/\//g, "-")}.xlsx`);
 }
 
 /* ---------- start ---------- */

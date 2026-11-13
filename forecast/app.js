@@ -219,6 +219,10 @@ function dash(c) {
     <div class="row"><label>Report date <input type="date" id="rd" value="${c.rd}"></label>
       <button id="msgBtn">WhatsApp message</button><button class="primary" id="xlBtn">Export GET tracker (Excel)</button></div>
   </div>
+  <section class="card dl-card"><h2>GET consumption report (date to date)</h2>
+    <p class="muted" style="margin-top:0">Bits, rods and shanks: stock at the start and end, received, issued, cost, metres drilled, metres per item and cost per metre, per rig and per day, with every issue line.</p>
+    <div class="row" style="align-items:flex-end"><label style="flex:1 1 140px">From <input type="date" id="cFrom" value="${consFrom || c.rd.slice(0, 7) + "-01"}" max="${today()}"></label><label style="flex:1 1 140px">To <input type="date" id="cTo" value="${consTo || (c.rd > today() ? today() : c.rd)}" max="${today()}"></label>
+      <button class="primary" id="consGo" style="flex:1 1 220px;min-height:48px">Download consumption report (Excel)</button></div></section>
   ${empty ? `<div class="notice"><b class="t">No data yet</b>${isAdmin() ? "Tap Import and choose your GET tracker file to bring in October so far, or add the metres." : "Ask admin to import the GET tracker or add the metres."}</div>` : ""}
   <div class="notice"><b class="t">Why the forecast looks like this</b><ul>${ex.out.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
   ${ex.warn.length ? `<div class="notice warn"><b class="t">Check</b><ul>${ex.warn.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
@@ -398,6 +402,8 @@ app.addEventListener("click", async e => {
   if (await drill.onClick(e)) return;
   if (b.dataset.del) { const [c, id] = b.dataset.del.split("|"); if (confirm("Delete this line?")) deleteDoc(doc(db, c, id)).catch(fail); return; }
   if (b.id === "msgBtn") { const t = message(calc(reportDate)); try { await navigator.clipboard.writeText(t); toast("Message copied. Paste it into WhatsApp."); } catch { prompt("Copy the message:", t); } return; }
+  if (b.id === "consGo") { const f = $("cFrom").value, t = $("cTo").value; if (!f || !t || t < f) { toast("Pick a From date and a later To date."); return; }
+    b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportConsumption(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; b.textContent = "Download consumption report (Excel)"; return; }
   if (b.id === "xlBtn") { b.disabled = true; b.textContent = "Making the Excel file…"; try { await exportExcel(calc(reportDate)); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } render(); }
 });
 app.addEventListener("change", async e => {
@@ -746,6 +752,86 @@ function message(c) {
 /* ---------- Excel export in the layout of the Daily GET Consumption Tracker ----------
    Same tabs as the tracker (Daily report, Prices, Consumption, Production, Stock, This week, Next week), TKR-branded, values worked out by the app. */
 /* ---------- machines and metres Excel (Metres tab): chosen dates, every rig, statuses from the shift reports ---------- */
+
+/* ---------- GET consumption report for any dates: stock, received, issued, cost, metres, metres per item, per rig and per day ---------- */
+let consFrom = "", consTo = "";
+app.addEventListener("input", e => { if (e.target.id === "cFrom") consFrom = e.target.value; if (e.target.id === "cTo") consTo = e.target.value; });
+function stockAt(k, d) {
+  const C = allCounts().filter(x => x.item === k && x.date <= d), last = C.filter(x => x.count !== "" && x.count != null).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+  if (!last) return null;
+  const rec = C.filter(x => (x.count === "" || x.count == null) && x.date > last.date).reduce((n, x) => n + num(x.received), 0);
+  const iss = allIssues().filter(x => x.item === k && x.date > last.date && x.date <= d).reduce((n, x) => n + num(x.qty), 0);
+  return num(last.count) + rec - iss;
+}
+async function exportConsumption(from, to) {
+  await loadLib("../lib/exceljs.min.js");
+  const ExcelJS = window.ExcelJS, wb = new ExcelJS.Workbook(); wb.creator = "TKR Operations"; wb.created = new Date();
+  let logo = null; try { logo = wb.addImage({ buffer: await (await fetch("../icons/icon-512.png")).arrayBuffer(), extension: "png" }); } catch {}
+  const X = { BLACK: "FF111111", HEAD: "FF262626", GOLD: "FFD4A12A", CREAM: "FFFFF8E6", TOT: "FFFFF2CC", WHITE: "FFFFFFFF", GRID: "FFD9D3C5" };
+  const fill = x => ({ type: "pattern", pattern: "solid", fgColor: { argb: x } }), thin = { style: "thin", color: { argb: X.GRID } }, box = { top: thin, left: thin, bottom: thin, right: thin };
+  const F = (o = {}) => Object.assign({ name: "Arial", size: 10, color: { argb: X.BLACK } }, o);
+  const D = s => { const [y, m, d] = s.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+  const MONEY = '"R" #,##0', MONEY2 = '"R" #,##0.00', DEC1 = "#,##0.0", period = `${fmt(from)} to ${fmt(to)}`;
+  function sheet(name, widths, sub) {
+    const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 7, showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
+    ws.columns = widths.map(w => ({ width: w })); const n = widths.length;
+    for (let r = 1; r <= 4; r++) { ws.getRow(r).height = [8, 22, 30, 18][r - 1]; for (let k = 1; k <= n; k++) ws.getCell(r, k).fill = fill(X.BLACK); }
+    ws.getRow(5).height = 4; for (let k = 1; k <= n; k++) ws.getCell(5, k).fill = fill(X.GOLD);
+    if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.12 }, ext: { width: 62, height: 62 } });
+    const put = (r, v, f) => { const x = ws.getCell(r, 2); x.value = v; x.font = f; x.alignment = { vertical: "middle" }; };
+    put(2, "TKR OPERATIONS – DRILLING: GET CONSUMPTION REPORT", F({ size: 13, bold: true, color: { argb: X.WHITE } }));
+    put(3, "DATES:  " + period, F({ size: 20, bold: true, color: { argb: X.GOLD } }));
+    put(4, sub, F({ size: 10, bold: true, color: { argb: X.WHITE } })); return ws;
+  }
+  const head = (ws, r, L) => { const row = ws.getRow(r); row.height = 30; L.forEach((l, i) => { const x = row.getCell(i + 1); x.value = l; x.font = F({ bold: true, color: { argb: X.WHITE } }); x.fill = fill(X.HEAD); x.border = box; x.alignment = { vertical: "middle", horizontal: i ? "center" : "left", wrapText: true }; }); };
+  const line = (ws, r, vals, i, fmts = {}, tot = false) => { const row = ws.getRow(r); row.height = 18;
+    vals.forEach((v, k) => { const x = row.getCell(k + 1); x.value = v === "" || v == null ? null : v; x.border = box; x.font = F({ bold: tot || k === 0 });
+      x.alignment = { vertical: "middle", horizontal: typeof v === "number" || v instanceof Date ? "center" : "left", wrapText: true };
+      if (v instanceof Date) x.numFmt = "dd/mm/yyyy"; else if (typeof v === "number") x.numFmt = fmts[k] || "0";
+      if (tot) { x.fill = fill(X.TOT); x.border = { ...box, top: { style: "medium", color: { argb: X.GOLD } } }; } else if (i % 2) x.fill = fill(X.CREAM); }); };
+  const price = k => num(settings.price[k]), K = ITEMS.map(x => x[0]), name = k => ITEMS.find(x => x[0] === k)?.[2] || k;
+  const iss = allIssues().filter(x => x.date >= from && x.date <= to && K.includes(x.item)).sort((a, b) => a.date.localeCompare(b.date) || String(a.shift).localeCompare(String(b.shift)));
+  const recv = allCounts().filter(x => (x.count === "" || x.count == null) && x.date >= from && x.date <= to && K.includes(x.item));
+  const M = metres.filter(x => x.date >= from && x.date <= to), mTot = M.reduce((n, x) => n + num(x.metres), 0);
+  const q = (k, L = iss) => L.filter(x => x.item === k).reduce((n, x) => n + num(x.qty), 0), cost = L => K.reduce((n, k) => n + q(k, L) * price(k), 0);
+  // 1. summary per item
+  let ws = sheet("Summary", [26, 14, 12, 12, 14, 16, 16, 18], "Stock, received and issued per item, with the metres drilled on the same dates"), r = 7;
+  head(ws, r++, ["Item", "Stock at start", "Received", "Issued", "Stock at end", "Cost issued", "Metres per item", "Price per item"]);
+  K.forEach((k, i) => { const iq = q(k), st0 = stockAt(k, addDays(from, -1)), st1 = stockAt(k, to);
+    line(ws, r++, [name(k), st0 ?? "", recv.filter(x => x.item === k).reduce((n, x) => n + num(x.received), 0), iq, st1 ?? "", iq * price(k), iq ? r1(mTot / iq) : "", price(k)], i, { 5: MONEY, 6: DEC1, 7: MONEY }); });
+  const cT = cost(iss);
+  line(ws, r++, ["All GET", "", "", K.reduce((n, k) => n + q(k), 0), "", cT, "", ""], 0, { 5: MONEY }, true); r++;
+  head(ws, r++, ["Metres drilled", "Cost of GET issued", "GET cost per metre", "", "", "", "", ""]);
+  line(ws, r++, [r1(mTot), cT, mTot ? cT / mTot : "", "", "", "", "", ""], 0, { 0: DEC1, 1: MONEY, 2: MONEY2 }, true);
+  ws.getCell(r + 1, 1).value = "Stock at start and end come from the GET counts and receipts in the app; blank where no count was taken before that date."; ws.getCell(r + 1, 1).font = F({ italic: true, size: 9, color: { argb: "FF6B6558" } });
+  // 2. per rig
+  const rigs = [...new Set([...RIGS, ...iss.map(x => x.rig).filter(Boolean), ...M.map(x => x.rig).filter(r => r && r !== "Not allocated")])];
+  ws = sheet("Per rig", [20, ...K.map(() => 12), 14, 14, 16], "GET issued, metres and cost per metre for each rig"); r = 7;
+  head(ws, r++, ["Rig", ...K.map(name), "Cost issued", "Metres", "Cost per metre"]);
+  rigs.forEach((rg, i) => { const L = iss.filter(x => x.rig === rg), m = M.filter(x => x.rig === rg).reduce((n, x) => n + num(x.metres), 0), c = cost(L);
+    line(ws, r++, [rg, ...K.map(k => q(k, L)), c, r1(m), m ? c / m : ""], i, { [K.length + 1]: MONEY, [K.length + 2]: DEC1, [K.length + 3]: MONEY2 }); });
+  const noRig = iss.filter(x => !rigs.includes(x.rig)); if (noRig.length) line(ws, r++, ["No rig given", ...K.map(k => q(k, noRig)), cost(noRig), "", ""], rigs.length, { [K.length + 1]: MONEY });
+  line(ws, r++, ["All rigs", ...K.map(k => q(k)), cT, r1(mTot), mTot ? cT / mTot : ""], 0, { [K.length + 1]: MONEY, [K.length + 2]: DEC1, [K.length + 3]: MONEY2 }, true);
+  // 3. per day
+  ws = sheet("Per day", [13, 13, ...K.map(() => 11), 14, 15, 16], "Metres and GET issued every day, with the running cost per metre"); r = 7;
+  head(ws, r++, ["Date", "Metres", ...K.map(name), "Cost issued", "Running metres", "Running cost per metre"]);
+  let runM = 0, runC = 0, i = 0;
+  for (let d = from; d <= to; d = addDays(d, 1)) { const L = iss.filter(x => x.date === d), m = M.filter(x => x.date === d).reduce((n, x) => n + num(x.metres), 0), c = cost(L); runM += m; runC += c;
+    line(ws, r++, [D(d), r1(m), ...K.map(k => q(k, L)), c, r1(runM), runM ? runC / runM : ""], i++, { 1: DEC1, [K.length + 2]: MONEY, [K.length + 3]: DEC1, [K.length + 4]: MONEY2 }); }
+  line(ws, r++, ["Total", r1(mTot), ...K.map(k => q(k)), cT, r1(mTot), mTot ? cT / mTot : ""], 0, { 1: DEC1, [K.length + 2]: MONEY, [K.length + 3]: DEC1, [K.length + 4]: MONEY2 }, true);
+  // 4. every issue line
+  ws = sheet("Issue lines", [13, 9, 18, 8, 14, 14, 20, 20, 14, 30], "Every GET issue in the app for these dates"); r = 7;
+  head(ws, r++, ["Date", "Shift", "Item", "Qty", "Rig", "Block", "Issued to", "Issued by", "Value", "Note"]);
+  iss.forEach((x, n) => line(ws, r++, [D(x.date), x.shift || "", name(x.item), num(x.qty), x.rig || "", x.block || "", x.to || "", x.by || "", num(x.qty) * price(x.item), x.note || ""], n, { 8: MONEY }));
+  if (!iss.length) ws.getCell(r, 1).value = "No GET issued on these dates.";
+  // 5. receipts
+  ws = sheet("Received", [13, 18, 8, 34], "GET received into the Drill Stores on these dates"); r = 7;
+  head(ws, r++, ["Date", "Item", "Qty", "From / by"]);
+  recv.sort((a, b) => a.date.localeCompare(b.date)).forEach((x, n) => line(ws, r++, [D(x.date), name(x.item), num(x.received), x.by || ""], n));
+  if (!recv.length) ws.getCell(r, 1).value = "No GET received on these dates.";
+  const blob = new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_GET_Consumption_${fmt(from).replace(/\//g, "-")}_to_${fmt(to).replace(/\//g, "-")}.xlsx`);
+}
 
 async function exportExcel(c) {
   await loadLib("../lib/exceljs.min.js");
