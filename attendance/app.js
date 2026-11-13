@@ -69,7 +69,7 @@ function toast(t){const el=document.createElement("div");el.className="toast";el
 const monthOf=d=>d.slice(0,7);
 function monthsIn(from,to){const out=[];let m=monthOf(from);const last=monthOf(to);while(m<=last){out.push(m);let [y,mm]=m.split("-").map(Number);mm++;if(mm>12){mm=1;y++}m=y+"-"+pad(mm)}return out}
 const live={};
-function applyMonth(m,snap){const o={};snap.docs.forEach(d=>{S.mExists[m+"/"+d.id]=true;o[d.id]={marks:d.data().marks||{},ot:d.data().ot||{}}});S.mm[m]=o}
+function applyMonth(m,snap){const o={};snap.docs.forEach(d=>{S.mExists[m+"/"+d.id]=true;o[d.id]={marks:d.data().marks||{},ot:d.data().ot||{},ottype:d.data().ottype||{}}});S.mm[m]=o}
 function watchCycle(){const c=cycleOf(S.date);monthsIn(c.start,c.end).forEach(m=>{if(live[m])return;
   live[m]=S.db.collection("months/"+m+"/sheets").onSnapshot(snap=>{applyMonth(m,snap);render()},err)})}
 async function loadRange(from,to){await Promise.all(monthsIn(from,to).filter(m=>!live[m]).map(async m=>{const snap=await S.db.collection("months/"+m+"/sheets").get();applyMonth(m,snap)}))}
@@ -302,9 +302,11 @@ function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-
     flagged.map(f=>'<li>'+esc(f.x.name)+' <span class="note">'+esc(f.x.sheet)+' · '+esc(f.code)+' from '+short(f.d)+'</span> <button class="btn sm" data-remove="'+esc(f.x.id)+'" data-reason="'+esc(f.code)+'" data-last="'+addDays(f.d,-1)+'">Remove</button></li>').join("")+'</ul></div>'+h;
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Update from the register Excel</h3><p class="note" style="margin:0 0 8px">Pick the register (one tab per sheet: rompad, support fleet, shared services, drilling, intern). The app puts everyone in the shift group they are under (SHIFT A, SHIFT B …), sets each group\'s DAY / NIGHT / OFF rota from the group row, and copies the marks for every date in the file. Anyone not yet on the register is added. Empty cells in the Excel do not clear marks in the app.</p><button class="btn gold" id="impReg">Choose register Excel</button><input type="file" id="regFile" accept=".xlsx,.xls,.xlsb" hidden><p class="note" id="regMsg" role="status">'+esc(regNote)+'</p></div>';
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Add employees from Excel</h3><p class="note" style="margin:0 0 8px">Pick an Excel list with the columns Employee, Number, Job Title and Department. People already on the register (same employee number) are skipped. Department decides the sheet: Rompad, Drilling and Shared Services go to their own sheet; Buses, Water Bowsers, Low Beds and TLB go to Support Fleet; Corporate goes to Shared Services. Each department becomes a shift group.</p><button class="btn gold" id="impEmps">Choose Excel file</button><input type="file" id="impFile" accept=".xlsx,.xls,.xlsb,.csv" hidden><p class="note" id="impMsg" role="status">'+esc(impNote)+'</p></div>';
+  if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Import overtime from Excel</h3><p class="note" style="margin:0 0 8px">Pick the overtime report (columns: Name and Surname, Standby / Unplanned, Date, Payable Hours on Time Sheet). Each line puts the payable hours as overtime on that person\'s day, in whatever month the date falls. Lines with no hours (for example "no clockings") are skipped and listed. Importing the same file again replaces those days, it does not add them twice.</p><button class="btn gold" id="impOt">Choose overtime Excel</button><input type="file" id="otFile" accept=".xlsx,.xls,.xlsb,.csv" hidden><p class="note" id="otMsg" role="status" style="white-space:pre-line">'+esc(otNote)+'</p></div>';
   if(isAdmin()&&(S.emps||[]).length)h+='<div class="list" style="margin-top:18px"><h3>Remove all employees</h3><p class="note" style="margin:0 0 8px">Clears the whole employee list ('+(S.emps||[]).length+' people, including removed ones) so you can add your own. A copy of the data file downloads first, so you can load it back under Users if you need it. Marks already saved are not deleted.</p><button class="btn" id="clearEmps" style="border-color:var(--bad);color:var(--bad)">Remove all employees</button></div>';
   main.innerHTML=h;
   const rb=$("impReg");if(rb){rb.onclick=()=>$("regFile").click();$("regFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importRegister(f)}}
+  const ob=$("impOt");if(ob){ob.onclick=()=>$("otFile").click();$("otFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importOvertime(f)}}
   const ib=$("impEmps");if(ib){ib.onclick=()=>$("impFile").click();$("impFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importEmps(f)}}
   const ce=$("clearEmps");if(ce)ce.onclick=async()=>{const n=(S.emps||[]).length;
     if(!confirm("Remove all "+n+" employees from TKR Attendance? A copy of the data file downloads first."))return;
@@ -315,7 +317,7 @@ function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-
 // Add employees from an Excel list (Employee, Number, Job Title, Department). Skips numbers already on the register.
 const DEPT_SHEET={"rompad":"Rompad","drilling":"Drilling","shared services":"Shared Services","interns":"Interns","support fleet":"Support Fleet","corporate":"Shared Services",
   "buses":"Support Fleet","bus":"Support Fleet","water bowsers":"Support Fleet","water bowser":"Support Fleet","low beds":"Support Fleet","lowbeds":"Support Fleet","low bed":"Support Fleet","tlb":"Support Fleet"};
-let impNote="",regNote="";
+let impNote="",regNote="",otNote="";
 // ---------- update from the register Excel (same layout as the TKR timesheet) ----------
 const TAB_SHEET=t=>{t=t.toLowerCase().replace(/[^a-z]/g,"");if(t.startsWith("rompad"))return "Rompad";if(t.startsWith("support"))return "Support Fleet";if(t.startsWith("drill"))return "Drilling";
   if(t.startsWith("share"))return "Shared Services";if(t.startsWith("intern"))return "Interns";return null};
@@ -374,6 +376,38 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
     for(const m in marks)for(const sid in marks[m]){const d=marks[m][sid];await S.db.doc("months/"+m+"/sheets/"+sid).update({sheet:d.sheet,month:m,marks:d.marks,updatedBy:email,updatedAt:Date.now()})}
     say("Done: "+used.size+" employees put in their shift groups, "+nMarks+" marks copied"+(added.length?", "+added.length+" new employees added ("+added.join(", ")+")":"")+"."+(notIn.length?" "+notIn.length+" people on the register are not in this Excel and were left as they are: "+notIn.map(x=>x.name).join(", ")+".":""));
     toast("Register updated")}
+  catch(e){say(denied(e)?"Your sign-in is not allowed to change the register.":"Could not read "+file.name+": "+(e.message||"try again"))}}
+/* Overtime report: NO. | NAME AND SURNAME | STANDBY/ UNPLANNED | DATE | PAYABLE HOURS ON TIME SHEET (hours as 12:10 = 12 h 10 min) */
+const normName=n=>String(n||"").toLowerCase().replace(/[^a-z]+/g," ").trim();
+function xlDate(v){if(typeof v==="number"&&v>20000){const d=new Date(Date.UTC(1899,11,30)+Math.round(v)*864e5);return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
+  const t=String(v||"").trim();let m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return m[1]+"-"+pad(+m[2])+"-"+pad(+m[3]);m=t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);if(m)return m[3]+"-"+pad(+m[2])+"-"+pad(+m[1]);return ""}
+function xlHours(v){if(typeof v==="number"){if(v<=0)return 0;return v<1?Math.round(v*24*60)/60:Math.round(v*100)/100}
+  const t=String(v||"").trim().toLowerCase();let m=t.match(/^(\d{1,2})[:h](\d{1,2})/);if(m)return +m[1]+(+m[2])/60;m=t.match(/^(\d+(?:[.,]\d+)?)\s*(h|hrs?|hours?)?$/);if(m)return parseFloat(m[1].replace(",","."));return 0}
+async function importOvertime(file){const say=t=>{otNote=t;const m=$("otMsg");if(m)m.textContent=t};say("Reading "+file.name+"…");
+  try{if(!window.XLSX)throw new Error("The Excel reader has not loaded yet. Try again.");
+    const wb=XLSX.read(await file.arrayBuffer(),{type:"array"});const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:"",raw:true});
+    const low=c=>String(c).trim().toLowerCase();
+    const hi=rows.findIndex(r=>r.some(c=>/name/.test(low(c)))&&r.some(c=>low(c)==="date"));
+    if(hi<0){say("No header row with Name and Date was found in "+file.name+".");return}
+    const H=rows[hi].map(low),cN=H.findIndex(c=>/name/.test(c)),cD=H.indexOf("date"),cH=H.findIndex(c=>/hour/.test(c)),cT=H.findIndex(c=>/standby|unplanned|planned|type/.test(c));
+    if(cH<0){say("No hours column (Payable Hours) was found in "+file.name+".");return}
+    const byName=new Map();(S.emps||[]).forEach(e=>{const n=normName(e.name);byName.set(n,e);byName.set(n.split(" ").reverse().join(" "),e);const w=n.split(" ");if(w.length>2)byName.set(w[0]+" "+w[w.length-1],e)});
+    const find=n=>{const k=normName(n);if(byName.has(k))return byName.get(k);const w=k.split(" ");return byName.get(w[0]+" "+w[w.length-1])||null};
+    const lines=[],notFound=new Set(),noHours=[],badDate=[];
+    rows.slice(hi+1).forEach(r=>{const name=String(r[cN]||"").trim();if(!name)return;const d=xlDate(r[cD]),hrs=xlHours(r[cH]),type=cT>=0?String(r[cT]||"").trim():"";
+      if(!d){badDate.push(name);return}
+      if(!hrs){noHours.push(name+" "+short(d)+(String(r[cH]||"").trim()?" ("+String(r[cH]).trim()+")":""));return}
+      const e=find(name);if(!e){notFound.add(name);return}
+      lines.push({e,d,hrs:Math.round(hrs*100)/100,type})});
+    if(!lines.length){say("No overtime could be put on the register."+(notFound.size?"\nNot on the register: "+[...notFound].join(", ")+".":"")+(noHours.length?"\nNo hours: "+noHours.join(", ")+".":""));return}
+    const people=new Set(lines.map(x=>x.e.id)).size,tot=lines.reduce((a,x)=>a+x.hrs,0);
+    if(!confirm("Put "+lines.length+" overtime lines ("+fmtH(tot)+" h, "+people+" people) on the register?"+(notFound.size?"\n\nNot on the register, skipped: "+[...notFound].join(", "):"")+(noHours.length?"\n\nNo hours, skipped: "+noHours.length+" lines":"")))return say("Nothing imported.");
+    const docs={};lines.forEach(x=>{const m=monthOf(x.d),id=SHEET_ID[x.e.sheet],k=m+"/"+id;const o=docs[k]=docs[k]||{m,id,sheet:x.e.sheet,ot:{},ottype:{}};
+      (o.ot[x.e.id]=o.ot[x.e.id]||{})[x.d]=x.hrs;if(x.type)(o.ottype[x.e.id]=o.ottype[x.e.id]||{})[x.d]=x.type});
+    for(const o of Object.values(docs)){await S.db.doc("months/"+o.m+"/sheets/"+o.id).update({sheet:o.sheet,month:o.m,ot:o.ot,ottype:o.ottype,updatedBy:email,updatedAt:Date.now()});
+      const mo=S.mm[o.m];if(mo){const sd=mo[o.id]=mo[o.id]||{marks:{},ot:{}};for(const k in o.ot)sd.ot[k]=Object.assign({},sd.ot[k]||{},o.ot[k])}}
+    say(lines.length+" overtime lines imported: "+fmtH(tot)+" h for "+people+" people."+(notFound.size?"\nNot on the register (add them, then import again): "+[...notFound].join(", ")+".":"")+(noHours.length?"\nNo hours, skipped: "+noHours.join(", ")+".":"")+(badDate.length?"\nNo date, skipped: "+badDate.join(", ")+".":""));
+    toast("Overtime imported");render()}
   catch(e){say(denied(e)?"Your sign-in is not allowed to change the register.":"Could not read "+file.name+": "+(e.message||"try again"))}}
 async function importEmps(file){const say=t=>{impNote=t;const m=$("impMsg");if(m)m.textContent=t};say("Reading "+file.name+"…");
   try{if(!window.XLSX)throw new Error("The Excel reader has not loaded yet. Try again.");
@@ -584,9 +618,9 @@ async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toa
     const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:24}].concat(dates.map(()=>({wch:7})));
     const pc=head.length-1;for(let r=2;r<aoa.length;r++){const ref=XLSX.utils.encode_cell({r,c:pc});if(ws[ref]&&typeof ws[ref].v==="number")ws[ref].z="0.0%"}
     XLSX.utils.book_append_sheet(wb,ws,s.sheet.slice(0,31))});
-  const otRows=[];bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>dates.forEach(d=>{const h=otOf(e,d);if(h)otRows.push([e.name,e.number,s.sheet,g.label,nice(d)+" "+yr(d),h])}))));
-  if(otRows.length){const tot=otRows.reduce((a,r)=>a+r[5],0);const ws=XLSX.utils.aoa_to_sheet([["Overtime – "+periodText(from,to)],["Employee","Number","Sheet","Group","Date","Hours"]].concat(otRows,[["Total","","","","",Math.round(tot*10)/10]]));
-    ws["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:22},{wch:16},{wch:8}];XLSX.utils.book_append_sheet(wb,ws,"Overtime")}
+  const otRows=[];bySheetGroup(es).forEach(s=>s.groups.forEach(g=>g.emps.forEach(e=>dates.forEach(d=>{const h=otOf(e,d);if(h)otRows.push([e.name,e.number,s.sheet,g.label,nice(d)+" "+yr(d),cell(e,d,"ottype")||"",h])}))));
+  if(otRows.length){const tot=otRows.reduce((a,r)=>a+r[6],0);const ws=XLSX.utils.aoa_to_sheet([["Overtime – "+periodText(from,to)],["Employee","Number","Sheet","Group","Date","Planned / unplanned","Hours"]].concat(otRows,[["Total","","","","","",Math.round(tot*10)/10]]));
+    ws["!cols"]=[{wch:30},{wch:11},{wch:16},{wch:22},{wch:16},{wch:18},{wch:8}];XLSX.utils.book_append_sheet(wb,ws,"Overtime")}
   saveFile("TKR Attendance "+(from===to?from:from+" to "+to)+(shift!=="all"?" "+SHIFT_LBL[shift]:"")+".xlsx",wb)}
 
 // ---------- users (admins) ----------
