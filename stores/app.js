@@ -293,6 +293,43 @@ const REPORT_SEEDS = [
     ["2026-10-24", "issue", "rompad", "Hydraulic oil", "oil-hyd", "", "", 1, "", "", "Phumzile", "Rompad day shift 24/10"]],
     c: [["2026-10-24", "rompad", "oil-hyd", 0, "Phumzile"], ["2026-10-24", "rompad", "ppe-gloves", 0, "Phumzile"], ["2026-10-24", "rompad", "ppe-glasses", 1, "Phumzile"],
       ["2026-10-24", "rompad", "ppe-resp", 35, "Phumzile"], ["2026-10-24", "rompad", "oil-eng", 2, "Phumzile"], ["2026-10-24", "rompad", "oil-comp", 1, "Phumzile"], ["2026-10-24", "rompad", "moil-lock", 2, "Phumzile"]] },
+  /* Rompad Stores shift reports 03/11 to 12/11 and the Stores chat (09/11, 10/11, 11/11, 12/11). GET at the Rompad belongs to Drill Stores.
+     No GET was issued in these reports: rods 1, shanks 3, 140 mm bits 2 at every closing from 03/11 to 12/11. */
+  { id: "seed-2026-11-03-12-rompad", msg: "Rompad reports 03/11 to 12/11 loaded", m: [
+    ...[["PPE", "ppe-gloves", "", "", 1], ["PPE", "", "Rain coat", "ea", 14], ["Fasteners", "", "M16 bolts", "ea", 1], ["Fasteners", "rp-m16n", "", "", 1], ["Fasteners", "", "M16 washers", "ea", 2]]
+      .map(([cat, id, n, u, q]) => ["2026-11-03", "issue", "rompad", cat, id, n, u, q, "", "", "Phumzile", "Rompad day shift 03/11"]),
+    ["2026-11-04", "issue", "rompad", "Engine oil", "oil-eng", "", "", 1, "TDR015", "", "Boitumelo", "Rompad day shift 04/11: the last 4 litres, operational service / refill (store now 0)"],
+    ...[["Fasteners", "", "M16 bolts", "ea", 2], ["Fasteners", "", "M16 washers", "ea", 4], ["Spares", "", "Reverse alarm", "ea", 1], ["Grease", "grease", "", "", 3], ["Spares", "", "H4 standard light", "ea", 1], ["PPE", "ppe-ear", "", "", 1]]
+      .map(([cat, id, n, u, q]) => ["2026-11-05", "issue", "rompad", cat, id, n, u, q, "", "", "Phumzile", "Rompad day shift 05/11"]),
+    ["2026-11-06", "issue", "rompad", "PPE", "ppe-resp", "", "", 2, "", "", "Phumzile", "Rompad day shift 06/11"],
+    ...[["Grease", "grease", "", "", 1], ["Spares", "", "Emergency stop button", "ea", 6], ["Spares", "", "Grinding disc set", "set", 1]]
+      .map(([cat, id, n, u, q]) => ["2026-11-06", "receive", "rompad", cat, id, n, u, q, "", "", "Phumzile", "Rompad day shift 06/11"]),
+    ["2026-11-07", "issue", "rompad", "Fasteners", "", "M24 x 120/140 bolts", "ea", 5, "TKRH021", "", "Olerato", "Rompad day shift 07/11 (ticket 5tkrh021, also on the 08/11 report)"],
+    ["2026-11-07", "issue", "rompad", "Fasteners", "", "M24 nuts", "ea", 5, "TKRH021", "", "Olerato", "Rompad day shift 07/11"],
+    ["2026-11-07", "issue", "rompad", "Fasteners", "", "M20 washers", "ea", 1, "TKRH011", "", "Olerato", "Rompad day shift 07/11"],
+    ["2026-11-07", "issue", "rompad", "Fasteners", "rp-m20x150", "", "", 1, "TKRH011", "", "Olerato", "Rompad day shift 07/11"],
+    ["2026-11-09", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 1, "", "Godfrey", "Olerato", "Stores chat 09/11"],
+    ["2026-11-09", "issue", "rompad", "Hydraulic oil", "oil-hyd", "", "", 1, "TKRH020", "", "Olerato", "Stores chat 09/11"],
+    ["2026-11-09", "receive", "rompad", "Fasteners", "", "M24 washers", "ea", 20, "", "Godfrey", "Olerato", "Stores chat 09/11"],
+    ["2026-11-09", "receive", "rompad", "Fasteners", "", "M24 nuts", "ea", 20, "", "Godfrey", "Olerato", "Stores chat 09/11"],
+    ...[["Hydraulic oil", "oil-hyd", "", "", 5], ["Engine oil", "oil-eng", "", "", 5], ["Engine oil", "", "Shell 15W40 engine oil", "20L", 1], ["Grease", "", "Lithium grease", "ea", 1]]
+      .map(([cat, id, n, u, q]) => ["2026-11-10", "receive", "rompad", cat, id, n, u, q, "", "Khaya", "Olerato", "Rompad day shift 10/11"]),
+    ["2026-11-10", "issue", "rompad", "Hydraulic oil", "oil-hyd", "", "", 3, "TKRH011", "", "Olerato", "Rompad day shift 10/11"],
+    ["2026-11-10", "issue", "rompad", "Grease", "grease", "", "", 5, "", "", "Olerato", "Rompad day shift 10/11: grease gun refill"],
+    ["2026-11-10", "issue", "rompad", "Fasteners", "", "M14 x 30 screws (Allen key)", "ea", 2, "TKRH020", "", "Olerato", "Rompad day shift 10/11"],
+    ...[["Hydraulic oil", "oil-hyd", "", "", 2], ["Spares", "", "Degreaser", "L", 6], ["Fasteners", "", "M16 bolts", "ea", 3], ["Fasteners", "", "M20 nuts", "ea", 2], ["Fasteners", "", "M20 bolts", "ea", 2]]
+      .map(([cat, id, n, u, q]) => ["2026-11-11", "issue", "rompad", cat, id, n, u, q, "", "", "Phumzile", "Rompad day shift 11/11"]),
+    ["2026-11-11", "receive", "rompad", "Spares", "", "Service kit TKRH017", "kit", 1, "", "", "Phumzile", "Rompad day shift 11/11"],
+    ["2026-11-11", "receive", "rompad", "Engine oil", "", "Engine oil (TotalEnergies)", "20L", 2, "", "", "Phumzile", "Rompad day shift 11/11"],
+    ["2026-11-12", "receive", "rompad", "Hydraulic oil", "oil-hyd", "", "", 3, "", "Sawara", "Phumzile", "Stores chat 12/11"],
+    ["2026-11-12", "receive", "rompad", "Spares", "", "Moil (rockbreaker tool)", "ea", 1, "", "Sawara", "Phumzile", "Stores chat 12/11"],
+    ["2026-11-12", "issue", "rompad", "Spares", "", "Degreaser", "L", 1, "", "", "Phumzile", "Rompad day shift 12/11"],
+    ["2026-11-12", "issue", "rompad", "Hydraulic oil", "", "Hydraulic oil 68 (litres)", "L", 1, "", "", "Phumzile", "Rompad day shift 12/11: 1 litre from an open drum"]],
+    c: [["2026-11-12", "rompad", "oil-hyd", 3, "Phumzile"], ["2026-11-12", "rompad", "oil-eng", 5, "Phumzile"], ["2026-11-12", "rompad", "oil-comp", 0, "Phumzile"],
+      ["2026-11-12", "rompad", "ppe-gloves", 0, "Phumzile"], ["2026-11-12", "rompad", "ppe-resp", 13, "Phumzile"], ["2026-11-12", "rompad", "ppe-glasses", 1, "Phumzile"],
+      ["2026-11-12", "rompad", "moil-lock", 3, "Phumzile"], ["2026-11-12", "rompad", "rp-m16n", 0, "Phumzile"], ["2026-11-12", "rompad", "rp-m16x200", 0, "Phumzile"], ["2026-11-12", "rompad", "rp-m20x140", 2, "Phumzile"],
+      ["2026-11-03", "drill", "get-rod", 1, "Phumzile"], ["2026-11-03", "drill", "get-shank", 3, "Phumzile"], ["2026-11-03", "drill", "get-bit", 2, "Phumzile"],
+      ["2026-11-12", "drill", "get-rod", 1, "Phumzile"], ["2026-11-12", "drill", "get-shank", 3, "Phumzile"], ["2026-11-12", "drill", "get-bit", 2, "Phumzile"]] },
 ];
 let seedingRep = false;
 async function seedReports() {
