@@ -6,6 +6,7 @@ import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where,
 } from "../lib/firebase.js";
 import { withOct2026 } from "../lib/oct2026.js";
+import { NOV_2026, NOV_2026_THROUGH } from "../lib/nov2026.js";
 import { makeDrill } from "./drill.js";
 import { metresChart, metresChartClick } from "../lib/metres-chart.js";
 const showName = e => /@mgr\.tkroperations\.app$/.test(e || "") ? (e[0].toUpperCase() + e.slice(1, e.indexOf("@"))) : e;
@@ -85,7 +86,7 @@ function gateOrApp() {
   $("gate").hidden = true; app.hidden = false; $("signBtn").hidden = false; $("who").textContent = showName(email) + (isAdmin() ? " · admin" : " · manager");
   if (subs.length === 1) {
     const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => netNote("Couldn't load. Check the signal.")));
-    live("fcMetres", v => { rawMetres = v; metres = withOct2026(v); if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await seedRegister(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
+    live("fcMetres", v => { rawMetres = v; metres = withOct2026(v); if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await seedRegister(); await seedNov(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
     const liveQ = (name, set) => subs.push(onSnapshot(query(collection(db, name), where("store", "==", "drill")), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => console.warn(e)));
     liveQ("stMoves", v => stMoves = v); liveQ("stCounts", v => stCounts = v);
     subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { stPrice = {}; (s.exists() ? s.data().list || [] : []).forEach(i => { if (i.getKey && num(i.price) > 0) stPrice[i.getKey] = num(i.price); }); settings = mergeSettings(rawSettings); render(); }, () => {}));
@@ -235,7 +236,7 @@ function dash(c) {
       ${RIGS.map(r => tile(r, M1(c.monthRig[r]) + " m", `this week ${M1(c.weekRig[r])} m · ${M1(c.avg[r] || 0)} m/day avg`)).join("")}
       ${Math.abs(c.monthNA) >= 0.05 ? tile("Not allocated to a rig", M1(c.monthNA) + " m", "site total not split by rig") : ""}
     </div></section>
-  ${metresChart(metres, [...RIGS, ...[...new Set(metres.filter(x => num(x.metres)).map(x => x.rig))].filter(r => r && !RIGS.includes(r)).sort()])}
+  ${novNote()}${metresChart(metres, [...RIGS, ...[...new Set(metres.filter(x => num(x.metres)).map(x => x.rig))].filter(r => r && !RIGS.includes(r)).sort()])}
   <div class="tiles">
     ${tile("Metres " + fmt(c.upToCal), M1(c.day.metres) + " m", "")}
     ${tile("Metres this week to date", M1(w.metres.toDate) + " m", "last week " + M1(w.metres.last) + " m")}
@@ -578,6 +579,34 @@ const OCT_REGISTER = [
   ["2026-10-30", "Night", "", 0.0, "Not working – 12hrs - Drifter Out for Service - Bucket Yard", 10.3, "Working – shank broke 1hr · - Waiting for block access 5hrs 30min · - Engine Cut Off 3hrs"],
   ["2026-10-31", "Day", "", 0.0, "Not working – Drifter out for service", 85.3, "Working – Shank broken and replaced (chat status 12:42)"],
   ["2026-10-31", "Night", "", 0.0, "Not working – Drifter out for service", 72.1, "Working"]];
+/* November 2026: the app's lines checked against the "Soosans drilling" WhatsApp shift reports and set to them.
+   What was different is kept in fcSettings/check-2026-11-reports and shown on the dashboard. */
+let seedingNov = false, novCheck = null;
+async function seedNov() {
+  if (seedingNov || !isAdmin() || !navigator.onLine) return; seedingNov = true;
+  try {
+    const flag = doc(db, "fcSettings", "check-2026-11-reports-v1"), f = await getDoc(flag); if (f.exists()) { novCheck = f.data(); render(); return; }
+    const now = Date.now(), diffs = [], keys = new Set(); let n = 0;
+    for (const [date, shift, sup, block, rigs] of NOV_2026) for (const [rig, m, from, to, problem, dl] of rigs) {
+      keys.add(`${date}|${shift}|${normK(rig)}`);
+      const have = rawMetres.filter(x => x.date === date && (x.shift || "Day") === shift && normK(x.rig) === normK(rig)), hm = Math.round(have.reduce((a, x) => a + num(x.metres), 0) * 10) / 10;
+      if (!have.length) { if (m > 0) diffs.push(`${fmtD(date)} ${shift} ${rig}: missing, now ${m.toFixed(1)} m`); }
+      else if (hm !== m) diffs.push(`${fmtD(date)} ${shift} ${rig}: was ${hm.toFixed(1)} m, now ${m.toFixed(1)} m`);
+      const id = `sh-${date}-${shift}-${rig.replace(/\s/g, "")}`;
+      for (const x of have) if (x.id !== id) await deleteDoc(doc(db, "fcMetres", x.id));
+      const delays = dl.map(([cat, h, text]) => ({ cat, h: h == null ? null : Math.round(h * 100) / 100, text }));
+      const status = m > 0 ? "Working" : "Not working";
+      const note = status + (problem || delays.length ? " – " + [problem ? "Problem: " + problem : "", ...delays.map(d => d.text + (d.h ? ` (${Math.floor(d.h)}h${pad2(Math.round((d.h % 1) * 60))})` : ""))].filter(Boolean).join(" · ") : "");
+      await setDoc(doc(db, "fcMetres", id), { date, shift, rig, metres: m, block, supervisor: sup, status, problem, delays, note, hrsFrom: from, hrsTo: to, src: "report", by: email, createdAt: now + n, editedAt: now + n }); n++; }
+    const extra = rawMetres.filter(x => String(x.date || "").startsWith("2026-11") && x.date <= "2026-11-12" && num(x.metres) > 0 && !keys.has(`${x.date}|${x.shift || "Day"}|${normK(x.rig)}`));
+    extra.forEach(x => diffs.push(`${fmtD(x.date)} ${x.shift || "Day"} ${x.rig}: ${num(x.metres).toFixed(1)} m in the app but no shift report in the chat (left as it is)`));
+    novCheck = { done: now, by: email, lines: n, through: NOV_2026_THROUGH, total: 205.4, diffs };
+    await setDoc(flag, novCheck); render();
+    toast(diffs.length ? `November checked against the shift reports: ${diffs.length} difference${diffs.length === 1 ? "" : "s"} found and fixed. See the dashboard.` : "November checked against the shift reports: everything was correct.");
+  } catch (e) { console.warn(e); } finally { seedingNov = false; }
+}
+const pad2 = n => String(n).padStart(2, "0"), fmtD = s => s.split("-").reverse().join("/").slice(0, 5);
+const novNote = () => !novCheck || Date.now() - novCheck.done > 14 * 864e5 ? "" : `<div class="notice ${novCheck.diffs.length ? "warn" : ""}" style="margin-bottom:14px"><b class="t">November checked against the Soosans drilling shift reports (to ${esc(novCheck.through)})</b>${novCheck.diffs.length ? `${novCheck.diffs.length} line${novCheck.diffs.length === 1 ? " was" : "s were"} different and ${novCheck.diffs.length === 1 ? "has" : "have"} been set to the reports:<ul style="margin:6px 0 0;padding-left:18px">${novCheck.diffs.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : "Every line in the app matched the reports."} Shift reports to date: <b>205.4 m</b>, all TDR 015.</div>`;
 let seedingReg = false;
 async function seedRegister() {
   if (seedingReg || !isAdmin() || !navigator.onLine) return; seedingReg = true;
