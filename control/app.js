@@ -397,9 +397,9 @@ async function saveShift(sh) {
   if (ctl.dayCtl !== (dayR.dayCtl || "") || ctl.nightCtl !== (dayR.nightCtl || "")) await put({ ...dayR, ...ctl }, `Controllers: day ${ctl.dayCtl || "–"}, night ${ctl.nightCtl || "–"}`);
   const n = R("log").filter(l => l.date === d).length;
   await put({ id: "log_" + uid(), kind: "log", ym: d.slice(0, 7), date: d, at: Date.now(), shiftSave: sh, what: `Saved and uploaded the ${sh.toLowerCase()} shift sheet` });
-  let up = false; if (navigator.onLine && fbUser) { await syncNow(false); up = !waiting(); }
+  let up = false; if (navigator.onLine) { await syncNow(false); up = !waiting(); }
   render();
-  popupMsg(up ? "Saved and uploaded" : "Saved on this PC", `${sh} shift, ${dow(d)} ${fmt(d)}: ${n} updates on this sheet.` + (up ? " Everyone in the TKR app can see it now." : fbUser ? " It uploads by itself as soon as this PC has signal." : " It uploads once someone signs in under Export & sync (needs signal once)."));
+  popupMsg(up ? "Saved and uploaded" : "Saved on this PC", `${sh} shift, ${dow(d)} ${fmt(d)}: ${n} updates on this sheet.` + (up ? " Everyone in the TKR app can see it now." : " It uploads by itself as soon as this PC has signal."));
 }
 function popupMsg(title, text) {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "alertdialog");
@@ -611,13 +611,14 @@ const waiting = () => recs.filter(r => !r.synced || r.synced < r.editedAt).lengt
 async function fire() {
   if (fb) return fb; const m = await import("../lib/firebase.js"), a = m.initializeApp(FB_CFG), auth = m.getAuth(a);
   fb = { ...m, auth, db: m.initializeFirestore(a, {}) };
-  m.onAuthStateChanged(auth, u => { fbUser = u; if (u) syncNow(false); if (tab === "export") render(); });
+  m.onAuthStateChanged(auth, u => { fbUser = u; if (u) syncNow(false); else if (navigator.onLine) m.signInAnonymously(auth).catch(() => {}); if (tab === "export") render(); });
   return fb;
 }
 let syncT = 0; const syncSoon = () => { clearTimeout(syncT); syncT = setTimeout(() => syncNow(false), 4000); };
 async function syncNow(manual) {
   if (sync.busy || !navigator.onLine) { if (manual && !navigator.onLine) toast("No signal now. It sends by itself when there is signal."); return; }
-  try { await fire(); } catch { return; } if (!fbUser) { if (manual) toast("Sign in under Export & sync first."); return; }
+  try { await fire(); } catch { return; }
+  if (!fbUser) { try { fbUser = (await fb.signInAnonymously(fb.auth)).user; } catch (e) { console.warn(e); if (manual) toast("Couldn't reach the TKR app. It tries again by itself."); return; } }
   sync.busy = true;
   try { const { db, collection, doc, setDoc, getDocs, query, where } = fb;
     for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { const { synced, pin, ...out } = r; await setDoc(doc(db, "ctrl", r.id), r.kind === "user" ? { ...out, pin } : out); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
@@ -627,15 +628,19 @@ async function syncNow(manual) {
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
     recs = await all(); sync.last = Date.now(); await metaSet("syncLast", sync.last); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
-  } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "This sign-in can't save Control Room data. Ask Muneer to add it." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
+  } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
 }
 function syncCard() {
+  return `<section class="card"><h2>Send to the TKR app</h2><p style="margin-top:0">Everything is sent by itself whenever this PC has signal, and changes from the other PCs come in the same way. No sign-in needed. ${waiting() ? `<b>${waiting()}</b> changes waiting on this PC.` : "Nothing waiting."}${sync.last ? ` Last sent ${fmt(ymd(new Date(sync.last)))} ${new Date(sync.last).toTimeString().slice(0, 5)}.` : ""} ${esc(sync.msg)}</p><div class="row"><button class="primary" id="syncNow">Send and check now</button></div></section>`;
+}
+function syncCardOld() {
   if (!fbUser) return `<section class="card"><h2>Send to the TKR app</h2><p class="muted" style="margin-top:0">Sign in once on this PC with the control room app account (needs signal once). After that, everything goes to the TKR app by itself whenever there is signal, so managers see it live. Without signal it waits on this PC.</p>
     <form id="fSync" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"><label>Email or username <input name="e" autocapitalize="none" required></label><label>Password <input name="p" type="password" required></label><div style="display:flex;align-items:flex-end"><button class="primary" style="width:100%">Sign in</button></div></form></section>`;
   return `<section class="card"><h2>Send to the TKR app</h2><p style="margin-top:0">Signed in as <b>${esc(fbUser.email)}</b> · ${waiting() ? `<b>${waiting()}</b> changes waiting` : "nothing waiting"}. ${esc(sync.msg)}</p><div class="row"><button class="primary" id="syncNow">Send and check now</button><button class="ghost" id="syncOut">Sign out</button></div></section>`;
 }
 addEventListener("online", () => syncNow(false));
+setInterval(() => { if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 60000);   // keep every PC up to date
 setInterval(() => { if (me && tab === "now" && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */

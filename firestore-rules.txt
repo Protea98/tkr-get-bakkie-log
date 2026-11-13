@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 11 Nov 2026 (Control Room)
+// TKR Operations app – rules updated 13 Nov 2026 (Control Room sends without an email sign-in)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -90,7 +90,7 @@ service cloud.firestore {
       return signedIn() && exists(/databases/$(database)/documents/config/ctrlAccess)
         && myEmail() in get(/databases/$(database)/documents/config/ctrlAccess).data.get('emails', []);
     }
-    match /ctrl/{id} { allow read, write: if isManager() || ctrlUser(); }
+    match /ctrl/{id} { allow read, write: if signedIn(); }   // the control room PCs sign in by themselves (no email); controllers use their name and PIN in the page
 
     match /fcMetres/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
     match /fcIssues/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
