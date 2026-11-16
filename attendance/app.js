@@ -322,9 +322,6 @@ async function pptCycle(){const btn=$("pptCycle");btn.disabled=true;btn.textCont
     s=base("New and removed employees");
     if(D.H.length)T(s,[hdr(["Date","Employee","Sheet","What happened"])].concat(D.H.slice(0,14).map(h=>[nice(h.date)+" "+yr(h.date),h.name,h.sheet,(HTYPE[h.type]||h.type)+(h.type==="Removed"||h.type==="Moved"?" – "+histText(h):"")])),{fontSize:12});
     else s.addText("No one added or removed this cycle.",{x:0.5,y:1.5,w:12,h:0.6,...TXT,fontSize:18});
-    // 7+ every employee, 14 per slide
-    for(let i=0;i<D.rows.length;i+=14){s=base("Every employee"+(D.rows.length>14?" ("+(i/14+1)+" of "+Math.ceil(D.rows.length/14)+")":""));
-      T(s,[hdr(["Employee","Sheet","Present","AWOP","Sick","Annual","Off","Not marked","Attendance"])].concat(D.rows.slice(i,i+14).map(r=>[r.e.name,r.e.sheet,r.t.present,r.t.absent,r.t.codes.SICK||0,r.t.codes["ANNUAL LEAVE"]||0,r.t.off,r.t.blank,pc1(r.p)].map(String))),{fontSize:11,rowH:0.36})}
     await pp.writeFile({fileName:D.file+".pptx"});toast("PowerPoint report downloaded")}
   catch(e){console.warn(e);toast("The PowerPoint couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent="Download PowerPoint report"}
