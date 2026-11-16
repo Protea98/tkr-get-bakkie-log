@@ -1,7 +1,8 @@
 {
   "name": "TKR Operations",
   "short_name": "TKR",
-  "description": "TKR Operations app: GET Bakkie Log and Daily Task Board.",
+  "id": "./",
+  "description": "TKR Operations app: Control Room, metres, GET, stores, attendance and tasks.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

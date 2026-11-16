@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Install the TKR app</title>
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/maskable-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TKR">
+<link rel="stylesheet" href="style.css">
+<style>
+.steps{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr))}
+.dev{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--gold);border-radius:12px;padding:16px 18px}
+.dev.me{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
+.dev h2{margin:0 0 4px;font-size:20px}.dev .who{color:var(--muted);font-size:13.5px;margin-bottom:8px}
+.dev ol{margin:0;padding-left:22px;line-height:1.6;font-size:15.5px}
+.dev b.k{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:0 6px;background:var(--panel2)}
+.big{min-height:56px;font-size:18px;width:100%;margin:6px 0 16px}
+.link{font-family:var(--mono);word-break:break-all;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0 14px}
+</style>
+</head>
+<body>
+<div class="band"><div class="in">
+  <a href="./" class="logolink" aria-label="TKR home"><img class="logo" src="icons/logo-96.png" alt="TKR Operations"></a>
+  <div><h1>Install the TKR app</h1><div class="sub">Phones (Android, Huawei, iPhone) and computers</div></div>
+</div></div>
+<div class="wrap">
+  <p id="done" class="notice" hidden><b class="t">The app is installed on this device.</b>Open it from the TKR icon on your home screen or desktop.</p>
+  <button id="go" class="primary big" hidden>Install the TKR app now</button>
+  <p>Nothing to download from a store: the app installs straight from this link, and works on every phone and computer. Share this link with colleagues:</p>
+  <div class="link" id="lnk"></div>
+  <div class="row" style="margin-bottom:16px"><button id="copy">Copy the link</button><a class="btn" id="wa" target="_blank" rel="noopener">Send on WhatsApp</a></div>
+  <div class="steps" id="steps"></div>
+  <p class="muted" style="margin-top:18px">After installing, open the app once with signal so it can save itself on the phone. After that the offline sections (GET Bakkie Log, Control Room, Metres, Attendance) work with no signal.</p>
+</div>
+<script>
+const url = location.origin + location.pathname.replace(/install\.html$/, "");
+document.getElementById("lnk").textContent = url;
+document.getElementById("copy").onclick = async () => { try { await navigator.clipboard.writeText(url); document.getElementById("copy").textContent = "Copied"; } catch { prompt("Copy this link:", url); } };
+document.getElementById("wa").href = "https://wa.me/?text=" + encodeURIComponent("Install the TKR Operations app: open this link, then follow the steps for your phone: " + url + "install.html");
+const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1),
+  huawei = /HuaweiBrowser|HUAWEI|HONOR|HMSCore|HarmonyOS/i.test(ua), android = /Android/i.test(ua), samsung = /SamsungBrowser/i.test(ua), firefox = /Firefox|FxiOS/i.test(ua);
+const mine = ios ? "ios" : huawei ? "huawei" : samsung ? "samsung" : android ? "android" : "pc";
+const S = [
+  ["huawei", "Huawei or Honor phone", "No Google Play or Chrome needed", ["Open <b>Huawei Browser</b> (the blue globe icon) and go to the link above.", "Tap the menu <b class=k>☰</b> or <b class=k>⋮</b> at the bottom right.", "Tap <b>Add to home screen</b> (on some phones it says <b>Add to desktop</b> or <b>Add shortcut</b>).", "Tap <b>Add</b>. The TKR icon is now on the home screen.", "If Huawei Browser has no such option: install <b>Firefox</b> from AppGallery, open the link, tap <b class=k>⋮</b> → <b>Install</b> (or <b>Add to home screen</b>)."]],
+  ["ios", "iPhone or iPad", "Use Safari", ["Open the link in <b>Safari</b> (on iOS 16.4 and newer Chrome works too).", "Tap the <b>Share</b> button <b class=k>⬆</b> (bottom of the screen, top on iPad).", "Scroll down and tap <b>Add to Home Screen</b>.", "Tap <b>Add</b> at the top right. The TKR icon is now on the home screen."]],
+  ["android", "Android phone (Samsung, Oppo, Vivo, Xiaomi…)", "Chrome", ["Open the link in <b>Chrome</b>.", "Tap <b>Install</b> when it shows at the bottom, or the green button at the top of this page.", "No button? Tap <b class=k>⋮</b> at the top right → <b>Install app</b> or <b>Add to home screen</b> → <b>Install</b>."]],
+  ["samsung", "Samsung Internet", "The Samsung browser", ["Open the link in <b>Samsung Internet</b>.", "Tap the <b>download/install icon</b> in the address bar, or the menu <b class=k>☰</b> at the bottom right.", "Tap <b>Add page to</b> → <b>Home screen</b> → <b>Add</b>."]],
+  ["pc", "Computer (Windows or Mac)", "Chrome or Microsoft Edge", ["Open the link in <b>Chrome</b> or <b>Microsoft Edge</b>.", "Click the green button at the top of this page, or the <b>install icon</b> <b class=k>⊕</b> at the right end of the address bar.", "Edge: menu <b class=k>⋯</b> → <b>Apps</b> → <b>Install this site as an app</b>. Chrome: menu <b class=k>⋮</b> → <b>Cast, save and share</b> → <b>Install page as app</b>.", "The app opens in its own window and gets an icon on the desktop and start menu."]],
+];
+document.getElementById("steps").innerHTML = S.sort((a, b) => (b[0] === mine) - (a[0] === mine)).map(([k, t, w, L]) => `<section class="dev ${k === mine ? "me" : ""}"><h2>${t}${k === mine ? " · this device" : ""}</h2><div class="who">${w}</div><ol>${L.map(x => `<li>${x}</li>`).join("")}</ol></section>`).join("");
+if (matchMedia("(display-mode: standalone)").matches || navigator.standalone) document.getElementById("done").hidden = false;
+let evt = null; const go = document.getElementById("go");
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); evt = e; go.hidden = false; });
+go.onclick = async () => { if (!evt) return; evt.prompt(); const r = await evt.userChoice; if (r.outcome === "accepted") { go.hidden = true; document.getElementById("done").hidden = false; } evt = null; };
+addEventListener("appinstalled", () => { go.hidden = true; document.getElementById("done").hidden = false; });
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>

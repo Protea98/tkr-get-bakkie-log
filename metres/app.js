@@ -122,8 +122,31 @@ function homeView() {
       ${tile("Shifts captured", `${S.L.length} <small style="font-size:16px;color:var(--muted)">of ${S.sofar}</small>`, `${S.expected} shifts in ${MONTHS[+month.slice(5, 7) - 1]} (day and night)`, S.L.length < S.sofar ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Shifts without a tally sheet", String(S.noTally.length), S.noTally.length ? "tap to see which" : "every shift with metres has one", S.noTally.length ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Not exported yet", String(ch), lastExport ? `last export ${when(lastExport.at)}` : "nothing exported yet", ch && (days === null || days >= 3) ? "alert" : "", 'data-tab="export"')}</div>`
+    + blocksCard(S)
     + chartCard()
     + `<div class="sect">Last shifts captured</div><div class="res">${latest.map(shiftLine).join("") || '<div class="card muted">Nothing captured yet. Tap + Capture a shift.</div>'}</div>`;
+}
+/* blocks drilled this month: from the block filled in per rig on each shift */
+function blocksOf(S) { const B = new Map();
+  for (const s of S.L) for (const r of allRigs()) { const g = rigOn(s, r); if (!g || !String(g.block || "").trim()) continue; const k = String(g.block).trim();
+    const b = B.get(k) || { block: k, metres: 0, rigs: new Set(), first: s.date, last: s.date, shifts: 0 }; b.metres += num(g.metres); b.rigs.add(r); b.shifts++; if (s.date < b.first) b.first = s.date; if (s.date > b.last) b.last = s.date; B.set(k, b); }
+  return [...B.values()].sort((a, b) => b.metres - a.metres); }
+function blocksCard(S) {
+  const B = blocksOf(S), drilled = B.filter(b => b.metres > 0);
+  return `<section class="card"><h2>Blocks · ${monthName(month)}</h2><p class="muted" style="margin-top:0"><b style="color:var(--fg);font-size:20px">${drilled.length}</b> block${drilled.length === 1 ? "" : "s"} drilled${B.length > drilled.length ? ` · ${B.length - drilled.length} other place${B.length - drilled.length === 1 ? "" : "s"} where rigs stood (no metres)` : ""}</p>
+    ${B.length ? `<div class="tbl"><table class="reg"><thead><tr><th>Block</th><th>Metres</th><th>Rigs</th><th>Shifts</th><th>From</th><th>To</th></tr></thead><tbody>${B.map(b => `<tr><td><b>${esc(b.block)}</b></td><td class="num">${M1(b.metres)}</td><td>${[...b.rigs].join(", ")}</td><td class="num">${b.shifts}</td><td>${fmt(b.first)}</td><td>${fmt(b.last)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="muted">No block filled in on any shift yet this month.</p>'}</section>`;
+}
+/* one shift: what is entered and what is not */
+function dayCheck(d, sh) {
+  const s = shiftOf(d, sh), F = s ? filesOf(s.id) : [], ok = t => `<span style="color:var(--ok)">✓ ${t}</span>`, no = t => `<span style="color:var(--bad)">✗ ${t}</span>`;
+  const rows = s ? allRigs().filter(r => rigOn(s, r)).map(r => { const g = rigOn(s, r), m = num(g.metres) > 0, doc = t => F.some(f => f.type === t && (!f.rig || f.rig === r));
+    return `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${r}</b><small>${[g.status ? ok("Status: " + esc(g.status)) : no("Status"), g.metres !== "" && g.metres != null ? ok(`Metres: ${M1(num(g.metres))} m`) : no("Metres"), g.block ? ok("Block " + esc(g.block)) : no("Block"),
+      g.hrsFrom || g.hrsTo ? ok(`Hours ${esc(g.hrsFrom || "?")}–${esc(g.hrsTo || "?")}`) : no("Machine hours"), (g.delays || []).length ? ok(`${g.delays.length} delay${g.delays.length === 1 ? "" : "s"}`) : (m ? "" : no("Delays / reason")), g.problem ? ok("Problem described") : (m ? "" : no("Problem")),
+      m ? (hasTally(s, r) ? ok("Tally sheet") : no("Tally sheet")) : "", doc("Job card") ? ok("Job card") : no("Job card"), doc("Checklist") ? ok("Checklist") : no("Checklist"), !m && g.status ? (doc("Breakdown report") ? ok("Breakdown report") : no("Breakdown report")) : ""].filter(Boolean).join(" · ")}</small></div></div>`; }).join("") : "";
+  return `<div class="done" id="dayck"><div style="max-width:640px;max-height:90vh;overflow:auto"><div class="big" style="font-size:19px">${dow(d)} ${fmt(d)} · ${sh} shift</div>
+    ${s ? `<p class="muted" style="margin:0 0 8px">${s.supervisor ? ok("Supervisor: " + esc(s.supervisor)) : no("Supervisor")} · ${s.report ? ok("Shift report") : no("Shift report")} · ${F.length} document${F.length === 1 ? "" : "s"}</p><div class="res">${rows || '<p class="muted">No rig filled in.</p>'}</div>`
+      : `<p style="color:var(--bad);font-weight:600">Nothing entered for this shift yet.</p>`}
+    <div class="acts" style="margin-top:14px"><button class="primary" data-cap="${s ? s.id : d + "|" + sh}">${s ? "Fill in or change this shift" : "Capture this shift"}</button><button data-ckx>Close</button></div></div></div>`;
 }
 function shiftLine(s) {
   const nt = needsTally(s), nf = filesOf(s.id).length;
@@ -149,11 +172,11 @@ function missingView() {
   const cells = days.flatMap(d => ["Day", "Night"].map(sh => ({ d, sh, st: state(d, sh) })));
   const notCap = cells.filter(c => c.st === "miss"), noTally = S.noTally;
   const noDocs = S.L.filter(s => rigs().some(r => /^Working/.test(rigOn(s, r)?.status || "") || num(rigOn(s, r)?.metres) > 0)).map(s => ({ s, miss: ["Job card", "Checklist"].filter(t => !filesOf(s.id).some(f => f.type === t)) })).filter(x => x.miss.length);
-  return pageHead("What's missing", monthName(month), "", "", `${S.expected} shifts this month (day and night, every day). Tap a box to capture or open that shift.`)
+  return pageHead("What's missing", monthName(month), "", "", `${S.expected} shifts this month (day and night, every day). Tap a box to see what is entered and what is not for that shift, and fill it in.`)
     + `<div class="mhead">${monthBar()}</div>`
     + `<div class="tiles">${tile("Shifts captured", `${S.L.length} of ${S.sofar}`, `so far · ${S.expected} in the month`, notCap.length ? "alert" : "good")}${tile("Not captured", String(notCap.length), "up to today", notCap.length ? "alert" : "good")}${tile("Without a tally sheet", String(noTally.length), "shifts with metres", noTally.length ? "alert" : "good")}${tile("Without a job card or checklist", String(noDocs.length), "working shifts", noDocs.length ? "alert" : "good")}</div>`
     + `<div class="legend2"><span><i style="background:var(--ok)"></i>Captured, tally sheet attached for every rig that drilled</span><span><i style="background:var(--gold)"></i>Captured, no tally sheet attached</span><span><i style="background:var(--bad)"></i>Not captured</span></div>`
-    + `<div class="mgrid">${cells.map(c => `<button class="mcell ${c.st}" data-cap="${c.d}|${c.sh}" ${c.st === "fut" ? "disabled" : ""}><b>${c.d.slice(8)}</b>${c.sh}</button>`).join("")}</div>`
+    + `<div class="mgrid">${cells.map(c => `<button class="mcell ${c.st}" data-dayck="${c.d}|${c.sh}" ${c.st === "fut" ? "disabled" : ""}><b>${c.d.slice(8)}</b>${c.sh}</button>`).join("")}</div>`
     + `<div class="grid2c"><section class="card"><h2>Not captured (${notCap.length})</h2><div class="res miss-list">${notCap.slice().reverse().map(c => `<div class="ri"><div class="rt"><b>${dow(c.d)} ${fmt(c.d)} · ${c.sh} shift</b></div><button class="sm primary" data-cap="${c.d}|${c.sh}">Capture</button></div>`).join("") || '<p class="muted">Every shift up to today is captured.</p>'}</div></section>
       <section class="card"><h2>No tally sheet (${noTally.length})</h2><div class="res">${noTally.map(({ s, r }) => `<div class="ri"><div class="rt"><b>${dow(s.date)} ${fmt(s.date)} · ${s.shift} · ${r}</b><small>${M1(num(rigOn(s, r).metres))} m</small></div><button class="sm" data-cap="${s.id}">Add tally sheet</button></div>`).join("") || '<p class="muted">Every shift with metres has a tally sheet.</p>'}</div>
       <h2 style="margin-top:16px">No job card or checklist (${noDocs.length})</h2><div class="res">${noDocs.map(({ s, miss }) => `<div class="ri"><div class="rt"><b>${dow(s.date)} ${fmt(s.date)} · ${s.shift}</b><small>missing: ${miss.join(", ").toLowerCase()}</small></div><button class="sm" data-cap="${s.id}">Add</button></div>`).join("") || '<p class="muted">Every working shift has a job card and a checklist.</p>'}</div></section></div>`;
@@ -655,6 +678,8 @@ app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.tab) { tab = b.dataset.tab; render(); scrollTo(0, 0); return; }
   if (b.dataset.mnav) { month = shiftMonth(month, +b.dataset.mnav); render(); return; }
+  if (b.dataset.dayck) { $("dayck")?.remove(); const [d, sh] = b.dataset.dayck.split("|"); document.body.insertAdjacentHTML("beforeend", dayCheck(d, sh)); const ov = $("dayck");
+    ov.addEventListener("click", ev => { const x = ev.target.closest("button"); if (ev.target === ov || x?.hasAttribute("data-ckx")) { ov.remove(); return; } if (x?.dataset.cap !== undefined) { ov.remove(); const v = x.dataset.cap; if (shifts.some(q => q.id === v)) openForm(v); else { const [d2, sh2] = v.split("|"); openForm(null, { date: d2, shift: sh2 }); } } }); return; }
   if (b.dataset.cap !== undefined) { const v = b.dataset.cap; if (!v) openForm(null); else if (shifts.some(s => s.id === v)) openForm(v); else { const [d, sh] = v.split("|"); openForm(null, { date: d, shift: sh }); } return; }
   if (b.dataset.del) { askDelete(b.dataset.del); return; }
   if (b.dataset.view) { viewFile(b.dataset.view); return; }
