@@ -248,11 +248,91 @@ function dailyText(){const D=dailyData();let s="*TKR Operations – Daily Attend
 const LEAVE_COLS=["ANNUAL LEAVE","SICK","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE","MATERNITY LEAVE"];
 function cycleRows(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.date);
   return filtered(c.start).sort((a,b)=>SHEETS.indexOf(a.sheet)-SHEETS.indexOf(b.sheet)||a.order-b.order).map(e=>{const t=tally([e],upto);return {e,t,p:pct(t.present,t.exc)}})}
+/* ---------- cycle report as PDF or PowerPoint ---------- */
+const loadJs=src=>new Promise((res,rej)=>{if(document.querySelector('script[src="'+src+'"]'))return res();const t=document.createElement("script");t.src=src;t.onload=res;t.onerror=()=>rej(new Error("Open the app once with signal, then try again."));document.head.appendChild(t)});
+async function logoData(){try{const b=await (await fetch("../icons/logo-96.png")).blob();return await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})}catch(e){return null}}
+function reportData(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),rows=cycleRows(),A=rows.map(r=>r.e),all=tally(A,upto);
+  const sheets=SHEETS.map(sh=>{const es=A.filter(e=>e.sheet===sh);if(!es.length)return null;const t=tally(es,upto);return {sh,n:es.length,t,p:pct(t.present,t.exc)}}).filter(Boolean);
+  const codes=Object.entries(all.codes).filter(([k])=>!["CLOCKED IN","HOURS WORKED"].includes(k)&&kindOf(k)!=="present"&&kindOf(k)!=="off").sort((a,b)=>b[1]-a[1]);
+  const low=rows.filter(r=>r.p!=null&&r.t.exc>0).sort((a,b)=>a.p-b.p).slice(0,10);
+  const H=allHistory().filter(h=>h.date>=c.start&&h.date<=c.end&&(S.sheet==="All"||h.sheet===S.sheet)&&h.type!=="Deleted");
+  const last=upto[upto.length-1]||c.start,period=nice(c.start)+" "+yr(c.start)+" – "+nice(c.end)+" "+yr(c.end);
+  return {c,upto,rows,all,sheets,codes,low,H,last,period,sheetLbl:S.sheet==="All"?"All sheets":S.sheet,
+    file:"TKR_Attendance_Cycle_Report_"+short(c.start).replace(" ","-")+"_to_"+short(c.end).replace(" ","-")+"_"+parse(c.end).getFullYear()+(S.sheet==="All"?"":"_"+S.sheet.replace(/\s+/g,"_"))}}
+const ot1=v=>v?hm(v):"0:00",pc1=v=>v==null?"–":v.toFixed(1)+"%",cap=k=>k.charAt(0)+k.slice(1).toLowerCase();
+async function pdfCycle(){const btn=$("pdfCycle");btn.disabled=true;btn.textContent="Making the PDF…";
+  try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
+    const D=reportData(),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
+    const head=()=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
+      P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – ATTENDANCE CYCLE REPORT",32,11);
+      P.setTextColor(...GOLD);P.setFontSize(11);P.text("Cycle "+D.period+"   ·   "+D.sheetLbl+"   ·   days counted "+D.upto.length+" of "+D.c.dates.length+" (to "+nice(D.last)+")",32,18.5)};
+    const tbl=(y,title,headRow,body,opt={})=>{P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);P.text(title,12,y);
+      P.autoTable(Object.assign({startY:y+2,head:[headRow],body,margin:{left:12,right:12,top:30},theme:"grid",styles:{fontSize:8.6,cellPadding:1.6,textColor:BLACK,lineColor:[217,211,197]},
+        headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},alternateRowStyles:{fillColor:[255,248,230]},didDrawPage:()=>head()},opt));return P.lastAutoTable.finalY+8};
+    head();
+    // summary tiles
+    const tiles=[["People",String(D.rows.length)],["Present days",String(D.all.present)],["Exception days",String(D.all.exc)],["Cycle attendance",pc1(pct(D.all.present,D.all.exc))],["Overtime",ot1(D.all.ot)+" h"],["New / removed",D.H.filter(h=>h.type==="Added").length+" / "+D.H.filter(h=>h.type==="Removed").length]];
+    tiles.forEach(([k,v],i)=>{const x=12+i*45.5;P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,31,43,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(7.5);P.text(k.toUpperCase(),x+3,37);
+      P.setTextColor(...BLACK);P.setFontSize(16);P.text(v,x+3,47)});
+    let y=60;
+    y=tbl(y,"Per sheet",["Sheet","People","Present","AWOP","Leave","Off","Not marked","Overtime","Attendance"],D.sheets.map(s=>[s.sh,s.n,s.t.present,s.t.absent,s.t.leave,s.t.off,s.t.blank,ot1(s.t.ot),pc1(s.p)]).concat([[{content:"All",styles:{fontStyle:"bold"}},D.rows.length,D.all.present,D.all.absent,D.all.leave,D.all.off,D.all.blank,ot1(D.all.ot),pc1(pct(D.all.present,D.all.exc))]]));
+    if(D.codes.length)y=tbl(y,"Absence and leave this cycle (days)",["Code","Days"],D.codes.map(([k,n])=>[cap(showMark(k)),n]),{tableWidth:110});
+    y=tbl(y,"Lowest attendance this cycle",["Employee","Sheet","Present","Exception days","Attendance"],D.low.length?D.low.map(r=>[r.e.name,r.e.sheet,r.t.present,r.t.exc,pc1(r.p)]):[["No exception days this cycle","","","",""]]);
+    y=tbl(y,"New and removed employees this cycle",["Date","Employee","Sheet","What happened"],D.H.length?D.H.map(h=>[nice(h.date)+" "+yr(h.date),h.name,h.sheet,(HTYPE[h.type]||h.type)+(h.type==="Removed"||h.type==="Moved"?" – "+histText(h):"")]):[["","No one added or removed this cycle","",""]]);
+    P.addPage();head();
+    tbl(32,"Every employee",["Employee","Sheet / group","Present","AWOP",...LEAVE_COLS.map(k=>cap(k.replace(" LEAVE","").replace("FAMILY ","Fam. "))),"Off","Not marked","Overtime","Attendance"],
+      D.rows.map(r=>[r.e.name,r.e.sheet+" · "+groupLabel(r.e),r.t.present,r.t.absent,...LEAVE_COLS.map(k=>r.t.codes[k]||""),r.t.off,r.t.blank,r.t.ot?hm(r.t.ot):"",pc1(r.p)]),{styles:{fontSize:7.6,cellPadding:1.2,textColor:BLACK,lineColor:[217,211,197]}});
+    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present days ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,204)}
+    P.save(D.file+".pdf");toast("PDF report downloaded")}
+  catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
+  btn.disabled=false;btn.textContent="Download PDF report"}
+async function pptCycle(){const btn=$("pptCycle");btn.disabled=true;btn.textContent="Making the PowerPoint…";
+  try{await loadJs("../lib/pptxgen.bundle.js");const D=reportData(),logo=await logoData(),pp=new window.PptxGenJS();pp.layout="LAYOUT_WIDE";pp.author="TKR Operations";pp.title="Attendance cycle report "+D.period;
+    const G="D4A12A",K="111111",CR="FFF8E6",TXT={fontFace:"Arial",color:K};
+    const base=(title)=>{const s=pp.addSlide();s.background={color:"FFFFFF"};s.addShape(pp.ShapeType.rect,{x:0,y:0,w:13.33,h:0.9,fill:{color:K}});s.addShape(pp.ShapeType.rect,{x:0,y:0.9,w:13.33,h:0.06,fill:{color:G}});
+      if(logo)s.addImage({data:logo,x:0.25,y:0.1,w:0.7,h:0.7});s.addText(title,{x:1.1,y:0.08,w:9,h:0.5,fontFace:"Arial",fontSize:22,bold:true,color:"FFFFFF"});
+      s.addText("Cycle "+D.period+" · "+D.sheetLbl,{x:1.1,y:0.52,w:11,h:0.32,fontFace:"Arial",fontSize:12,color:G,bold:true});
+      s.addText("TKR Operations · Attendance",{x:0.3,y:7.1,w:6,h:0.3,fontFace:"Arial",fontSize:9,color:"888888"});return s};
+    const T=(s,rows,o)=>s.addTable(rows,Object.assign({x:0.4,y:1.2,w:12.5,fontFace:"Arial",fontSize:12,color:K,border:{type:"solid",pt:0.5,color:"D9D3C5"},autoPage:false},o));
+    const hdr=a=>a.map(t=>({text:String(t),options:{bold:true,color:"FFFFFF",fill:{color:"262626"}}}));
+    // 1 title
+    let s=pp.addSlide();s.background={color:K};if(logo)s.addImage({data:logo,x:0.6,y:0.6,w:1.4,h:1.4});
+    s.addText("ATTENDANCE CYCLE REPORT",{x:0.6,y:2.4,w:12,h:0.9,fontFace:"Arial",fontSize:40,bold:true,color:"FFFFFF"});
+    s.addText(D.period,{x:0.6,y:3.3,w:12,h:0.7,fontFace:"Arial",fontSize:26,bold:true,color:G});
+    s.addText(D.sheetLbl+" · days counted "+D.upto.length+" of "+D.c.dates.length+" (to "+nice(D.last)+" "+yr(D.last)+")",{x:0.6,y:4.1,w:12,h:0.5,fontFace:"Arial",fontSize:16,color:"DDDDDD"});
+    s.addText("TKR Operations · Tharisa Mine",{x:0.6,y:6.6,w:8,h:0.4,fontFace:"Arial",fontSize:12,color:"AAAAAA"});
+    // 2 summary
+    s=base("Summary");const tiles=[["People on the register",String(D.rows.length)],["Present days",String(D.all.present)],["Exception days",String(D.all.exc)],["Cycle attendance",pc1(pct(D.all.present,D.all.exc))],["Overtime",ot1(D.all.ot)+" h"],["New / removed",D.H.filter(h=>h.type==="Added").length+" / "+D.H.filter(h=>h.type==="Removed").length]];
+    tiles.forEach(([k,v],i)=>{const x=0.5+(i%3)*4.15,y=1.4+Math.floor(i/3)*2.6;s.addShape(pp.ShapeType.roundRect,{x,y,w:3.9,h:2.2,fill:{color:CR},line:{color:G,width:1.5},rectRadius:0.1});
+      s.addText(k.toUpperCase(),{x:x+0.25,y:y+0.2,w:3.5,h:0.4,fontFace:"Arial",fontSize:12,bold:true,color:"6E6450"});s.addText(v,{x:x+0.25,y:y+0.75,w:3.5,h:1,fontFace:"Arial",fontSize:40,bold:true,color:K})});
+    s.addText("Attendance = present days ÷ (present + exception days). Exceptions are AWOP, sick and maternity leave. Annual, family and study leave are not counted as absent.",{x:0.5,y:6.6,w:12.3,h:0.4,fontFace:"Arial",fontSize:10,color:"666666"});
+    // 3 per sheet
+    s=base("Per sheet");T(s,[hdr(["Sheet","People","Present","AWOP","Leave","Off","Not marked","Overtime","Attendance"])].concat(D.sheets.map(x=>[x.sh,x.n,x.t.present,x.t.absent,x.t.leave,x.t.off,x.t.blank,ot1(x.t.ot),pc1(x.p)].map(String)),
+      [["All",D.rows.length,D.all.present,D.all.absent,D.all.leave,D.all.off,D.all.blank,ot1(D.all.ot),pc1(pct(D.all.present,D.all.exc))].map(v=>({text:String(v),options:{bold:true,fill:{color:"FFF2CC"}}}))]),{fontSize:14});
+    // 4 absence and leave
+    s=base("Absence and leave this cycle");
+    if(D.codes.length){s.addChart(pp.ChartType.bar,[{name:"Days",labels:D.codes.slice(0,8).map(([k])=>cap(showMark(k))),values:D.codes.slice(0,8).map(([,n])=>n)}],{x:0.4,y:1.2,w:7.6,h:5.6,barDir:"bar",chartColors:[G],catAxisLabelFontSize:12,valAxisLabelFontSize:10,showValue:true,dataLabelFontSize:11,catAxisOrientation:"maxMin"});
+      T(s,[hdr(["Code","Days"])].concat(D.codes.map(([k,n])=>[cap(showMark(k)),String(n)])),{x:8.4,w:4.5,fontSize:12})}
+    else s.addText("No absence or leave marked this cycle.",{x:0.5,y:1.5,w:12,h:0.6,...TXT,fontSize:18});
+    // 5 lowest attendance
+    s=base("Lowest attendance this cycle");
+    if(D.low.length)T(s,[hdr(["Employee","Sheet","Present","Exception days","Attendance"])].concat(D.low.map(r=>[r.e.name,r.e.sheet,String(r.t.present),String(r.t.exc),pc1(r.p)])),{fontSize:13});
+    else s.addText("No exception days this cycle.",{x:0.5,y:1.5,w:12,h:0.6,...TXT,fontSize:18});
+    // 6 joiners and leavers
+    s=base("New and removed employees");
+    if(D.H.length)T(s,[hdr(["Date","Employee","Sheet","What happened"])].concat(D.H.slice(0,14).map(h=>[nice(h.date)+" "+yr(h.date),h.name,h.sheet,(HTYPE[h.type]||h.type)+(h.type==="Removed"||h.type==="Moved"?" – "+histText(h):"")])),{fontSize:12});
+    else s.addText("No one added or removed this cycle.",{x:0.5,y:1.5,w:12,h:0.6,...TXT,fontSize:18});
+    // 7+ every employee, 14 per slide
+    for(let i=0;i<D.rows.length;i+=14){s=base("Every employee"+(D.rows.length>14?" ("+(i/14+1)+" of "+Math.ceil(D.rows.length/14)+")":""));
+      T(s,[hdr(["Employee","Sheet","Present","AWOP","Sick","Annual","Off","Not marked","Overtime","Attendance"])].concat(D.rows.slice(i,i+14).map(r=>[r.e.name,r.e.sheet,r.t.present,r.t.absent,r.t.codes.SICK||0,r.t.codes["ANNUAL LEAVE"]||0,r.t.off,r.t.blank,r.t.ot?hm(r.t.ot):"",pc1(r.p)].map(String))),{fontSize:11,rowH:0.36})}
+    await pp.writeFile({fileName:D.file+".pptx"});toast("PowerPoint report downloaded")}
+  catch(e){console.warn(e);toast("The PowerPoint couldn't be made: "+(e.message||"try again"))}
+  btn.disabled=false;btn.textContent="Download PowerPoint report"}
 function viewCycle(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.date);let rows=cycleRows();
   if(S.sortLow)rows=rows.slice().sort((a,b)=>(a.p??101)-(b.p??101));
   const all=tally(rows.map(r=>r.e),upto);
   let h=cycleBanner()+chipsBar('<input class="search" id="q" type="search" placeholder="Search name, number or job" value="'+esc(S.q)+'">');
-  h+='<div class="bar"><button class="btn" id="sortLow" aria-pressed="'+S.sortLow+'">'+(S.sortLow?"Show in timesheet order":"Lowest attendance first")+'</button><button class="btn gold" id="xlsCycle">Download Excel timesheet</button></div>';
+  h+='<div class="bar"><button class="btn" id="sortLow" aria-pressed="'+S.sortLow+'">'+(S.sortLow?"Show in timesheet order":"Lowest attendance first")+'</button><button class="btn gold" id="xlsCycle">Download Excel timesheet</button><button class="btn gold" id="pdfCycle">Download PDF report</button><button class="btn gold" id="pptCycle">Download PowerPoint report</button></div>';
   h+='<div class="summary">'+stat("Days counted",upto.length+" of "+c.dates.length)+stat("Present days",all.present)+stat("Exception days",all.exc)+stat("Cycle attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
   h+='<p class="note">'+short(c.start)+' to '+short(upto[upto.length-1]||c.start)+'. Attendance = present days ÷ (present days + exception days). Exceptions are AWOP, sick and maternity leave. Annual leave, family responsibility, family emergency and study leave are not counted as absent. Medical counts as present. Off days are not counted.</p>';
   h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Present</th><th>AWOP</th>'+LEAVE_COLS.map(k=>'<th>'+esc(k.replace(" LEAVE","").replace("FAMILY ","FAM. "))+'</th>').join("")+'<th>Off</th><th>Not marked</th><th>Overtime</th><th>Attendance</th></tr></thead><tbody>';
@@ -749,6 +829,8 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
   if(t.id==="xlsDaily"){xlsRange(S.date,S.date,S.dshift);return}
   if(t.dataset.exp){S.exp.type=t.dataset.exp;if(t.dataset.exp!=="custom")[S.exp.from,S.exp.to]=preset(t.dataset.exp,S.exp.from||S.date);render();return}
   if(t.dataset.htype){(S.hf||(S.hf={type:"All",from:"",to:""})).type=t.dataset.htype;render();return}
+  if(t.id==="pdfCycle"){pdfCycle();return}
+  if(t.id==="pptCycle"){pptCycle();return}
   if(t.id==="xlsEmps"){xlsEmployees();return}
   if(t.id==="xlsRange"){xlsRange(S.exp.from,S.exp.to);return}
   if(t.dataset.flg){const F=S.flg;F.type=t.dataset.flg;if(F.type!=="custom")[F.from,F.to]=preset(F.type,F.from||S.date);render();return}
