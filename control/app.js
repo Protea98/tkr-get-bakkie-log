@@ -315,14 +315,14 @@ function shiftTable(d, sh) {
   const opt = v => ["", "OP", "BD", "PM"].map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("");
   for (const [g, L] of fleet()) { const gt = tot(), opCount = H.map(() => 0);
     L.forEach((mc, i) => { const hr = recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted), C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
-      const reason = [...new Set(E.map(e => e.reason).filter(Boolean))].join("; ");
+      const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
         if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv">${v}</span></td>`;
         return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}${!C[h] && v && v !== "OP" ? " dv" : ""}" ${!C[h] && v && v !== "OP" ? 'title="Carried on from a breakdown that has not been closed. Pick OP if it was working."' : ""}>${opt(v)}</select></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${cells}
-        <td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>")}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
-        <td>${(() => { const lr = E.find(e => lockedV(e, "reason")); return lr ? `<input readonly class="rsn lk" data-edit="${lr.id}" value="${esc(reason)}">` : `<input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" ${E.length ? "" : "disabled"}>`; })()}</td><td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
+        <td class="tm">${E.length ? E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>") : `<span data-newev="${esc(mc)}" title="Log a breakdown with exact times" style="color:#999">+ time</span>`}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
+        <td>${(() => { const lr = E.find(e => lockedV(e, "reason")); return lr ? `<input readonly class="rsn lk" data-edit="${lr.id}" value="${esc(reason)}">` : `<input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" placeholder="${E.length ? "" : "comment"}">`; })()}</td><td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
       for (const k of ["avail", "BD", "PM", "down"]) gt[k] += s[k]; });
     body += `<tr class="gt"><td colspan="2">${esc(g)} total</td>${opCount.map(n => `<td>${n}/${L.length}</td>`).join("")}<td></td><td></td><td></td><td>${n2(gt.avail)}</td><td>${n2(gt.BD)}</td><td>${n2(gt.PM)}</td><td>${n2(gt.down)}</td></tr>`;
     for (const k of ["avail", "BD", "PM", "down"]) shT[k] += gt[k]; }
@@ -363,6 +363,8 @@ async function setCell(d, mc, h, val) {
 async function setReason(mc, d, sh, reason) {
   const [a, b] = shiftWin(d, sh), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
   for (const e of E) if ((e.reason || "") !== reason && !lockedV(e, "reason")) await put({ ...e, reason }, `${mc}: ${reason}`);
+  if (!E.length) { const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };   // no breakdown on this shift: keep it as a comment
+    if ((rec.notes?.[sh] || "") !== reason) await put({ ...rec, deleted: false, notes: { ...(rec.notes || {}), [sh]: reason } }, `${mc} ${sh.toLowerCase()} shift comment: ${reason || "cleared"}`); }
 }
 function shiftMessage(d, sh) {
   const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me.name;
@@ -629,6 +631,7 @@ async function viewDoc(id) {
 /* ---------- events ---------- */
 async function clickH(ev) {
   if (sheetClick(ev, app)) return;
+  const ne = ev.target.closest("[data-newev]"); if (ne) { openEv(evForm({}, ne.dataset.newev), "Log breakdown"); return; }
   const lc = ev.target.closest("[data-lockcell]"); if (lc) { const [mc, h] = lc.dataset.lockcell.split("|"); openEv(reqForm({ type: "cell", d: $("fDay").dataset.date, mc, h: +h }), "Ask the admin to change it"); return; }
   const lf = ev.target.closest("[data-lockf]"); if (lf) { const [id, field] = lf.dataset.lockf.split("|"); openEv(reqForm({ type: "field", id, field }), "Ask the admin to change it"); return; }
   const cell = ev.target.closest("[data-edit]:not(button)"); if (cell) { const e = recs.find(r => r.id === cell.dataset.edit); if (e) openEv(evForm(e), `${e.machine} · correct the times`); return; }
@@ -846,7 +849,7 @@ async function exportXlsx(from, to) {
       const [a, b] = shiftWin(d, sh);
       for (const [g, L] of fleet()) L.forEach((mc, i) => { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh), C = cellsOf(d, mc);
         row(ws, r++, [i ? "" : g, mc, ...HRS(sh).map(h => cellVal(d, mc, h, C)), E.map(e => toMs(e.start) < a ? tOf(a) : hhmm(e.start)).join(", "), E.map(e => e.end && toMs(e.end) <= b ? hhmm(e.end) : "").filter(Boolean).join(", "),
-          [...new Set(E.map(e => e.reason).filter(Boolean))].join("; "), s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [16] }); });
+          [...new Set([...E.map(e => e.reason), recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted)?.notes?.[sh]].filter(Boolean))].join("; "), s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [16] }); });
     }
     r++; band(ws, r++, 21, "24-hour availability summary per machine"); head(ws, r++, ["Group", "Machine", "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Down hrs", "Total hrs", "Availability %"]);
     for (const [g, L] of fleet()) L.forEach((mc, i) => { const s = daySum(mc, d); row(ws, r, [i ? "" : g, mc, ...(s ? [s.avail, s.BD, s.PM, s.down, s.avail + s.down, s.pct ?? ""] : ["", "", "", "", "", ""])], { boldCol: [0, 1] }); ws.getCell(r, 8).numFmt = "0%"; r++; });
