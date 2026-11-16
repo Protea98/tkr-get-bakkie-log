@@ -551,15 +551,22 @@ function shiftsSoFar(m0) { const L = [], c = curShift(), end = m0 === today().sl
   for (let d = m0 + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { if (shiftWin(d, sh)[0] > Date.now()) continue; L.push([d, sh]); } return L; }
 function needFor() { return ["Checklist"]; }        // the minimum per machine per shift; any other document can be added
 function docMissing(m, m0 = month) { return shiftsSoFar(m0).flatMap(([d, sh]) => needFor(m, d, sh).filter(t => !docsOf(m, d, sh).some(x => x.type === t)).map(t => ({ d, sh, t }))); }
-function docsPanel(m) {
-  const S = shiftsSoFar(month).reverse(), miss = docMissing(m).length;
-  return `<div class="card" style="max-width:820px;margin:0 auto"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(m)}</b> · ${esc(groupOf(m))} · ${monthName(month)}<br><span class="muted">A checklist is needed every shift. ${miss ? `<b style="color:var(--bad)">${miss} shift${miss === 1 ? "" : "s"} without a checklist</b>` : "Every shift has a checklist."} Add job cards, trip summaries or any other document too.</span></div>
-    <div class="row" style="gap:6px"><button class="primary" data-upload="${esc(m)}">Upload documents</button><button data-dzip="${esc(m)}">Download all (${docsOf(m).filter(x => x.date.startsWith(month)).length})</button></div></div>
-    ${miss ? `<p style="margin:10px 0 0"><b>No checklist:</b> ${docMissing(m).map(x => `${fmt(x.d).slice(0, 5)} ${x.sh === "Day" ? "D" : "N"}`).join(", ")}</p>` : ""}
-    <div class="res" style="margin-top:12px">${S.map(([d, sh]) => { const have = docsOf(m, d, sh), need = needFor(m, d, sh);
-      return `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${dow(d)} ${fmt(d)} · ${sh}</b><small>${need.map(t => have.some(x => x.type === t) ? `<span style="color:var(--ok)">✓ ${t}</span>` : `<span style="color:var(--bad)">✗ ${t}</span>`).join(" · ")}</small>
-        ${have.length ? `<div class="row" style="gap:6px;margin-top:6px">${have.map(x => `<button class="sm" data-dview="${x.id}">${esc(x.type)}: ${esc(x.name.slice(0, 28))}</button><button class="sm ghost" data-ddl="${x.id}" aria-label="Download">⬇</button><button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button>`).join("")}</div>` : ""}</div>
-        <div class="row" style="gap:6px">${need.filter(t => !have.some(x => x.type === t)).map(t => `<button class="sm primary" data-upload="${esc(m)}|${d}|${sh}|${esc(t)}">+ ${t}</button>`).join("")}<button class="sm ghost" data-upload="${esc(m)}|${d}|${sh}|Job card">+ Other document</button></div></div>`; }).join("")}</div></div>`;
+function docsPanel(m, sel = "") {
+  const end = monthEnd(month), cells = [], now = Date.now();
+  for (let d = month + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { const fut = shiftWin(d, sh)[0] > now, have = docsOf(m, d, sh);
+    cells.push({ d, sh, fut, have, st: fut ? "fut" : have.some(x => x.type === "Checklist") ? "ok" : have.length ? "part" : "miss" }); }
+  const past = cells.filter(c => !c.fut), withCl = past.filter(c => c.st === "ok").length, other = docsOf(m).filter(x => x.date.startsWith(month) && x.type !== "Checklist").length;
+  const pick = sel ? cells.find(c => `${c.d}|${c.sh}` === sel) : past.at(-1), all = docsOf(m).filter(x => x.date.startsWith(month)).length;
+  const tileH = (l, n, sub, cls) => `<div class="tile ${cls}"><div class="l">${l}</div><div class="n">${n}</div><div class="s">${sub}</div></div>`;
+  return `<div style="max-width:1100px;margin:0 auto"><div class="row" style="justify-content:space-between;align-items:flex-end;margin-bottom:10px"><div><span class="muted" style="font-size:12px;letter-spacing:1px;text-transform:uppercase">${esc(groupOf(m))} · documents</span><h2 style="margin:2px 0 0">${esc(m)} · ${monthName(month)}</h2></div>
+      <div class="row" style="gap:6px"><button class="primary" data-upload="${esc(m)}">Upload documents</button><button data-dzip="${esc(m)}">Download all (${all})</button></div></div>
+    <div class="tiles">${tileH("Shifts with a checklist", `${withCl} of ${past.length}`, `so far · ${cells.length} in the month`, withCl < past.length ? "alert" : "good")}${tileH("No checklist", String(past.length - withCl), "up to now", past.length - withCl ? "alert" : "good")}${tileH("Other documents", String(other), "job cards, trip summaries and others", "")}</div>
+    <div class="legend2"><span><i style="background:var(--ok)"></i>Checklist uploaded</span><span><i style="background:var(--gold)"></i>Other documents, no checklist</span><span><i style="background:var(--bad)"></i>No checklist</span></div>
+    <div class="mgrid">${cells.map(c => `<button class="mcell ${c.st}" data-dshift="${esc(m)}|${c.d}|${c.sh}" ${c.fut ? "disabled" : ""} style="${pick && pick.d === c.d && pick.sh === c.sh ? "outline:3px solid var(--gold);outline-offset:1px" : ""}"><b>${c.d.slice(8)}</b>${c.sh}</button>`).join("")}</div>
+    ${pick ? `<section class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${dow(pick.d)} ${fmt(pick.d)} · ${pick.sh} shift</h3>
+        <div class="row" style="gap:6px">${pick.have.some(x => x.type === "Checklist") ? "" : `<button class="sm primary" data-upload="${esc(m)}|${pick.d}|${pick.sh}|Checklist">+ Checklist</button>`}<button class="sm" data-upload="${esc(m)}|${pick.d}|${pick.sh}|Job card">+ Other document</button></div></div>
+      <div class="res" style="margin-top:10px">${pick.have.map(x => `<div class="ri"><div class="rt"><b>${esc(x.type)}</b><small>${esc(x.name)} · by ${esc(x.by || "")}</small></div><div class="row" style="gap:6px"><button class="sm" data-dview="${x.id}">Open</button><button class="sm" data-ddl="${x.id}">Download</button><button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button></div></div>`).join("")
+        || `<p style="color:var(--bad);font-weight:600;margin:0">No documents for this shift yet. A checklist is the minimum.</p>`}</div></section>` : ""}</div>`;
 }
 function docForm(m = "", d = "", sh = "", t = "") {
   const c = curShift(), M = fleet().flatMap(([, L]) => L); d = d || c.key.split("|")[0]; sh = sh || c.key.split("|")[1];
@@ -588,7 +595,7 @@ async function saveDocs(f) {
       for (let i = 0; i < parts; i++) await fileSet(`${fid}_${i}`, data.slice(i * 700000, (i + 1) * 700000));
       await put({ id: "doc_" + fid, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: m, group: m ? groupOf(m) : "", type: t, name: file.name, mime: pdf ? "application/pdf" : "image/jpeg", fid, parts, size: data.length }, `Document: ${t} for ${m || "general"} (${fmt(d).slice(0, 5)} ${sh})`); n++; }
     catch (e) { console.warn(e); toast(file.name + " couldn't be read."); } }
-  if (m) openEv(docsPanel(m), `${m} · documents`); else closeEv(); render(); toast(`${n} document${n === 1 ? "" : "s"} saved${navigator.onLine ? "" : " on this PC. They send when there is signal"}.`);
+  if (m) openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); else closeEv(); render(); toast(`${n} document${n === 1 ? "" : "s"} saved${navigator.onLine ? "" : " on this PC. They send when there is signal"}.`);
 }
 async function docData(r) { const parts = [];
   for (let i = 0; i < (r.parts || 1); i++) { let p = await fileGet(`${r.fid}_${i}`);
@@ -635,10 +642,11 @@ async function clickH(ev) {
   if (b.dataset.mail) { const e = recs.find(r => r.id === b.dataset.mail); if (e) openEv(mailForm(e), "Email this breakdown"); return; }
   if (b.dataset.mdocs) { openEv(docsPanel(b.dataset.mdocs), `${b.dataset.mdocs} · documents`); return; }
   if (b.dataset.upload !== undefined) { const [m, d, sh, t] = b.dataset.upload.split("|"); openEv(docForm(m, d, sh, t), "Upload documents"); return; }
+  if (b.dataset.dshift) { const [m, d, sh] = b.dataset.dshift.split("|"); openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); return; }
   if (b.dataset.dview) { await viewDoc(b.dataset.dview); return; }
   if (b.dataset.ddl) { await downloadDoc(b.dataset.ddl); return; }
   if (b.dataset.dzip) { b.disabled = true; try { await downloadAll(b.dataset.dzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
-  if (b.dataset.ddel) { const r = recs.find(x => x.id === b.dataset.ddel); if (r && confirm(`Delete ${r.name}?`)) { await put({ ...r, deleted: true }, `Deleted document ${r.type} ${r.machine}`); if (r.machine && document.getElementById("evPanel")) openEv(docsPanel(r.machine), `${r.machine} · documents`); else closeEv(); render(); } return; }
+  if (b.dataset.ddel) { const r = recs.find(x => x.id === b.dataset.ddel); if (r && confirm(`Delete ${r.name}?`)) { await put({ ...r, deleted: true }, `Deleted document ${r.type} ${r.machine}`); if (r.machine && document.getElementById("evPanel")) openEv(docsPanel(r.machine, r.date + "|" + r.shift), `${r.machine} · documents`); else closeEv(); render(); } return; }
   if (b.dataset.addmg) { openEv(machForm(+b.dataset.addmg, "add"), "Add a machine"); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; closeSheet(app); render(); scrollTo(0, 0); return; }
