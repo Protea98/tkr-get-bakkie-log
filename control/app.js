@@ -546,7 +546,7 @@ function mailForm(e) {
 /* ---------- documents per machine per shift (job cards, checklists…), kept on this PC and sent when there is signal ---------- */
 const DOC_TYPES = ["Checklist", "Job card", "Tally sheet", "Trip summary", "Fleet report", "Breakdown report", "Other"];
 const NEEDS = { "Drill rigs": ["Checklist", "Tally sheet"], "Rockbreakers": ["Checklist"], "Buses": ["Checklist", "Trip summary"], "Lowbed": ["Checklist", "Trip summary"], "Water bowser": ["Checklist", "Trip summary"], "Bakkies": ["Checklist"] };
-const docsOf = (m, d, sh) => R("doc").filter(x => x.machine === m && (!d || (x.date === d && x.shift === sh)));
+const docsOf = (m, d, sh) => R("doc").concat(R("mdoc")).filter(x => x.machine === m && (!d || (x.date === d && x.shift === sh)));   // mdoc: drill rig documents from the Metres section
 function shiftsSoFar(m0) { const L = [], c = curShift(), end = m0 === today().slice(0, 7) ? today() : monthEnd(m0);
   for (let d = m0 + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { if (shiftWin(d, sh)[0] > Date.now()) continue; L.push([d, sh]); } return L; }
 function needFor() { return ["Checklist"]; }        // the minimum per machine per shift; any other document can be added
@@ -556,16 +556,17 @@ function docsPanel(m, sel = "") {
   for (let d = month + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { const fut = shiftWin(d, sh)[0] > now, have = docsOf(m, d, sh);
     cells.push({ d, sh, fut, have, st: fut ? "fut" : have.some(x => x.type === "Checklist") ? "ok" : have.length ? "part" : "miss" }); }
   const past = cells.filter(c => !c.fut), withCl = past.filter(c => c.st === "ok").length, other = docsOf(m).filter(x => x.date.startsWith(month) && x.type !== "Checklist").length;
-  const pick = sel ? cells.find(c => `${c.d}|${c.sh}` === sel) : past.at(-1), all = docsOf(m).filter(x => x.date.startsWith(month)).length;
+  const pick = sel ? cells.find(c => `${c.d}|${c.sh}` === sel) : past.at(-1), all = docsOf(m).filter(x => x.kind === "doc" && x.date.startsWith(month)).length;
   const tileH = (l, n, sub, cls) => `<div class="tile ${cls}"><div class="l">${l}</div><div class="n">${n}</div><div class="s">${sub}</div></div>`;
-  return `<div style="max-width:1100px;margin:0 auto"><div class="row" style="justify-content:space-between;align-items:flex-end;margin-bottom:10px"><div><span class="muted" style="font-size:12px;letter-spacing:1px;text-transform:uppercase">${esc(groupOf(m))} · documents</span><h2 style="margin:2px 0 0">${esc(m)} · ${monthName(month)}</h2></div>
+  return `<div style="max-width:1100px;margin:0 auto"><div class="row" style="justify-content:space-between;align-items:flex-end;margin-bottom:10px"><div><span class="muted" style="font-size:12px;letter-spacing:1px;text-transform:uppercase">${esc(groupOf(m))} · documents${/^TDR/.test(m) ? " · linked with the Metres section" : ""}</span><h2 style="margin:2px 0 0">${esc(m)} · ${monthName(month)}</h2></div>
       <div class="row" style="gap:6px"><button class="primary" data-upload="${esc(m)}">Upload documents</button><button data-dzip="${esc(m)}">Download all (${all})</button></div></div>
     <div class="tiles">${tileH("Shifts with a checklist", `${withCl} of ${past.length}`, `so far · ${cells.length} in the month`, withCl < past.length ? "alert" : "good")}${tileH("No checklist", String(past.length - withCl), "up to now", past.length - withCl ? "alert" : "good")}${tileH("Other documents", String(other), "job cards, trip summaries and others", "")}</div>
     <div class="legend2"><span><i style="background:var(--ok)"></i>Checklist uploaded</span><span><i style="background:var(--gold)"></i>Other documents, no checklist</span><span><i style="background:var(--bad)"></i>No checklist</span></div>
     <div class="mgrid">${cells.map(c => `<button class="mcell ${c.st}" data-dshift="${esc(m)}|${c.d}|${c.sh}" ${c.fut ? "disabled" : ""} style="${pick && pick.d === c.d && pick.sh === c.sh ? "outline:3px solid var(--gold);outline-offset:1px" : ""}"><b>${c.d.slice(8)}</b>${c.sh}</button>`).join("")}</div>
     ${pick ? `<section class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${dow(pick.d)} ${fmt(pick.d)} · ${pick.sh} shift</h3>
         <div class="row" style="gap:6px">${pick.have.some(x => x.type === "Checklist") ? "" : `<button class="sm primary" data-upload="${esc(m)}|${pick.d}|${pick.sh}|Checklist">+ Checklist</button>`}<button class="sm" data-upload="${esc(m)}|${pick.d}|${pick.sh}|Job card">+ Other document</button></div></div>
-      <div class="res" style="margin-top:10px">${pick.have.map(x => `<div class="ri"><div class="rt"><b>${esc(x.type)}</b><small>${esc(x.name)} · by ${esc(x.by || "")}</small></div><div class="row" style="gap:6px"><button class="sm" data-dview="${x.id}">Open</button><button class="sm" data-ddl="${x.id}">Download</button><button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button></div></div>`).join("")
+      <div class="res" style="margin-top:10px">${pick.have.map(x => x.kind === "mdoc" ? `<div class="ri"><div class="rt"><b>${esc(x.type)}</b><small>${esc(x.name)} · in the Metres section (open it there)</small></div><span class="tag OP">METRES</span></div>`
+        : `<div class="ri"><div class="rt"><b>${esc(x.type)}</b><small>${esc(x.name)} · by ${esc(x.by || "")}</small></div><div class="row" style="gap:6px"><button class="sm" data-dview="${x.id}">Open</button><button class="sm" data-ddl="${x.id}">Download</button><button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button></div></div>`).join("")
         || `<p style="color:var(--bad);font-weight:600;margin:0">No documents for this shift yet. A checklist is the minimum.</p>`}</div></section>` : ""}</div>`;
 }
 function docForm(m = "", d = "", sh = "", t = "") {
@@ -605,7 +606,7 @@ const docName = r => `${r.machine || "General"}_${r.date}_${r.shift}_${r.type.re
 async function downloadDoc(id) { const r = recs.find(x => x.id === id); if (!r) return; const d = await docData(r); if (!d) { toast(navigator.onLine ? "This document hasn't reached the TKR app yet." : "This document is on another PC. Try again with signal."); return; }
   const { deliver } = await import("../lib/deliver.js"); deliver(await (await fetch(d)).blob(), docName(r)); }
 async function downloadAll(m) {
-  const L = docsOf(m).filter(x => x.date.startsWith(month)); if (!L.length) { toast("No documents for " + m + " this month yet."); return; }
+  const L = docsOf(m).filter(x => x.kind === "doc" && x.date.startsWith(month)); if (!L.length) { toast("No documents for " + m + " this month yet."); return; }
   await new Promise((res, rej) => { if (window.JSZip) return res(); const s = document.createElement("script"); s.src = "../lib/jszip.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
   const zip = new window.JSZip(), root = `${m} documents ${monthName(month)}`; let n = 0, skip = 0;
   for (const r of L) { const d = await docData(r); if (!d) { skip++; continue; } zip.file(`${root}/${r.date} ${r.shift}/${docName(r)}`, d.split(",")[1], { base64: true }); n++; }

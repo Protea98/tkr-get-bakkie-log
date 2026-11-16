@@ -67,7 +67,7 @@ async function ensureOctober() {
   await metaSet("oct2026", 1);
 }
 async function load() {
-  try { [shifts, files] = await Promise.all([getAll("shifts"), getAll("files")]); cfg = { ...cfg, ...(await metaGet("cfg") || {}) }; lastExport = await metaGet("lastExport") || null; ms = { ...MS_DEFAULT, ...(await metaGet("ms") || {}) }; fcLast = await metaGet("fcLast") || 0; }
+  try { [shifts, files] = await Promise.all([getAll("shifts"), getAll("files")]); withCtrlFiles(); cfg = { ...cfg, ...(await metaGet("cfg") || {}) }; lastExport = await metaGet("lastExport") || null; ms = { ...MS_DEFAULT, ...(await metaGet("ms") || {}) }; fcLast = await metaGet("fcLast") || 0; }
   catch (e) { console.warn(e); app.innerHTML = `<div class="notice warn"><b class="t">This browser can't store the metres</b>It may be in private mode. Open the app in a normal window.</div>`; return false; }
   try { est = await navigator.storage?.estimate?.(); } catch {}
   return true;
@@ -376,6 +376,7 @@ function askDelete(id) {
         b => { if (b === "redo") openForm(null, { date: s.date, shift: s.shift }); }); });
 }
 async function blobOf(f) {
+  if (f.cr) { const d = await crData(f.cr); return d ? await (await fetch(d)).blob() : null; }
   const have = (await getOne("blobs", f.id))?.blob; if (have || !f.remote) return have || null;
   if (!navigator.onLine) return null;
   await fire(); const { db, doc, getDoc, getDocs, query, where, collection } = fb;
@@ -637,7 +638,28 @@ addEventListener("online", () => { if (fbUser) fcSync(false); else render(); });
 const CTRL_CAT = { BD: "Breakdowns", PM: "Service and maintenance", SB: "Other" }, CTRL_NAME = { BD: "Breakdown", PM: "Planned maintenance", SB: "Standby" };
 let ctrlEvs = new Map();
 const ctMs = s => { if (!s) return 0; const [d, t] = s.split("T"), [y, m, dd] = d.split("-").map(Number), [h, mi] = (t || "00:00").split(":").map(Number); return new Date(y, m - 1, dd, h, mi).getTime(); };
-function takeCtrl(L) { for (const r of L) { if (r.kind !== "ev") continue; const o = ctrlEvs.get(r.id); if (!o || (r.editedAt || 0) > (o.editedAt || 0)) ctrlEvs.set(r.id, r); } }
+function takeCtrl(L) { for (const r of L) { const M = r.kind === "ev" ? ctrlEvs : r.kind === "doc" && /^TDR/.test(r.machine || "") ? ctrlDocs : null; if (!M) continue; const o = M.get(r.id); if (!o || (r.editedAt || 0) > (o.editedAt || 0)) M.set(r.id, r); } }
+/* drill rig documents uploaded in the Control Room show on the matching shift here (and the other way round, see pushMdocs) */
+let ctrlDocs = new Map();
+const CR_TYPE = { Checklist: "Checklist", "Job card": "Job card", "Tally sheet": "Tally sheet", "Breakdown report": "Breakdown report" };
+const ctrlFiles = () => [...ctrlDocs.values()].filter(r => !r.deleted && r.date && r.shift).map(r => ({ id: "cr_" + r.id, cr: r, remote: 1, fcId: "cr_" + r.id, shiftId: r.date + "|" + r.shift, date: r.date, shift: r.shift,
+  rig: r.machine.replace(/^TDR(\d+)/, "TDR $1"), type: CR_TYPE[r.type] || "Supporting document", name: `${r.name} (Control Room)`, mime: r.mime || "image/jpeg", size: 0, thumb: "", note: "From the Control Room", savedAt: r.editedAt || 0 }));
+const withCtrlFiles = () => { files = files.filter(f => !f.cr).concat(ctrlFiles()); };
+async function crData(r) { const parts = [];
+  let d = null; try { const L = await indexedDB.databases?.(); if (L && L.some(x => x.name === "tkr-control")) d = await new Promise((res, rej) => { const q = indexedDB.open("tkr-control"); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); } catch {}
+  try { for (let i = 0; i < (r.parts || 1); i++) { let p = "";
+      if (d && d.objectStoreNames.contains("files")) p = (await req(d.transaction("files").objectStore("files").get(`${r.fid}_${i}`)))?.data || "";
+      if (!p && navigator.onLine) { await fire(); const x = await fb.getDoc(fb.doc(fb.db, "ctrl", `file_${r.fid}_${i}`)); p = x.exists() ? x.data().data : ""; }
+      if (!p) return null; parts.push(p); } } finally { d?.close(); }
+  return parts.join(""); }
+async function pushMdocs() {
+  if (!navigator.onLine || !fbUser) return; const from = shiftMonth(today().slice(0, 7), -1) + "-01";
+  const L = files.filter(f => !f.cr && /^TDR/.test(f.rig || "") && f.date >= from), sent = JSON.parse(localStorage.getItem("tkr-mdocs") || "{}"), now = {}, { db, doc, setDoc } = fb;
+  for (const f of L) { const id = "mdoc_" + String(f.fcId || f.id).replace(/[\/]/g, "_"), key = [f.date, f.shift, f.rig, f.type, f.name].join("|"); now[id] = key;
+    if (sent[id] !== key) await setDoc(doc(db, "ctrl", id), { kind: "mdoc", ym: f.date.slice(0, 7), date: f.date, shift: f.shift, machine: f.rig.replace(/\s+/g, ""), type: f.type === "Supporting document" ? "Other" : f.type, name: f.name, by: "Metres section", editedAt: Date.now() }); }
+  for (const id of Object.keys(sent)) if (!now[id]) await setDoc(doc(db, "ctrl", id), { kind: "mdoc", ym: sent[id].slice(0, 7), deleted: true, editedAt: Date.now() });
+  try { localStorage.setItem("tkr-mdocs", JSON.stringify(now)); } catch {}
+}
 async function readCtrlLocal() {
   try { const L = await indexedDB.databases?.(); if (!L || !L.some(d => d.name === "tkr-control")) return; } catch { return; }
   const d = await new Promise((res, rej) => { const r = indexedDB.open("tkr-control"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
@@ -658,6 +680,7 @@ function ctrlDelays(date, sh, rig) {
 async function linkCtrl() {
   try { await readCtrlLocal(); } catch (e) { console.warn(e); }
   try { await readCtrlRemote(); } catch (e) { console.warn("control room not reachable", e?.code || e); }
+  withCtrlFiles(); try { await pushMdocs(); } catch (e) { console.warn("metres documents not shared with the Control Room", e); }
   if (!ctrlEvs.size) return 0;
   const now = Date.now(), changed = [];
   for (const s of shifts) { if (s.date < FC_FROM) continue; const R2 = { ...(s.rigs || {}) }; let ch = false;
@@ -670,7 +693,7 @@ async function linkCtrl() {
   return changed.length;
 }
 let linking = false;
-async function relink() { if (linking) return; linking = true; try { if (await linkCtrl()) render(); } finally { linking = false; } }
+async function relink() { if (linking) return; linking = true; try { await linkCtrl(); render(); } finally { linking = false; } }
 addEventListener("focus", relink); document.addEventListener("visibilitychange", () => { if (!document.hidden) relink(); });
 
 /* ---------- events ---------- */
