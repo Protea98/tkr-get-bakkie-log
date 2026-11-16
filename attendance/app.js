@@ -378,7 +378,7 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
     toast("Register updated")}
   catch(e){say(denied(e)?"Your sign-in is not allowed to change the register.":"Could not read "+file.name+": "+(e.message||"try again"))}}
 /* Overtime report: NO. | NAME AND SURNAME | STANDBY/ UNPLANNED | DATE | PAYABLE HOURS ON TIME SHEET (hours as 12:10 = 12 h 10 min) */
-const normName=n=>String(n||"").toLowerCase().replace(/[^a-z]+/g," ").trim();
+const otName=n=>String(n||"").toLowerCase().replace(/[^a-z]+/g," ").trim();
 function xlDate(v){if(typeof v==="number"&&v>20000){const d=new Date(Date.UTC(1899,11,30)+Math.round(v)*864e5);return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
   const t=String(v||"").trim();let m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return m[1]+"-"+pad(+m[2])+"-"+pad(+m[3]);m=t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);if(m)return m[3]+"-"+pad(+m[2])+"-"+pad(+m[1]);return ""}
 function xlHours(v){if(typeof v==="number"){if(v<=0)return 0;return v<1?Math.round(v*24*60)/60:Math.round(v*100)/100}
@@ -391,8 +391,8 @@ async function importOvertime(file){const say=t=>{otNote=t;const m=$("otMsg");if
     if(hi<0){say("No header row with Name and Date was found in "+file.name+".");return}
     const H=rows[hi].map(low),cN=H.findIndex(c=>/name/.test(c)),cD=H.indexOf("date"),cH=H.findIndex(c=>/hour/.test(c)),cT=H.findIndex(c=>/standby|unplanned|planned|type/.test(c));
     if(cH<0){say("No hours column (Payable Hours) was found in "+file.name+".");return}
-    const byName=new Map();(S.emps||[]).forEach(e=>{const n=normName(e.name);byName.set(n,e);byName.set(n.split(" ").reverse().join(" "),e);const w=n.split(" ");if(w.length>2)byName.set(w[0]+" "+w[w.length-1],e)});
-    const find=n=>{const k=normName(n);if(byName.has(k))return byName.get(k);const w=k.split(" ");return byName.get(w[0]+" "+w[w.length-1])||null};
+    const byName=new Map();(S.emps||[]).forEach(e=>{const n=otName(e.name);byName.set(n,e);byName.set(n.split(" ").reverse().join(" "),e);const w=n.split(" ");if(w.length>2)byName.set(w[0]+" "+w[w.length-1],e)});
+    const find=n=>{const k=otName(n);if(byName.has(k))return byName.get(k);const w=k.split(" ");return byName.get(w[0]+" "+w[w.length-1])||null};
     const lines=[],notFound=new Set(),noHours=[],badDate=[];
     rows.slice(hi+1).forEach(r=>{const name=String(r[cN]||"").trim();if(!name)return;const d=xlDate(r[cD]),hrs=xlHours(r[cH]),type=cT>=0?String(r[cT]||"").trim():"";
       if(!d){badDate.push(name);return}
