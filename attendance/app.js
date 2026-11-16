@@ -228,7 +228,7 @@ function dailyData(){S.dshift=S.dshift||"all";const es=onShift(inPeriod(S.date),
 function viewDaily(){const D=dailyData();
   let h=cycleBanner()+'<div class="bar" role="group" aria-label="Shift">'+["all","day","night"].map(k=>'<button class="chip" data-dshift="'+k+'" aria-pressed="'+(S.dshift===k)+'">'+SHIFT_LBL[k]+'</button>').join("")+'</div>'+
    (S.dshift!=="all"?'<p class="note" style="margin:0 0 10px">'+SHIFT_LBL[S.dshift]+' on '+nice(S.date)+': people whose group rota shows '+(S.dshift==="day"?"DAY":"NIGHT")+' that day'+(S.dshift==="day"?", plus groups with no rota (office and Monday to Friday)":"")+'. Groups on OFF are left out.</p>':"")+
-   '<div class="bar"><button class="btn gold" id="copyDaily">Copy report for WhatsApp</button><button class="btn" id="xlsDaily">Download Excel</button></div>';
+   '<div class="bar"><button class="btn gold" id="copyDaily">Copy report for WhatsApp</button><button class="btn" id="xlsDaily">Download Excel</button><button class="btn gold" id="pdfDaily">Download PDF report</button><button class="btn gold" id="pptDaily">Download PowerPoint report</button></div>';
   h+='<div class="summary">'+stat("Employees",D.n)+stat("Present",D.all.present)+stat("AWOP",D.all.absent)+stat("Leave",D.all.leave)+stat("Off",D.all.off)+stat("Not marked",D.all.blank)+stat("Overtime",fmtH(D.all.ot)+" h")+stat("Attendance",fmtPct(pct(D.all.present,D.all.exc)),"pct")+'</div>';
   h+='<h2 class="sheet-h">Daily report'+(S.dshift!=="all"?" – "+SHIFT_LBL[S.dshift]:"")+' <small>'+nice(S.date)+'</small></h2><div class="tbl-wrap"><table><thead><tr><th>Sheet</th><th>Employees</th><th>Present</th><th>AWOP</th><th>Leave</th><th>Off</th><th>Resigned, absconded, dismissed, deceased, suspended</th><th>Not marked</th><th>Overtime</th><th>Attendance</th></tr></thead><tbody>';
   D.rows.forEach(r=>{h+=trow(r.sheet,r.n,r.t)});h+=trow("Total",D.n,D.all,"tot")+'</tbody></table></div>';
@@ -328,6 +328,46 @@ async function pptCycle(){const btn=$("pptCycle");btn.disabled=true;btn.textCont
     await pp.writeFile({fileName:D.file+".pptx"});toast("PowerPoint report downloaded")}
   catch(e){console.warn(e);toast("The PowerPoint couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent="Download PowerPoint report"}
+/* ---------- daily report as PDF or PowerPoint (no overtime) ---------- */
+function dailySpec(){const D=dailyData(),day=nice(S.date)+" "+yr(S.date),shift=S.dshift!=="all"?SHIFT_LBL[S.dshift]:"All shifts";
+  const row=(name,n,t,b)=>[name,n,t.present,t.absent,t.leave,t.off,t.out,t.blank,pc1(pct(t.present,t.exc))].map(v=>b?{content:String(v),bold:1}:String(v));
+  const names=(arr,f)=>arr.length?arr.map(e=>[e.name,e.sheet,f?f(e):""]):[["None","",""]];
+  return {title:"DAILY ATTENDANCE REPORT",sub:day+"   ·   "+shift,file:"TKR_Attendance_Daily_Report_"+S.date+(S.dshift!=="all"?"_"+S.dshift:""),
+    tiles:[["Employees",D.n],["Present",D.all.present],["AWOP",D.all.absent],["Leave",D.all.leave],["Off",D.all.off],["Not marked",D.all.blank],["Attendance",pc1(pct(D.all.present,D.all.exc))]],
+    sections:[{title:"Per sheet",head:["Sheet","Employees","Present","AWOP","Leave","Off","Resigned, absconded, dismissed, deceased, suspended","Not marked","Attendance"],rows:D.rows.map(r=>row(r.sheet,r.n,r.t)).concat([row("Total",D.n,D.all,1)])},
+      {title:"AWOP ("+D.awop.length+")",head:["Employee","Sheet",""],rows:names(D.awop)},
+      {title:"On leave ("+D.leave.length+")",head:["Employee","Sheet","Leave"],rows:names(D.leave,e=>cap(showMark(markOf(e,S.date))))},
+      {title:"Not marked ("+D.blank.length+")",head:["Employee","Sheet",""],rows:names(D.blank)}]}}
+async function pdfSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making the PDF…";
+  try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
+    const logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
+    const head=()=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
+      P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – "+sp.title,32,11);P.setTextColor(...GOLD);P.setFontSize(11);P.text(sp.sub,32,18.5)};
+    head();const tw=(W-24-(sp.tiles.length-1)*2.5)/sp.tiles.length;
+    sp.tiles.forEach(([k,v],i)=>{const x=12+i*(tw+2.5);P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,31,tw,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(7.5);P.text(String(k).toUpperCase(),x+3,37);P.setTextColor(...BLACK);P.setFontSize(16);P.text(String(v),x+3,47)});
+    let y=60;for(const sec of sp.sections){P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);if(y>185){P.addPage();head();y=34}P.text(sec.title,12,y);
+      P.autoTable({startY:y+2,head:[sec.head],body:sec.rows.map(r=>r.map(c=>typeof c==="object"?{content:c.content,styles:{fontStyle:"bold",fillColor:[255,242,204]}}:c)),margin:{left:12,right:12,top:30},theme:"grid",
+        styles:{fontSize:8.8,cellPadding:1.6,textColor:BLACK,lineColor:[217,211,197]},headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},alternateRowStyles:{fillColor:[255,248,230]},didDrawPage:()=>head()});y=P.lastAutoTable.finalY+9}
+    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,204)}
+    P.save(sp.file+".pdf");toast("PDF report downloaded")}
+  catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
+  btn.disabled=false;btn.textContent=label}
+async function pptSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making the PowerPoint…";
+  try{await loadJs("../lib/pptxgen.bundle.js");const logo=await logoData(),pp=new window.PptxGenJS();pp.layout="LAYOUT_WIDE";pp.author="TKR Operations";const G="D4A12A",K="111111";
+    const base=t=>{const s=pp.addSlide();s.addShape(pp.ShapeType.rect,{x:0,y:0,w:13.33,h:0.9,fill:{color:K}});s.addShape(pp.ShapeType.rect,{x:0,y:0.9,w:13.33,h:0.06,fill:{color:G}});if(logo)s.addImage({data:logo,x:0.25,y:0.1,w:0.7,h:0.7});
+      s.addText(t,{x:1.1,y:0.08,w:11,h:0.5,fontFace:"Arial",fontSize:22,bold:true,color:"FFFFFF"});s.addText(sp.sub,{x:1.1,y:0.52,w:11,h:0.32,fontFace:"Arial",fontSize:12,color:G,bold:true});return s};
+    let s=pp.addSlide();s.background={color:K};if(logo)s.addImage({data:logo,x:0.6,y:0.6,w:1.4,h:1.4});
+    s.addText(sp.title,{x:0.6,y:2.4,w:12,h:0.9,fontFace:"Arial",fontSize:40,bold:true,color:"FFFFFF"});s.addText(sp.sub,{x:0.6,y:3.3,w:12,h:0.7,fontFace:"Arial",fontSize:24,bold:true,color:G});
+    s.addText("TKR Operations · Tharisa Mine",{x:0.6,y:6.6,w:8,h:0.4,fontFace:"Arial",fontSize:12,color:"AAAAAA"});
+    s=base("Summary");const per=Math.ceil(sp.tiles.length/2),tw=12.3/per;
+    sp.tiles.forEach(([k,v],i)=>{const x=0.5+(i%per)*tw,y=1.4+Math.floor(i/per)*2.6;s.addShape(pp.ShapeType.roundRect,{x,y,w:tw-0.25,h:2.2,fill:{color:"FFF8E6"},line:{color:G,width:1.5},rectRadius:0.1});
+      s.addText(String(k).toUpperCase(),{x:x+0.2,y:y+0.2,w:tw-0.6,h:0.4,fontFace:"Arial",fontSize:12,bold:true,color:"6E6450"});s.addText(String(v),{x:x+0.2,y:y+0.75,w:tw-0.6,h:1,fontFace:"Arial",fontSize:36,bold:true,color:K})});
+    const hdr=a=>a.map(t=>({text:String(t),options:{bold:true,color:"FFFFFF",fill:{color:"262626"}}}));
+    for(const sec of sp.sections){for(let i=0;i<Math.max(1,sec.rows.length);i+=14){s=base(sec.title+(sec.rows.length>14?" ("+(i/14+1)+")":""));
+      s.addTable([hdr(sec.head)].concat(sec.rows.slice(i,i+14).map(r=>r.map(c=>typeof c==="object"?{text:c.content,options:{bold:true,fill:{color:"FFF2CC"}}}:String(c)))),{x:0.4,y:1.2,w:12.5,fontFace:"Arial",fontSize:13,color:K,border:{type:"solid",pt:0.5,color:"D9D3C5"}})}}
+    await pp.writeFile({fileName:sp.file+".pptx"});toast("PowerPoint report downloaded")}
+  catch(e){console.warn(e);toast("The PowerPoint couldn't be made: "+(e.message||"try again"))}
+  btn.disabled=false;btn.textContent=label}
 function viewCycle(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.date);let rows=cycleRows();
   if(S.sortLow)rows=rows.slice().sort((a,b)=>(a.p??101)-(b.p??101));
   const all=tally(rows.map(r=>r.e),upto);
@@ -830,6 +870,8 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
   if(t.dataset.exp){S.exp.type=t.dataset.exp;if(t.dataset.exp!=="custom")[S.exp.from,S.exp.to]=preset(t.dataset.exp,S.exp.from||S.date);render();return}
   if(t.dataset.htype){(S.hf||(S.hf={type:"All",from:"",to:""})).type=t.dataset.htype;render();return}
   if(t.id==="pdfCycle"){pdfCycle();return}
+  if(t.id==="pdfDaily"){pdfSpec(dailySpec(),t,"Download PDF report");return}
+  if(t.id==="pptDaily"){pptSpec(dailySpec(),t,"Download PowerPoint report");return}
   if(t.id==="pptCycle"){pptCycle();return}
   if(t.id==="xlsEmps"){xlsEmployees();return}
   if(t.id==="xlsRange"){xlsRange(S.exp.from,S.exp.to);return}
