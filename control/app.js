@@ -28,7 +28,7 @@ function toast(m) { const t = $("toast"); t.textContent = m; t.hidden = false; c
 
 /* ---------- what the control room tracks (from the November control room workbook) ---------- */
 const TYPES = { BD: "Breakdown", SB: "Standby", PM: "Planned maintenance", NU: "Not in use" };
-const DEFAULT_FLEET = [["Drill rigs", ["TDR013", "TDR014", "TDR015"]], ["Rockbreakers", ["TKRH011", "TKRH012", "TKRH015", "TKRH017", "TKRH019", "TKRH020"]],
+const DEFAULT_FLEET = [["Drill rigs", ["TDR013", "TDR014", "TDR015"]], ["Rockbreakers", ["TKRH011", "TKRH015", "TKRH017", "TKRH019", "TKRH020"]],
   ["Buses", ["TKR020", "TKR021", "TKR023", "TKR024", "TKR025", "TKR026"]], ["Lowbed", ["TKR06"]], ["Water bowser", ["TKR09"]], ["Bakkies", ["LDV011", "LDV012"]]];
 const CHECK = [["Collect data", ["PTO", "Inspection reports", "SOP", "T Connect attendance", "Risk assessment", "Capture", "Pit licence expiring"]], ["Documents", ["Job cards", "Checklists", "Fleet reports", "Trip summary"]],
   ["Systems", ["Cartrack", "On / Off", "Planned maintenance"]], ["Cartrack", ["Predictive failures", "Mechanical inspections", "Operator behaviour", "Fuel consumption management system", "Geofences"]]];
@@ -882,6 +882,10 @@ async function exportXlsx(from, to) {
     const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
     if (f && !f.groups.some(([g, L]) => g === "Water bowser" || L.includes("TKR09"))) { const G = f.groups.map(([g, L]) => [g, [...L]]), i = G.findIndex(([g]) => g === "Lowbed"); G.splice(i < 0 ? G.length : i + 1, 0, ["Water bowser", ["TKR09"]]); await put({ ...f, groups: G }); }
     await metaSet("fix126", 1); }
+  if (!(await metaGet("fix136"))) {               // once: TKRH012 taken off the control room list (Muneer, 16/11)
+    const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
+    if (f && f.groups.some(([, L]) => L.includes("TKRH012"))) await put({ ...f, groups: f.groups.map(([g, L]) => [g, L.filter(m => m !== "TKRH012")]) }, "Removed machine TKRH012");
+    await metaSet("fix136", 1); }
   if (!(await metaGet("fix130"))) {               // once: the water bowser is TKR09, not TKR08
     const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
     if (f && f.groups.some(([, L]) => L.includes("TKR08"))) await put({ ...f, groups: f.groups.map(([g, L]) => [g, L.map(m => m === "TKR08" ? "TKR09" : m)]) });
