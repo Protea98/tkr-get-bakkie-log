@@ -57,8 +57,8 @@ function setCustom(list){CUSTOM=(list||[]).slice().sort((a,b)=>a.start<b.start?-
 const pct=(p,a)=>p+a?Math.round(1000*p/(p+a))/10:null;
 const fmtPct=v=>v==null?"–":v.toFixed(1)+"%";
 
-const S={flg:{kind:"all",type:"cycle",from:null,to:null,key:""},mm:{},mExists:{},rota:{},gmeta:{},exp:{type:"daily",from:null,to:null,key:""},view:"mark",date:iso(new Date()),sheet:"All",q:"",emps:null,empVer:null,cycles:{},marks:{},markExists:{},db:null,canWrite:true,sortLow:false,unsubs:[]};
-try{const v=localStorage.getItem("tkr-att-view");if(v)S.view=v;const sh=localStorage.getItem("tkr-att-sheet");if(sh)S.sheet=sh}catch(e){}
+const S={flg:{kind:"all",type:"cycle",from:null,to:null,key:""},mm:{},mExists:{},rota:{},gmeta:{},exp:{type:"daily",from:null,to:null,key:""},view:"dash",date:iso(new Date()),sheet:"All",q:"",emps:null,empVer:null,cycles:{},marks:{},markExists:{},db:null,canWrite:true,sortLow:false,unsubs:[]};
+try{const sh=localStorage.getItem("tkr-att-sheet");if(sh)S.sheet=sh}catch(e){}
 const $=id=>document.getElementById(id);
 const main=$("main");
 
@@ -149,7 +149,56 @@ function render(){
   if(!activeEmps().length&&S.view!=="people"&&S.view!=="users"&&S.view!=="groups"){main.innerHTML=isAdmin()?'<div class="empty"><b>No employees yet</b>Load the TKR Attendance data file to bring in your employees, shift rotas and marks.<div class="bar" style="justify-content:center;margin-top:14px"><button class="btn gold" id="emptyLoad">Load data file</button></div><p class="note" id="uMsg" role="status"></p><input type="file" id="dataIn" accept=".json,application/json" hidden></div>':'<div class="empty"><b>No employees yet</b>Ask admin to load the register.</div>';
     if(isAdmin()){$("emptyLoad").onclick=()=>$("dataIn").click();$("dataIn").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{loadBackup(JSON.parse(rd.result))}catch(e){toast("That file is not a TKR Attendance data file")}};rd.readAsText(f);ev.target.value=""}}
     return}
-  ({mark:viewMark,daily:viewDaily,cycle:viewCycle,export:viewExport,flags:viewFlags,people:viewPeople,groups:viewGroups,users:viewUsers}[S.view]||viewMark)();
+  ({dash:viewDash,history:viewHistory,mark:viewMark,daily:viewDaily,cycle:viewCycle,export:viewExport,flags:viewFlags,people:viewPeople,groups:viewGroups,users:viewUsers}[S.view]||viewMark)();
+}
+
+/* ---------- history of new, removed, returned and moved employees ---------- */
+const where=e=>(e.sheet||"")+(e.section&&e.section!==e.sheet?" · "+e.section:"");
+function empEvents(oldL,newL){const O=new Map(oldL.map(e=>[e.id,e])),N=new Set(newL.map(e=>e.id)),at=Date.now(),day=iso(new Date()),ev=[];
+  const base=e=>({at,by:email,id:e.id,name:e.name,number:e.number||"",sheet:e.sheet||"",title:e.title||""});
+  newL.forEach(e=>{const o=O.get(e.id);
+    if(!o){if(e.active!==false)ev.push(Object.assign(base(e),{type:"Added",date:day}));return}
+    if(o.active!==false&&e.active===false){ev.push(Object.assign(base(e),{type:"Removed",date:e.leftDate||day,reason:e.leftReason||""}));return}
+    if(o.active===false&&e.active!==false){ev.push(Object.assign(base(e),{type:"Back",date:day}));return}
+    if(e.active!==false&&(o.sheet!==e.sheet||o.group!==e.group))ev.push(Object.assign(base(e),{type:"Moved",date:day,from:where(o)+(o.shift?" · "+o.shift:""),to:where(e)+(e.shift?" · "+e.shift:"")}))});
+  O.forEach((o,id)=>{if(!N.has(id))ev.push(Object.assign(base(o),{type:"Deleted",date:day}))});return ev}
+function allHistory(){const H=(S.hist||[]).slice();
+  (S.emps||[]).filter(e=>e.active===false&&e.leftDate&&!H.some(h=>h.id===e.id&&h.type==="Removed")).forEach(e=>H.push({type:"Removed",date:e.leftDate,reason:e.leftReason||"",id:e.id,name:e.name,number:e.number||"",sheet:e.sheet||"",title:e.title||"",by:"",at:0}));
+  return H.sort((a,b)=>String(b.date).localeCompare(String(a.date))||(b.at||0)-(a.at||0))}
+const HTYPE={Added:"New employee",Removed:"Removed",Back:"Back on the register",Moved:"Moved",Deleted:"Deleted from the list"};
+function histText(h){return h.type==="Removed"?(h.reason?h.reason.charAt(0)+h.reason.slice(1).toLowerCase():"Removed"):h.type==="Moved"?(h.from+" → "+h.to):HTYPE[h.type]||h.type}
+function viewHistory(){const F=S.hf||(S.hf={type:"All",from:"",to:""});const q=S.q.trim().toLowerCase();
+  const L=allHistory().filter(h=>(F.type==="All"||h.type===F.type)&&(!F.from||h.date>=F.from)&&(!F.to||h.date<=F.to)&&(S.sheet==="All"||h.sheet===S.sheet)&&(!q||(h.name+" "+h.number+" "+h.title).toLowerCase().includes(q)));
+  let h=chipsBar('<input class="search" id="q" type="search" placeholder="Search name, number or job" value="'+esc(S.q)+'">');
+  h+='<div class="bar">'+["All","Added","Removed","Back","Moved"].map(t=>'<button class="chip" data-htype="'+t+'" aria-pressed="'+(F.type===t)+'">'+(t==="All"?"Everything":t==="Back"?"Back on the register":t==="Added"?"New employees":t)+'</button>').join("")+'</div>';
+  h+='<div class="bar" style="align-items:flex-end"><label class="lbl" style="margin:0">From <input type="date" id="hFrom" value="'+F.from+'"></label><label class="lbl" style="margin:0">To <input type="date" id="hTo" value="'+F.to+'"></label><button class="btn gold" id="xlsHist">Download Excel</button></div>';
+  h+='<div class="summary">'+stat("New employees",L.filter(x=>x.type==="Added").length)+stat("Removed",L.filter(x=>x.type==="Removed").length)+stat("Back on the register",L.filter(x=>x.type==="Back").length)+stat("Moved",L.filter(x=>x.type==="Moved").length)+'</div>';
+  h+=L.length?'<div class="list"><table class="tbl"><thead><tr><th>Date</th><th>Employee</th><th>Number</th><th>Sheet</th><th>What happened</th><th>Done by</th></tr></thead><tbody>'+L.map(x=>'<tr><td>'+nice(x.date)+' '+yr(x.date)+'</td><td><b>'+esc(x.name)+'</b><br><small>'+esc(x.title||"")+'</small></td><td>'+esc(x.number)+'</td><td>'+esc(x.sheet)+'</td><td><span class="pill s-'+(x.type==="Removed"||x.type==="Deleted"?"out":x.type==="Added"||x.type==="Back"?"present":"leave")+'">'+esc(HTYPE[x.type]||x.type)+'</span> '+(x.type==="Removed"||x.type==="Moved"?esc(histText(x)):"")+'</td><td><small>'+esc(x.by||"")+'</small></td></tr>').join("")+'</tbody></table></div>'
+    :'<div class="empty"><b>Nothing here yet</b>From now on every new employee, removal, return and move is recorded here.</div>';
+  h+='<p class="note">History is kept from 16 Nov 2026. People removed before that show with the date they were removed.</p>';
+  main.innerHTML=h;
+  const set=()=>{F.from=$("hFrom").value;F.to=$("hTo").value;render()};$("hFrom").onchange=set;$("hTo").onchange=set;
+  $("xlsHist").onclick=()=>{if(!L.length){toast("Nothing to download");return}const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet([["TKR Operations – Employee history"+(F.from||F.to?" – "+(F.from?nice(F.from)+" "+yr(F.from):"start")+" to "+(F.to?nice(F.to)+" "+yr(F.to):"today"):"")],[],["Date","Employee","Number","Sheet","Job title","What happened","Details","Done by"]].concat(L.map(x=>[x.date,x.name,x.number,x.sheet,x.title,HTYPE[x.type]||x.type,x.type==="Removed"||x.type==="Moved"?histText(x):"",x.by||""])));
+    ws["!cols"]=[{wch:12},{wch:30},{wch:12},{wch:16},{wch:26},{wch:22},{wch:34},{wch:28}];XLSX.utils.book_append_sheet(wb,ws,"History");saveFile("TKR_Employee_History.xlsx",wb)};
+}
+/* ---------- dashboard: the important things at a glance ---------- */
+function viewDash(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=activeEmps().filter(e=>S.sheet==="All"||e.sheet===S.sheet);
+  const tD=tally(A,[S.date]),tC=tally(A,upto),H=allHistory().filter(h=>h.date>=c.start&&h.date<=c.end&&(S.sheet==="All"||h.sheet===S.sheet));
+  const per=A.map(e=>({e,t:tally([e],upto)}));const topExc=per.filter(x=>x.t.exc>0).sort((a,b)=>b.t.exc-a.t.exc).slice(0,8),topOt=per.filter(x=>x.t.ot>0).sort((a,b)=>b.t.ot-a.t.ot).slice(0,6);
+  const codes=Object.entries(tC.codes).filter(([k])=>!["CLOCKED IN","HOURS WORKED"].includes(k)&&kindOf(k)!=="present"&&kindOf(k)!=="off").sort((a,b)=>b[1]-a[1]).slice(0,8);
+  let h=chipsBar();
+  h+='<h2 style="margin:6px 0 4px">'+nice(S.date)+' '+yr(S.date)+'</h2><p class="note" style="margin:0 0 10px">Cycle '+short(c.start)+' – '+short(c.end)+' · '+upto.length+' of '+c.dates.length+' days so far'+(S.sheet!=="All"?' · '+esc(S.sheet):'')+'</p>';
+  h+='<div class="summary">'+stat("People on the register",A.length)+stat("Present today",tD.present)+stat("Absent today",tD.absent,tD.absent?"warn":"")+stat("On leave today",tD.leave)+stat("Off today",tD.off)+stat("Not marked yet today",tD.blank,tD.blank?"warn":"")+'</div>';
+  h+='<div class="summary">'+stat("Cycle attendance",fmtPct(pct(tC.present,tC.exc)),"pct")+stat("Exception days this cycle",tC.exc)+stat("Overtime this cycle",(Math.round(tC.ot*10)/10)+" h")+stat("New this cycle",H.filter(x=>x.type==="Added").length)+stat("Removed this cycle",H.filter(x=>x.type==="Removed").length)+'</div>';
+  if(tD.blank&&S.canWrite)h+='<div class="bar"><button class="btn gold" data-go="mark">Mark today ('+tD.blank+' not marked)</button></div>';
+  if(S.sheet==="All")h+='<div class="list"><h3>Per sheet</h3><table class="tbl"><thead><tr><th>Sheet</th><th>People</th><th>Present today</th><th>Absent</th><th>Leave</th><th>Off</th><th>Not marked</th><th>Cycle attendance</th><th>Overtime (cycle)</th></tr></thead><tbody>'+SHEETS.map(sh=>{const es=A.filter(e=>e.sheet===sh);if(!es.length)return"";const t=tally(es,[S.date]),tc=tally(es,upto);
+    return '<tr><td><b>'+esc(sh)+'</b></td><td>'+es.length+'</td><td>'+t.present+'</td><td>'+t.absent+'</td><td>'+t.leave+'</td><td>'+t.off+'</td><td>'+(t.blank?'<b style="color:var(--bad,#c0392b)">'+t.blank+'</b>':"0")+'</td><td>'+fmtPct(pct(tc.present,tc.exc))+'</td><td>'+(Math.round(tc.ot*10)/10)+' h</td></tr>'}).join("")+'</tbody></table></div>';
+  h+='<div class="list"><h3>Most exception days this cycle</h3>'+(topExc.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Sheet</th><th>Exception days</th><th>Attendance</th></tr></thead><tbody>'+topExc.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b></td><td>'+esc(x.e.sheet)+'</td><td>'+x.t.exc+'</td><td>'+fmtPct(pct(x.t.present,x.t.exc))+'</td></tr>').join("")+'</tbody></table><div class="bar"><button class="btn" data-go="flags">Open Flags</button></div>':'<p class="note" style="margin:0">No AWOP, sick or maternity days this cycle.</p>')+'</div>';
+  if(codes.length)h+='<div class="list"><h3>Absence and leave this cycle</h3><div class="bar">'+codes.map(([k,n])=>'<span class="pill s-'+kindOf(k)+'">'+esc(showMark(k))+' · '+n+'</span>').join("")+'</div></div>';
+  if(topOt.length)h+='<div class="list"><h3>Most overtime this cycle</h3><table class="tbl"><tbody>'+topOt.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b></td><td>'+esc(x.e.sheet)+'</td><td>'+(Math.round(x.t.ot*10)/10)+' h</td></tr>').join("")+'</tbody></table></div>';
+  h+='<div class="list"><h3>New and removed employees this cycle</h3>'+(H.length?'<table class="tbl"><tbody>'+H.slice(0,10).map(x=>'<tr><td>'+nice(x.date)+'</td><td><b>'+esc(x.name)+'</b></td><td>'+esc(x.sheet)+'</td><td><span class="pill s-'+(x.type==="Removed"||x.type==="Deleted"?"out":x.type==="Moved"?"leave":"present")+'">'+esc(HTYPE[x.type]||x.type)+'</span> '+(x.type==="Removed"||x.type==="Moved"?esc(histText(x)):"")+'</td></tr>').join("")+'</tbody></table>':'<p class="note" style="margin:0">No one added or removed this cycle.</p>')+'<div class="bar"><button class="btn" data-go="history">Open the full history</button></div></div>';
+  main.innerHTML=h;
+  main.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{S.view=b.dataset.go;render();scrollTo(0,0)});
 }
 
 function cycleBanner(){const gap=rotaGap();if(!gap)return"";const c=cycleOf(S.date);
@@ -432,7 +481,8 @@ async function importEmps(file){const say=t=>{impNote=t;const m=$("impMsg");if(m
     toast(added.length+" employees added")}
   catch(e){say("Could not read "+file.name+": "+(e.message||"try again"))}}
 async function saveEmps(list){if(!S.canWrite){toast("You can view this register but not change it.");return}
-  try{await S.db.doc("config/employees").set({list,groups:S.groupDefs||[]});S.emps=list;render()}catch(e){if(denied(e)){S.canWrite=false;toast("You can view this register but not change it.")}else toast("Not saved: "+(e.message||"try again"))}}
+  try{const hist=(S.hist||[]).concat(empEvents(S.emps||[],list)).slice(-3000);
+    await S.db.doc("config/employees").set({list,groups:S.groupDefs||[],history:hist});S.emps=list;S.hist=hist;render()}catch(e){if(denied(e)){S.canWrite=false;toast("You can view this register but not change it.")}else toast("Not saved: "+(e.message||"try again"))}}
 
 // ---------- mark panel ----------
 function openPanel(e){const v=markOf(e,S.date);const now=new Date();const hv=isHrs(v)?hrsOf(v):12;
@@ -644,7 +694,7 @@ function viewUsers(){const row=(em,role)=>'<tr><td>'+esc(em)+'</td><td>'+(role==
 }
 async function loadBackup(b){if(!b||!b.employees||!b.months){toast("That file is not a TKR Attendance data file");return}
   const msg=$("uMsg")||{set textContent(v){toast(v)}};msg.textContent="Loading the data file…";
-  try{await S.db.doc("config/employees").set({list:b.employees,groups:b.groups||[]});
+  try{await S.db.doc("config/employees").set({list:b.employees,groups:b.groups||[],history:(S.hist||[]).concat(empEvents(S.emps||[],b.employees))});
     if(b.settings)await S.db.doc("config/settings").set(b.settings);
     for(const id in (b.rota||{}))await S.db.doc("cycles/"+id).set(b.rota[id]);
     for(const m in b.months)for(const sh in b.months[m])await S.db.doc("months/"+m+"/sheets/"+sh).update(b.months[m][sh]);
@@ -694,6 +744,7 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
   if(t.dataset.dshift){S.dshift=t.dataset.dshift;render();return}
   if(t.id==="xlsDaily"){xlsRange(S.date,S.date,S.dshift);return}
   if(t.dataset.exp){S.exp.type=t.dataset.exp;if(t.dataset.exp!=="custom")[S.exp.from,S.exp.to]=preset(t.dataset.exp,S.exp.from||S.date);render();return}
+  if(t.dataset.htype){(S.hf||(S.hf={type:"All",from:"",to:""})).type=t.dataset.htype;render();return}
   if(t.id==="xlsEmps"){xlsEmployees();return}
   if(t.id==="xlsRange"){xlsRange(S.exp.from,S.exp.to);return}
   if(t.dataset.flg){const F=S.flg;F.type=t.dataset.flg;if(F.type!=="custom")[F.from,F.to]=preset(F.type,F.from||S.date);render();return}
@@ -705,7 +756,7 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
 // ---------- boot ----------
 render();
 startApp=function(db){if(S.db)return;S.db=db;S.canWrite=canWrite();
-  db.doc("config/employees").onSnapshot(d=>{S.emps=d.exists?(d.data().list||[]):[];S.groupDefs=d.exists?(d.data().groups||[]):[];render()},err);
+  db.doc("config/employees").onSnapshot(d=>{S.emps=d.exists?(d.data().list||[]):[];S.groupDefs=d.exists?(d.data().groups||[]):[];S.hist=d.exists?(d.data().history||[]):[];render()},err);
   db.collection("cycles").onSnapshot(snap=>{S.cycles={};snap.docs.forEach(d=>{S.cycles[d.id]=d.data()});applyRotas();render()},err);
   db.doc("config/settings").onSnapshot(d=>{setCustom(d.exists?d.data().cycles:[]);watchCycle();render()},err);
   watchCycle();render()};

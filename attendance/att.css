@@ -116,3 +116,6 @@ select[data-gmove]{display:block;margin-top:4px;font:500 14px/1.2 var(--body);pa
 .rota.rbtn{background:none;cursor:pointer;min-height:28px}.rota.rbtn:hover{border-color:var(--gold)}
 select[data-rd]{font:600 14px/1.2 var(--display);letter-spacing:.06em;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--fg);min-height:36px;min-width:100px}
 .logolink{display:inline-flex;border-radius:50%;flex:none}
+.stat.warn .v{color:var(--bad)}
+.list .tbl{margin-top:6px}
+.list{overflow-x:auto}
