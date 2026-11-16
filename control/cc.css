@@ -120,3 +120,4 @@ table.xl td.tm span.lk{color:#8a8a8a}
 table.xl input.lk,input.lk{background:#ececec!important;color:#8a8a8a!important;cursor:pointer}
 .tick.lk{filter:grayscale(1);opacity:.55}
 #who{display:flex;align-items:center;gap:4px;justify-content:flex-end;flex-wrap:wrap}
+table.xl select.ty.dv{opacity:.55;border-style:dashed}

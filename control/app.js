@@ -153,6 +153,19 @@ function statusBar() {
     <span>${w ? `${w} change${w === 1 ? "" : "s"} waiting for signal` : (sync.last ? `Sent to the TKR app ${new Date(sync.last).toTimeString().slice(0, 5)}` : "Saved on this PC")}</span>
     <button class="danger" data-logout style="margin-left:auto;min-height:44px">Log out · end shift</button></div>`;
 }
+/* Breakdowns still open from an earlier shift: the new controller confirms each one at the start of the shift */
+function curShift() { const n = new Date(), h = n.getHours(), d = ymd(n);
+  if (h >= 6 && h < 18) return { key: d + "|Day", start: toMs(d + "T06:00"), label: "06:00" };
+  const dd = h >= 18 ? d : addDays(d, -1); return { key: dd + "|Night", start: toMs(dd + "T18:00"), label: "18:00" }; }
+/* Clean slate: every new shift starts with all machines working. Anything still open from the shift before is closed
+   at the shift change (06:00 or 18:00). If a machine is still down, the new controller logs it again for the new shift. */
+let closing = false;
+async function closeCarried() {
+  if (closing) return 0; closing = true;
+  try { const c = curShift(), L = evs().filter(e => !e.end && toMs(e.start) < c.start);
+    for (const e of L) await put({ ...e, end: isoOf(c.start), endBy: "Shift change" }, `${e.machine}: ${TYPES[e.type].toLowerCase()} closed at ${c.label}, end of the shift`);
+    return L.length; } finally { closing = false; }
+}
 function nowView() {
   const F = fleet(), open = evs().filter(e => !e.end).sort((a, b) => toMs(a.start) - toMs(b.start));
   const todays = evs().filter(e => e.start.slice(0, 10) === today() || !e.end || (e.end || "").slice(0, 10) === today()).sort((a, b) => toMs(b.start) - toMs(a.start));
@@ -298,7 +311,7 @@ function shiftTable(d, sh) {
       const reason = [...new Set(E.map(e => e.reason).filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
         if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv">${v}</span></td>`;
-        return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}">${opt(v)}</select></td>`; }).join("");
+        return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}${!C[h] && v && v !== "OP" ? " dv" : ""}" ${!C[h] && v && v !== "OP" ? 'title="Carried on from a breakdown that has not been closed. Pick OP if it was working."' : ""}>${opt(v)}</select></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><b>${esc(mc)}</b></td>${cells}
         <td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>")}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
@@ -641,7 +654,7 @@ function syncCardOld() {
   return `<section class="card"><h2>Send to the TKR app</h2><p style="margin-top:0">Signed in as <b>${esc(fbUser.email)}</b> · ${waiting() ? `<b>${waiting()}</b> changes waiting` : "nothing waiting"}. ${esc(sync.msg)}</p><div class="row"><button class="primary" id="syncNow">Send and check now</button><button class="ghost" id="syncOut">Sign out</button></div></section>`;
 }
 addEventListener("online", () => syncNow(false));
-setInterval(() => { if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 60000);   // keep every PC up to date
+setInterval(() => { closeCarried().then(n => { if (n && me) render(); }); if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 60000);   // keep every PC up to date
 setInterval(() => { if (me && tab === "now" && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
@@ -725,6 +738,7 @@ async function exportXlsx(from, to) {
     if (f) { const G = f.groups.map(([g, L]) => [g, g === "Drill rigs" ? L.filter(m => !["TDR016", "TDR017", "TDR018", "TDR019"].includes(m)) : L]); if (JSON.stringify(G) !== JSON.stringify(f.groups)) await put({ ...f, groups: G }); }
     for (const u of R("user").filter(u => /^muneer\b/i.test(u.name))) await put({ ...u, deleted: true });
     await metaSet("fix113", 1); }
+  try { await closeCarried(); } catch (e) { console.warn(e); }
   const s = await metaGet("me");
   if (s && s.until > Date.now()) { const u = s.admin ? R("admin").find(a => a.id === s.id) : R("user").find(u => u.id === s.id);
     if (u) { me = { ...u, admin: !!s.admin, sid: s.sid || "s_" + uid(), start: s.start || s.until - 14 * 36e5 }; if (!s.sid) await metaSet("me", { ...s, sid: me.sid, start: me.start }); } }
