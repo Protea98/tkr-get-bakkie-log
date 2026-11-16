@@ -180,7 +180,6 @@ function nowView() {
       <div class="tile good"><div class="l">Working now</div><div class="n">${F.flatMap(([, L]) => L).filter(m => !statusNow(m)).length}</div><div class="s">of ${F.flatMap(([, L]) => L).length} machines</div></div></div>`
     + `<div class="fleet">${F.map(([g, L]) => `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => !statusNow(m)).length}/${L.length} working</span></h3><div class="mlist">${L.map(m => { const s = statusNow(m);
         return `<button class="mach ${s ? s.type : ""}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : "Working"}</small></button>`; }).join("")}</div>
-        <div class="row" style="margin-top:8px;gap:6px">${L.map(m => { const n = docMissing(m).length; return `<button class="sm ${n ? "ghost" : ""}" data-mdocs="${esc(m)}" title="Documents for ${esc(m)}">${esc(m)} docs${n ? ` · <b style="color:var(--bad)">${n} missing</b>` : " ✓"}</button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`).join("")}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Every machine is working.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "Today's breakdowns", `<div class="res">${todays.map(evLine).join("") || '<p class="muted">Nothing logged today.</p>'}</div>`, { icon: icon("bd"), count: todays.length, sub: "every event with its exact times" })}
@@ -550,16 +549,17 @@ const NEEDS = { "Drill rigs": ["Checklist", "Tally sheet"], "Rockbreakers": ["Ch
 const docsOf = (m, d, sh) => R("doc").filter(x => x.machine === m && (!d || (x.date === d && x.shift === sh)));
 function shiftsSoFar(m0) { const L = [], c = curShift(), end = m0 === today().slice(0, 7) ? today() : monthEnd(m0);
   for (let d = m0 + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { if (shiftWin(d, sh)[0] > Date.now()) continue; L.push([d, sh]); } return L; }
-function needFor(m, d, sh) { const g = groupOf(m), N = [...(NEEDS[g] || ["Checklist"])]; if (evsIn(m, d, sh).some(e => e.type === "BD" || e.type === "PM")) N.push("Job card"); return N; }
+function needFor() { return ["Checklist"]; }        // the minimum per machine per shift; any other document can be added
 function docMissing(m, m0 = month) { return shiftsSoFar(m0).flatMap(([d, sh]) => needFor(m, d, sh).filter(t => !docsOf(m, d, sh).some(x => x.type === t)).map(t => ({ d, sh, t }))); }
 function docsPanel(m) {
   const S = shiftsSoFar(month).reverse(), miss = docMissing(m).length;
-  return `<div class="card" style="max-width:820px;margin:0 auto"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(m)}</b> · ${esc(groupOf(m))} · ${monthName(month)}<br><span class="muted">${miss ? `${miss} document${miss === 1 ? "" : "s"} missing` : "Nothing missing"} · needed every shift: ${(NEEDS[groupOf(m)] || ["Checklist"]).join(", ").toLowerCase()}; a job card on any shift with a breakdown or maintenance</span></div>
-    <button class="primary" data-upload="${esc(m)}">Upload documents</button></div>
+  return `<div class="card" style="max-width:820px;margin:0 auto"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(m)}</b> · ${esc(groupOf(m))} · ${monthName(month)}<br><span class="muted">A checklist is needed every shift. ${miss ? `<b style="color:var(--bad)">${miss} shift${miss === 1 ? "" : "s"} without a checklist</b>` : "Every shift has a checklist."} Add job cards, trip summaries or any other document too.</span></div>
+    <div class="row" style="gap:6px"><button class="primary" data-upload="${esc(m)}">Upload documents</button><button data-dzip="${esc(m)}">Download all (${docsOf(m).filter(x => x.date.startsWith(month)).length})</button></div></div>
+    ${miss ? `<p style="margin:10px 0 0"><b>No checklist:</b> ${docMissing(m).map(x => `${fmt(x.d).slice(0, 5)} ${x.sh === "Day" ? "D" : "N"}`).join(", ")}</p>` : ""}
     <div class="res" style="margin-top:12px">${S.map(([d, sh]) => { const have = docsOf(m, d, sh), need = needFor(m, d, sh);
       return `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${dow(d)} ${fmt(d)} · ${sh}</b><small>${need.map(t => have.some(x => x.type === t) ? `<span style="color:var(--ok)">✓ ${t}</span>` : `<span style="color:var(--bad)">✗ ${t}</span>`).join(" · ")}</small>
-        ${have.length ? `<div class="row" style="gap:6px;margin-top:6px">${have.map(x => `<button class="sm" data-dview="${x.id}">${esc(x.type)}: ${esc(x.name.slice(0, 28))}</button><button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button>`).join("")}</div>` : ""}</div>
-        <div class="row" style="gap:6px">${need.filter(t => !have.some(x => x.type === t)).map(t => `<button class="sm primary" data-upload="${esc(m)}|${d}|${sh}|${esc(t)}">+ ${t}</button>`).join("")}<button class="sm ghost" data-upload="${esc(m)}|${d}|${sh}|">+ Other</button></div></div>`; }).join("")}</div></div>`;
+        ${have.length ? `<div class="row" style="gap:6px;margin-top:6px">${have.map(x => `<button class="sm" data-dview="${x.id}">${esc(x.type)}: ${esc(x.name.slice(0, 28))}</button><button class="sm ghost" data-ddl="${x.id}" aria-label="Download">⬇</button><button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button>`).join("")}</div>` : ""}</div>
+        <div class="row" style="gap:6px">${need.filter(t => !have.some(x => x.type === t)).map(t => `<button class="sm primary" data-upload="${esc(m)}|${d}|${sh}|${esc(t)}">+ ${t}</button>`).join("")}<button class="sm ghost" data-upload="${esc(m)}|${d}|${sh}|Job card">+ Other document</button></div></div>`; }).join("")}</div></div>`;
 }
 function docForm(m = "", d = "", sh = "", t = "") {
   const c = curShift(), M = fleet().flatMap(([, L]) => L); d = d || c.key.split("|")[0]; sh = sh || c.key.split("|")[1];
@@ -590,6 +590,21 @@ async function saveDocs(f) {
     catch (e) { console.warn(e); toast(file.name + " couldn't be read."); } }
   if (m) openEv(docsPanel(m), `${m} · documents`); else closeEv(); render(); toast(`${n} document${n === 1 ? "" : "s"} saved${navigator.onLine ? "" : " on this PC. They send when there is signal"}.`);
 }
+async function docData(r) { const parts = [];
+  for (let i = 0; i < (r.parts || 1); i++) { let p = await fileGet(`${r.fid}_${i}`);
+    if (!p && navigator.onLine) { try { await fire(); const x = await fb.getDoc(fb.doc(fb.db, "ctrl", `file_${r.fid}_${i}`)); p = x.exists() ? x.data().data : ""; if (p) await fileSet(`${r.fid}_${i}`, p); } catch (e) { console.warn(e); } }
+    if (!p) return null; parts.push(p); } return parts.join(""); }
+const docName = r => `${r.machine || "General"}_${r.date}_${r.shift}_${r.type.replace(/\s+/g, "_")}_${r.name}`.replace(/[\\/:*?"<>|]+/g, "-");
+async function downloadDoc(id) { const r = recs.find(x => x.id === id); if (!r) return; const d = await docData(r); if (!d) { toast(navigator.onLine ? "This document hasn't reached the TKR app yet." : "This document is on another PC. Try again with signal."); return; }
+  const { deliver } = await import("../lib/deliver.js"); deliver(await (await fetch(d)).blob(), docName(r)); }
+async function downloadAll(m) {
+  const L = docsOf(m).filter(x => x.date.startsWith(month)); if (!L.length) { toast("No documents for " + m + " this month yet."); return; }
+  await new Promise((res, rej) => { if (window.JSZip) return res(); const s = document.createElement("script"); s.src = "../lib/jszip.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  const zip = new window.JSZip(), root = `${m} documents ${monthName(month)}`; let n = 0, skip = 0;
+  for (const r of L) { const d = await docData(r); if (!d) { skip++; continue; } zip.file(`${root}/${r.date} ${r.shift}/${docName(r)}`, d.split(",")[1], { base64: true }); n++; }
+  if (!n) { toast("These documents are on another PC. Try again with signal."); return; }
+  const { deliver } = await import("../lib/deliver.js"); deliver(await zip.generateAsync({ type: "blob" }), `${root.replace(/\s+/g, "_")}.zip`);
+  toast(`${n} document${n === 1 ? "" : "s"} downloaded${skip ? ` · ${skip} not on this PC yet` : ""}.`); }
 async function viewDoc(id) {
   const r = recs.find(x => x.id === id); if (!r) return; let parts = [];
   for (let i = 0; i < (r.parts || 1); i++) { let p = await fileGet(`${r.fid}_${i}`);
@@ -621,6 +636,8 @@ async function clickH(ev) {
   if (b.dataset.mdocs) { openEv(docsPanel(b.dataset.mdocs), `${b.dataset.mdocs} · documents`); return; }
   if (b.dataset.upload !== undefined) { const [m, d, sh, t] = b.dataset.upload.split("|"); openEv(docForm(m, d, sh, t), "Upload documents"); return; }
   if (b.dataset.dview) { await viewDoc(b.dataset.dview); return; }
+  if (b.dataset.ddl) { await downloadDoc(b.dataset.ddl); return; }
+  if (b.dataset.dzip) { b.disabled = true; try { await downloadAll(b.dataset.dzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
   if (b.dataset.ddel) { const r = recs.find(x => x.id === b.dataset.ddel); if (r && confirm(`Delete ${r.name}?`)) { await put({ ...r, deleted: true }, `Deleted document ${r.type} ${r.machine}`); if (r.machine && document.getElementById("evPanel")) openEv(docsPanel(r.machine), `${r.machine} · documents`); else closeEv(); render(); } return; }
   if (b.dataset.addmg) { openEv(machForm(+b.dataset.addmg, "add"), "Add a machine"); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
