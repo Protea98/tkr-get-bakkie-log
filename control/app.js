@@ -29,7 +29,7 @@ function toast(m) { const t = $("toast"); t.textContent = m; t.hidden = false; c
 /* ---------- what the control room tracks (from the November control room workbook) ---------- */
 const TYPES = { BD: "Breakdown", SB: "Standby", PM: "Planned maintenance", NU: "Not in use" };
 const DEFAULT_FLEET = [["Drill rigs", ["TDR013", "TDR014", "TDR015"]], ["Rockbreakers", ["TKRH011", "TKRH012", "TKRH015", "TKRH017", "TKRH019", "TKRH020"]],
-  ["Buses", ["TKR020", "TKR021", "TKR023", "TKR024", "TKR025", "TKR026"]], ["Lowbed", ["TKR06"]], ["Water bowser", ["TKR08"]], ["Bakkies", ["LDV011", "LDV012"]]];
+  ["Buses", ["TKR020", "TKR021", "TKR023", "TKR024", "TKR025", "TKR026"]], ["Lowbed", ["TKR06"]], ["Water bowser", ["TKR09"]], ["Bakkies", ["LDV011", "LDV012"]]];
 const CHECK = [["Collect data", ["PTO", "Inspection reports", "SOP", "T Connect attendance", "Risk assessment", "Capture", "Pit licence expiring"]], ["Documents", ["Job cards", "Checklists", "Fleet reports", "Trip summary"]],
   ["Systems", ["Cartrack", "On / Off", "Planned maintenance"]], ["Cartrack", ["Predictive failures", "Mechanical inspections", "Operator behaviour", "Fuel consumption management system", "Geofences"]]];
 const COLS = ["Rompad", "Drilling", "Buses"];
@@ -96,6 +96,8 @@ function hoursIn(machine, from, to) {
   return out;
 }
 /* one machine, one date (06:00 to 06:00 next day), up to now */
+function stateNow(m) { const s = statusNow(m); if (s) return s.type; const c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
+  const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1); return h != null ? C[h] : "?"; }
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
 /* ---------- controllers on this device ---------- */
@@ -177,9 +179,10 @@ function nowView() {
   return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }), `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
     + statusBar()
     + `<div class="tiles">${[["BD", "Breakdowns now"], ["PM", "In maintenance now"], ["NU", "Not in use now"]].map(([k, l]) => { const n = F.flatMap(([, L]) => L).filter(m => statusNow(m)?.type === k).length; return `<div class="tile ${k === "BD" && n ? "alert" : ""}"><div class="l">${l}</div><div class="n">${n}</div></div>`; }).join("")}
-      <div class="tile good"><div class="l">Working now</div><div class="n">${F.flatMap(([, L]) => L).filter(m => !statusNow(m)).length}</div><div class="s">of ${F.flatMap(([, L]) => L).length} machines</div></div></div>`
-    + `<div class="fleet">${F.map(([g, L]) => `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => !statusNow(m)).length}/${L.length} working</span></h3><div class="mlist">${L.map(m => { const s = statusNow(m);
-        return `<button class="mach ${s ? s.type : ""}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : "Working"}</small></button>`; }).join("")}</div>
+      <div class="tile good"><div class="l">Working now</div><div class="n">${F.flatMap(([, L]) => L).filter(m => stateNow(m) === "OP").length}</div><div class="s">of ${F.flatMap(([, L]) => L).length} machines · OP picked this shift</div></div>
+      ${(() => { const n = F.flatMap(([, L]) => L).filter(m => stateNow(m) === "?").length; return n ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${n}</div><div class="s">pick OP or BD in the sheet</div></div>` : ""; })()}</div>`
+    + `<div class="fleet">${F.map(([g, L]) => `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working</span></h3><div class="mlist">${L.map(m => { const s = statusNow(m);
+        const st = stateNow(m); return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : TYPES[st] || st}</small></button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`).join("")}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Every machine is working.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "Today's breakdowns", `<div class="res">${todays.map(evLine).join("") || '<p class="muted">Nothing logged today.</p>'}</div>`, { icon: icon("bd"), count: todays.length, sub: "every event with its exact times" })}
@@ -327,7 +330,7 @@ function shiftTable(d, sh) {
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
   return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operational / standby · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="savebar"><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
+    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
 async function setCell(d, mc, h, val) {
@@ -408,13 +411,14 @@ function daySheet(d) {
       ${hourLog.map(([h, L]) => `<tr><td>${pad(h)}:00–${pad((h + 1) % 24)}:00</td><td class="${L.length ? "okc" : ""}">${L.length ? "✓" : ""}</td><td>${L[0] ? new Date(L[0].at).toTimeString().slice(0, 5) : ""}</td><td>${esc([...new Set(L.map(l => l.by))].join(", "))}</td><td class="nt">${esc(L.map(l => l.what).slice(0, 3).join(" · "))}${L.length > 3 ? ` · +${L.length - 3} more` : ""}</td></tr>`).join("")}
       <tr class="gt"><td>Hours updated</td><td colspan="4">${hourLog.filter(([, L]) => L.length).length} of 24</td></tr></tbody></table></div></form>`;
 }
-async function saveShift(sh) {
+async function saveShift(sh, upload = true) {
   const f = $("fDay"); if (!f) return; const d = f.dataset.date;
   const dayR = recs.find(r => r.id === "day_" + d) || { id: "day_" + d, kind: "day", ym: d.slice(0, 7), date: d };
   const ctl = { dayCtl: f.elements.dayCtl.value.trim() || (sh === "Day" ? me.name : dayR.dayCtl || ""), nightCtl: f.elements.nightCtl.value.trim() || (sh === "Night" ? me.name : dayR.nightCtl || "") };
   if (ctl.dayCtl !== (dayR.dayCtl || "") || ctl.nightCtl !== (dayR.nightCtl || "")) await put({ ...dayR, ...ctl }, `Controllers: day ${ctl.dayCtl || "–"}, night ${ctl.nightCtl || "–"}`);
   const n = R("log").filter(l => l.date === d).length;
-  await put({ id: "log_" + uid(), kind: "log", ym: d.slice(0, 7), date: d, at: Date.now(), shiftSave: sh, what: `Saved and uploaded the ${sh.toLowerCase()} shift sheet` });
+  await put({ id: "log_" + uid(), kind: "log", ym: d.slice(0, 7), date: d, at: Date.now(), shiftSave: sh, what: upload ? `Saved and uploaded the ${sh.toLowerCase()} shift sheet` : `Saved the ${sh.toLowerCase()} shift sheet` });
+  if (!upload) { render(); popupMsg("Saved", `${sh} shift, ${dow(d)} ${fmt(d)}: saved on this PC. Tap Save and upload at the end of the shift.`); return; }
   let up = false; if (navigator.onLine) { await syncNow(false); up = !waiting(); }
   render();
   popupMsg(up ? "Saved and uploaded" : "Saved on this PC", `${sh} shift, ${dow(d)} ${fmt(d)}: ${n} updates on this sheet.` + (up ? " Everyone in the TKR app can see it now." : " It uploads by itself as soon as this PC has signal."));
@@ -657,6 +661,7 @@ async function clickH(ev) {
   if (b.dataset.sh) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; sheetSel = b.dataset.sh; if (sheetSel !== "month") date = sheetSel; render(); document.querySelector(".xltabs")?.scrollIntoView({ block: "start" }); return; }
   if (b.dataset.wbm) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; const m = shiftMonth((sheetSel === "month" ? date : sheetSel).slice(0, 7), +b.dataset.wbm), last = monthEnd(m) < today() ? monthEnd(m) : today(); date = last; sheetSel = sheetSel === "month" ? "month" : last; render(); return; }
   if (b.dataset.msg) { showMessage(shiftMessage($("fDay").dataset.date, b.dataset.msg)); return; }
+  if (b.dataset.saveonly) { b.disabled = true; try { await saveShift(b.dataset.saveonly, false); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
   if (b.dataset.saveshift) { b.disabled = true; b.textContent = "Saving…"; try { await saveShift(b.dataset.saveshift); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
   if (b.dataset.mach !== undefined) { const m = b.dataset.mach, open = statusNow(m); openEv(evForm({}, m), open ? `${m} · ${TYPES[open.type]}` : `${m} · log what happened`); return; }
   if (b.dataset.log !== undefined) { openEv(evForm(), "Log breakdown"); return; }
@@ -864,8 +869,12 @@ async function exportXlsx(from, to) {
     await metaSet("fix113", 1); }
   if (!(await metaGet("fix126"))) {               // once: the water bowser (TKR08) joins the control room list
     const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
-    if (f && !f.groups.some(([g, L]) => g === "Water bowser" || L.includes("TKR08"))) { const G = f.groups.map(([g, L]) => [g, [...L]]), i = G.findIndex(([g]) => g === "Lowbed"); G.splice(i < 0 ? G.length : i + 1, 0, ["Water bowser", ["TKR08"]]); await put({ ...f, groups: G }); }
+    if (f && !f.groups.some(([g, L]) => g === "Water bowser" || L.includes("TKR09"))) { const G = f.groups.map(([g, L]) => [g, [...L]]), i = G.findIndex(([g]) => g === "Lowbed"); G.splice(i < 0 ? G.length : i + 1, 0, ["Water bowser", ["TKR09"]]); await put({ ...f, groups: G }); }
     await metaSet("fix126", 1); }
+  if (!(await metaGet("fix130"))) {               // once: the water bowser is TKR09, not TKR08
+    const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
+    if (f && f.groups.some(([, L]) => L.includes("TKR08"))) await put({ ...f, groups: f.groups.map(([g, L]) => [g, L.map(m => m === "TKR08" ? "TKR09" : m)]) });
+    await metaSet("fix130", 1); }
   try { await closeCarried(); } catch (e) { console.warn(e); }
   const s = await metaGet("me");
   if (s && s.until > Date.now()) { const u = s.admin ? R("admin").find(a => a.id === s.id) : R("user").find(u => u.id === s.id);
