@@ -72,7 +72,15 @@ function stamp(rec, old) {
   for (const [k, v] of fieldsOf(rec)) if (JSON.stringify(v ?? "") !== JSON.stringify(O.get(k) ?? "")) fs[k] = me.sid;
   return { ...rec, fs };
 }
-function lockedF(r, f) { if (!r || !me || me.admin) return false; const s = r.fs?.[f]; if (s) return s !== me.sid; return (r.editedAt || 0) < (me.start || 0); }
+/* A box is locked only when it belongs to an earlier shift (before the current 06:00 / 18:00 change) and was not filled by the
+   controller logged in now. Everything in the current shift stays open for the controller on duty, whoever filled it. */
+function fieldTime(r, f) {
+  if (r.kind === "hr" && /^h\d+$/.test(f)) return hStart(r.date, +f.slice(1));
+  if (r.kind === "ev") return toMs(f === "end" ? (r.end || r.start) : r.start);
+  if (r.kind === "chk") return toMs(r.date + "T23:59");
+  return r.editedAt || 0;
+}
+function lockedF(r, f) { if (!r || !me || me.admin) return false; if (r.fs?.[f] && r.fs[f] === me.sid) return false; return fieldTime(r, f) < curShift().start; }
 const valOf = (r, f) => /^h\d+$/.test(f) && r?.cells ? r.cells[f.slice(1)] : r?.[f];
 const lockedV = (r, f) => !!r && filled(valOf(r, f)) && lockedF(r, f);
 const evLocked = e => ["machine", "type", "start"].some(f => lockedV(e, f));
