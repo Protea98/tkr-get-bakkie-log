@@ -403,7 +403,7 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
     if(!emps.length){say("No employees found. Check that the tabs are named rompad, support fleet, shared services, drilling and intern.");return}
     let list=(S.emps||[]).map(x=>Object.assign({},x));const byNum={},byName={};
     list.forEach(x=>{const n=String(x.number||"").trim().toUpperCase();if(n)(byNum[n]=byNum[n]||[]).push(x);(byName[normName(x.name)]=byName[normName(x.name)]||[]).push(x)});
-    const used=new Set(),added=[],moved=[],marks={},rotaGroups={};let nMarks=0,seq=0;
+    const used=new Set(),added=[],moved=[],stillOff=[],marks={},rotaGroups={};let nMarks=0,seq=0;
     items.filter(x=>x.kind==="group"&&x.rota).forEach(g=>{rotaGroups[g.gid]={sheet:g.sheet,section:g.section,shift:g.shift,rota:g.rota}});
     const sheetBase=sh=>(SHEETS.indexOf(sh)+1)*10000;
     for(const r of emps){const n=r.number.toUpperCase();let x=(n&&byNum[n]&&byNum[n].length===1?byNum[n][0]:null)||((byName[normName(r.name)]||[]).find(y=>!used.has(y.id))||null);
@@ -412,18 +412,22 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
         const c=list.filter(y=>!used.has(y.id)&&normName(y.name).split(",")[0]===sur&&((n&&String(y.number||"").toUpperCase().startsWith(n))||(first.length>=3&&(normName(y.name).split(",")[1]||"").startsWith(first.slice(0,4)))));
         if(c.length===1)x=c[0]}
       const g={sheet:r.sheet,group:r.gid,section:r.section,shift:r.shift,order:sheetBase(r.sheet)+(seq++)};
+      if(x&&x.active===false){   // removed people stay removed even if the Excel still lists them; only their marks from before they left are copied
+        stillOff.push(x.name);used.add(x.id);const sid=SHEET_ID[x.sheet]||SHEET_ID[r.sheet];
+        for(const dt in r.marks){if(x.leftDate&&dt>=x.leftDate)continue;const m=dt.slice(0,7);((marks[m]=marks[m]||{})[sid]=marks[m][sid]||{sheet:x.sheet||r.sheet,month:m,marks:{}}).marks[x.id]=Object.assign(marks[m][sid].marks[x.id]||{},{[dt]:r.marks[dt]});nMarks++}
+        continue}
       if(x){if(x.group!==g.group)moved.push(x.name);Object.assign(x,g,{active:true});if(!x.number&&r.number)x.number=r.number;if(!x.title&&r.title)x.title=r.title;if(!x.dept&&r.dept)x.dept=r.dept;delete x.leftDate;delete x.leftReason}
       else{x=Object.assign({id:(r.number||r.name).replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"")+"-"+Date.now().toString(36)+seq,active:true,name:r.name,number:r.number,dept:r.dept,title:r.title},g);list.push(x);added.push(r.name)}
       used.add(x.id);
       for(const dt in r.marks){const m=dt.slice(0,7),sid=SHEET_ID[r.sheet];((marks[m]=marks[m]||{})[sid]=marks[m][sid]||{sheet:r.sheet,month:m,marks:{}}).marks[x.id]=Object.assign(marks[m][sid].marks[x.id]||{},{[dt]:r.marks[dt]});nMarks++}}
     const notIn=list.filter(x=>x.active!==false&&!used.has(x.id));notIn.forEach(x=>{x.order=900000+(x.order||0)});
     const dates=Object.values(rotaGroups).flatMap(g=>Object.keys(g.rota)).sort();
-    if(!confirm("Update TKR Attendance from "+file.name+"?\n\n"+used.size+" employees in "+new Set(emps.map(x=>x.gid)).size+" shift groups ("+added.length+" new, "+moved.length+" moved to a new group)\n"+nMarks+" marks"+(dates.length?"\nRotas for "+short(dates[0])+" – "+short(dates.at(-1)):"")))return say("Nothing changed.");
+    if(!confirm("Update TKR Attendance from "+file.name+"?\n\n"+used.size+" employees in "+new Set(emps.map(x=>x.gid)).size+" shift groups ("+added.length+" new, "+moved.length+" moved to a new group)"+(stillOff.length?"\n"+stillOff.length+" removed employees are still in the Excel and stay removed":"")+"\n"+nMarks+" marks"+(dates.length?"\nRotas for "+short(dates[0])+" – "+short(dates.at(-1)):"")))return say("Nothing changed.");
     say("Saving…");S.groupDefs=(S.groupDefs||[]).filter(d=>!d.removed);
     await saveEmps(list);
     if(dates.length){const c=cycleOf(dates[0]);const id="r-"+c.start;await S.db.doc("cycles/"+id).update({start:c.start,end:c.end,groups:rotaGroups})}
     for(const m in marks)for(const sid in marks[m]){const d=marks[m][sid];await S.db.doc("months/"+m+"/sheets/"+sid).update({sheet:d.sheet,month:m,marks:d.marks,updatedBy:email,updatedAt:Date.now()})}
-    say("Done: "+used.size+" employees put in their shift groups, "+nMarks+" marks copied"+(added.length?", "+added.length+" new employees added ("+added.join(", ")+")":"")+"."+(notIn.length?" "+notIn.length+" people on the register are not in this Excel and were left as they are: "+notIn.map(x=>x.name).join(", ")+".":""));
+    say("Done: "+used.size+" employees put in their shift groups, "+nMarks+" marks copied"+(added.length?", "+added.length+" new employees added ("+added.join(", ")+")":"")+"."+(stillOff.length?" "+stillOff.length+" removed employees are still in this Excel and stay removed: "+stillOff.join(", ")+".":"")+(notIn.length?" "+notIn.length+" people on the register are not in this Excel and were left as they are: "+notIn.map(x=>x.name).join(", ")+".":""));
     toast("Register updated")}
   catch(e){say(denied(e)?"Your sign-in is not allowed to change the register.":"Could not read "+file.name+": "+(e.message||"try again"))}}
 /* Overtime report: NO. | NAME AND SURNAME | STANDBY/ UNPLANNED | DATE | PAYABLE HOURS ON TIME SHEET (hours as 12:10 = 12 h 10 min) */
