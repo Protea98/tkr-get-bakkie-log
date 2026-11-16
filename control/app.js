@@ -317,7 +317,7 @@ function shiftTable(d, sh) {
     L.forEach((mc, i) => { const hr = recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted), C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
       const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
-        if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv">${v}</span></td>`;
+        if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv ${v}">${v || "–"} <small>🔒</small></span></td>`;
         return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}${!C[h] && v && v !== "OP" ? " dv" : ""}" ${!C[h] && v && v !== "OP" ? 'title="Carried on from a breakdown that has not been closed. Pick OP if it was working."' : ""}>${opt(v)}</select></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${cells}
