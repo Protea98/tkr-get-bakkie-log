@@ -1,7 +1,7 @@
 /* TKR Training Matrix — every employee's training expiry dates, the trainings expiring each month with booking and progress,
    and Excel downloads in the same layout as the Training Matrix workbook. Shared online through Firebase (collection "training"). */
 import {
-  initializeApp, getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
+  initializeApp, deleteApp, getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, arrayUnion, arrayRemove, signOut, onAuthStateChanged, sendPasswordResetEmail,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, deleteDoc, onSnapshot,
 } from "../lib/firebase.js";
 
@@ -11,6 +11,7 @@ const firebaseConfig = {
 };
 // Must match the Firestore rules (firestore-rules.txt, Training Matrix block).
 const ADMINS = ["muneer@tkroperations.com", "amogelang@tkroperations.com", "amogelangmabilu56@gmail.com"];
+const ACCESS_ADMINS = ["amogelang@tkroperations.com", "amogelangmabilu56@gmail.com"];   // only Amogelang gives or removes access
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };
 
 const fbApp = initializeApp(firebaseConfig);
@@ -41,10 +42,11 @@ const PROGRESS = ["No booking required", "No bookings yet", "Booked", "Completed
 const STATUS = { ex: "Expired", m0: "Expires this month", m1: "Expires next month", ok: "Valid", mi: "Mandatory – missing" };
 
 /* ---------- state ---------- */
-let email = "", hrAcc = { editors: [], viewers: [] }, view = "dash", loaded = false, unsub = null, accUnsub = null;
+let email = "", tmAcc = { editors: [], viewers: [] }, view = "dash", loaded = false, unsub = null, accUnsub = null;
 let meta = { courses: [], mandatory: [] }, emps = [], books = {};
 let fQ = "", fOcc = "", fShow = "", month = ym();
-const canEdit = () => ADMINS.includes(email) || hrAcc.editors.includes(email);
+const canEdit = () => ADMINS.includes(email) || tmAcc.editors.includes(email);
+const isAccessAdmin = () => ACCESS_ADMINS.includes(email);
 const ref = id => doc(db, "training", id);
 const active = () => emps.filter(e => !e.removed).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -344,9 +346,31 @@ async function brandedXlsx(fname, months, withMatrix) {
 }
 
 /* ================= shell ================= */
-const VIEWS = { dash: viewDash, matrix: viewMatrix, month: viewMonth, set: viewSet };
+/* ================= Access (Amogelang only) ================= */
+function viewAccess() {
+  const row = (em, role) => `<tr><td>${esc(em)}</td><td>${role === "editors" ? "Full access (add and change)" : "View only"}</td><td><button class="sm danger" data-rm="${esc(em)}" data-role="${role}">Remove</button></td></tr>`;
+  const n = tmAcc.editors.length + tmAcc.viewers.length;
+  $("main").innerHTML = `<div class="card"><h2>Give access to the Training Matrix</h2><form class="form" id="addUser"><label>Email or username<input id="uEmail" required></label><label>Password<input id="uPass" type="text" minlength="6" placeholder="Leave empty if they already sign in to the TKR app"></label>
+    <label>Access<select id="uRole"><option value="editors">Full access (add and change)</option><option value="viewers">View only</option></select></label><div style="display:flex;align-items:end"><button class="primary">Add</button></div></form>
+    <p class="note" id="uMsg" role="status">Only Amogelang can give or remove access. Muneer and Amogelang always have full access.</p></div>
+    <div class="card"><h2>Who has access <span class="note">${n}</span></h2>${n ? `<div class="tbl"><table><thead><tr><th>Email</th><th>Access</th><th></th></tr></thead><tbody>${tmAcc.editors.map(e => row(e, "editors")).join("")}${tmAcc.viewers.map(e => row(e, "viewers")).join("")}</tbody></table></div>` : '<p class="note">Nobody else has access yet.</p>'}</div>`;
+  $("addUser").onsubmit = async ev => {
+    ev.preventDefault(); const em = toLogin($("uEmail").value).toLowerCase(), pw = $("uPass").value, role = $("uRole").value, other = role === "editors" ? "viewers" : "editors", msg = $("uMsg");
+    if (pw && pw.length < 6) { msg.textContent = "The password must be at least 6 characters."; return; }
+    msg.textContent = "Adding…"; let note = "";
+    if (pw) { const tmp = initializeApp(firebaseConfig, "tm-add-" + Date.now());
+      try { await createUserWithEmailAndPassword(getAuth(tmp), em, pw); note = " Their sign-in was made."; }
+      catch (er) { if (er?.code === "auth/email-already-in-use") note = " They already had a sign-in, so their password stays the same."; else { msg.textContent = "The sign-in couldn't be made. Check the email and try again."; deleteApp(tmp).catch(() => {}); return; } }
+      deleteApp(tmp).catch(() => {}); }
+    try { await setDoc(doc(db, "config", "trainingAccess"), { [role]: arrayUnion(em), [other]: arrayRemove(em) }, { merge: true }); toast(em + " now has access." + note); } catch (er) { fail(er); msg.textContent = ""; }
+  };
+  document.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => { if (!confirm("Remove access for " + b.dataset.rm + "?")) return; try { await setDoc(doc(db, "config", "trainingAccess"), { [b.dataset.role]: arrayRemove(b.dataset.rm) }, { merge: true }); toast("Access removed"); } catch (er) { fail(er); } });
+}
+
+const VIEWS = { dash: viewDash, matrix: viewMatrix, month: viewMonth, set: viewSet, access: viewAccess };
 function render() {
-  if (view === "set" && !canEdit()) view = "dash";
+  if ((view === "set" && !canEdit()) || (view === "access" && !isAccessAdmin())) view = "dash";
+  $("accTab").hidden = !isAccessAdmin();
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === view));
   $("setTab").hidden = !canEdit();
   if (!loaded) { $("main").innerHTML = '<div class="card note">Loading the training matrix…</div>'; return; }
@@ -365,6 +389,7 @@ function startData() {
     if (!$("modal").innerHTML && !(view === "matrix" && document.activeElement?.id === "fQ")) render();
   }, e => {
     console.warn(e); unsub = null;
+    if (e.code === "permission-denied" && isAccessAdmin()) { loaded = true; show("app"); view = "access"; render(); $("main").insertAdjacentHTML("afterbegin", '<div class="card notice">The Training Matrix rules are not published in Firebase yet, so the records cannot load. You can still give access here.</div>'); return; }
     if (e.code === "permission-denied") { $("naEmail").textContent = email; show("noaccess"); if (ADMINS.includes(email)) $("naEmail").textContent = email + " (the Training Matrix rules still need to be published in Firebase)"; }
     else $("main").innerHTML = '<div class="card note">Could not load the training matrix: ' + esc(e.message) + '</div>';
   });
@@ -374,7 +399,7 @@ onAuthStateChanged(auth, u => {
   if (!u || !u.email) { email = ""; $("who").textContent = ""; show("signin"); return; }
   email = u.email.toLowerCase(); $("who").textContent = email.replace("@mgr.tkroperations.app", "");
   show("app"); render();
-  accUnsub = onSnapshot(doc(db, "config", "hrAccess"), d => { const v = d.exists() ? d.data() : {}; hrAcc = { editors: (v.editors || []).map(x => x.toLowerCase()), viewers: (v.viewers || []).map(x => x.toLowerCase()) }; if (loaded && !$("modal").innerHTML) render(); }, () => {});
+  accUnsub = onSnapshot(doc(db, "config", "trainingAccess"), d => { const v = d.exists() ? d.data() : {}; tmAcc = { editors: (v.editors || []).map(x => x.toLowerCase()), viewers: (v.viewers || []).map(x => x.toLowerCase()) }; if (loaded && !$("modal").innerHTML) render(); }, () => {});
   startData();
 });
 $("signForm").onsubmit = async e => {
@@ -383,7 +408,7 @@ $("signForm").onsubmit = async e => {
   catch { m.textContent = "Wrong email or password."; } finally { $("sBtn").disabled = false; }
 };
 $("sReset").onclick = async () => { const em = toLogin($("sEmail").value), m = $("sMsg"); if (!em.includes("@") || em.endsWith("@mgr.tkroperations.app")) { m.textContent = "Type your email first, then press Forgot password."; return; }
-  try { await sendPasswordResetEmail(auth, em); m.textContent = "A password reset email was sent to " + em + "."; } catch { m.textContent = "The reset email couldn't be sent. Ask Muneer."; } };
+  try { await sendPasswordResetEmail(auth, em); m.textContent = "A password reset email was sent to " + em + "."; } catch { m.textContent = "The reset email couldn't be sent. Ask Amogelang."; } };
 $("outBtn").onclick = $("naOut").onclick = () => signOut(auth);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("modal").innerHTML) closeModal(); });
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("../sw.js", { updateViaCache: "none" }).catch(() => {});

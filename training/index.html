@@ -25,7 +25,7 @@
 <main class="wrap" id="signin" hidden>
   <form class="card signin" id="signForm">
     <h2>Sign in to the Training Matrix</h2>
-    <p class="muted">Admins, managers and people with HR access can open this section.</p>
+    <p class="muted">Only people Amogelang has given access can open this section.</p>
     <label>Email or username<input id="sEmail" autocomplete="username" required></label>
     <label>Password<input id="sPass" type="password" autocomplete="current-password" required></label>
     <div class="row"><button class="primary" id="sBtn">Sign in</button><button type="button" class="ghost" id="sReset">Forgot password</button></div>
@@ -34,7 +34,7 @@
 </main>
 
 <main class="wrap" id="noaccess" hidden>
-  <div class="card"><h2>No access</h2><p class="muted">You are signed in as <b id="naEmail"></b>, but you have not been given access to the Training Matrix. Ask Muneer or Amogelang.</p><button id="naOut">Sign out</button></div>
+  <div class="card"><h2>No access</h2><p class="muted">You are signed in as <b id="naEmail"></b>, but you have not been given access to the Training Matrix. Ask Amogelang to add you.</p><button id="naOut">Sign out</button></div>
 </main>
 
 <div class="wrap" id="app" hidden>
@@ -43,6 +43,7 @@
     <button role="tab" data-v="matrix" aria-selected="false">Training Matrix</button>
     <button role="tab" data-v="month" aria-selected="false">Expiring per month</button>
     <button role="tab" data-v="set" aria-selected="false" id="setTab" hidden>Settings</button>
+    <button role="tab" data-v="access" aria-selected="false" id="accTab" hidden>Access</button>
   </nav>
   <div id="main"></div>
 </div>
