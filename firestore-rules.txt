@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 13 Nov 2026 (Control Room sends without an email sign-in)
+// TKR Operations app – rules updated 17 Nov 2026 (Training Matrix added)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -188,6 +188,11 @@ service cloud.firestore {
     match /hr/{section}/items/{id} {
       allow read: if hrViewer();
       allow write: if hrEditor();
+    }
+    // ---------- Training Matrix (admins and HR editors change it; managers and HR viewers see it) ----------
+    match /training/{id} {
+      allow read: if isManager() || hrViewer();
+      allow write: if isAdmin() || hrAdmin() || hrEditor();
     }
   }
 }

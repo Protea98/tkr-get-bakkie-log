@@ -1,0 +1,30 @@
+.wrap#app{max-width:min(1900px,100%)}
+.key{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:13px;color:var(--muted);margin:0 0 10px}
+.key span{display:inline-flex;align-items:center;gap:6px}
+.key i{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid var(--line)}
+.c-ex{background:#f3c7c0;color:#7a1b10}
+.c-m0{background:#f6c98e;color:#6b3a00}
+.c-m1{background:#fbe79b;color:#5a4700}
+.c-ok{background:#c9e8d2;color:#17492b}
+.c-mi{background:transparent;color:var(--bad);outline:2px solid var(--bad);outline-offset:-2px}
+@media (prefers-color-scheme:dark){
+  .c-ex{background:#5b211a;color:#ffd5cf} .c-m0{background:#5c3a0f;color:#ffdcae}
+  .c-m1{background:#4f4410;color:#fff0a6} .c-ok{background:#1d3f2a;color:#c7f0d4}}
+.mx{overflow:auto;max-height:calc(100vh - 230px);background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.mx table{border-collapse:separate;border-spacing:0;font-size:12.5px}
+.mx th,.mx td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:5px 6px;white-space:nowrap;text-align:center}
+.mx thead th{position:sticky;top:0;background:var(--panel2);z-index:2;vertical-align:bottom;font-size:11.5px;font-weight:700}
+.mx thead th.vt{writing-mode:vertical-rl;transform:rotate(180deg);height:150px;white-space:normal;max-width:34px;text-align:left;padding:6px 4px}
+.mx th.nm,.mx td.nm{position:sticky;left:0;background:var(--panel);z-index:1;text-align:left;min-width:190px;max-width:220px;white-space:normal}
+.mx thead th.nm{z-index:3;background:var(--panel2)}
+.mx td.oc{text-align:left;color:var(--muted);min-width:140px;white-space:normal}
+.mx td.d{font-family:var(--mono);min-width:76px}
+.mx td.d.ed{cursor:pointer}
+.mx td.d.ed:hover{outline:2px solid var(--gold);outline-offset:-2px}
+.mnav{display:flex;align-items:center;gap:8px}
+.mnav b{font-family:var(--display);font-size:20px;min-width:150px;text-align:center}
+.prog{font-weight:600}
+.prog.done{color:var(--ok)} .prog.none{color:var(--bad)} .prog.bk{color:var(--gold)}
+.chk{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 14px}
+.chk label{display:flex;gap:8px;align-items:center;font-size:14px}
+.chk input{width:auto;min-height:0}
