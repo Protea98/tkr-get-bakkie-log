@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 17 Nov 2026 (Training Matrix access given by Amogelang)
+// TKR Operations app – rules updated 17 Nov 2026 (Training Matrix access given by Muneer and Amogelang)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -189,14 +189,14 @@ service cloud.firestore {
       allow read: if hrViewer();
       allow write: if hrEditor();
     }
-    // ---------- Training Matrix (access given by Amogelang only) ----------
+    // ---------- Training Matrix (access given by Muneer and Amogelang) ----------
     function tmHas() { return exists(/databases/$(database)/documents/config/trainingAccess); }
     function tmAcc() { return get(/databases/$(database)/documents/config/trainingAccess).data; }
     function tmEditor() { return isAdmin() || hrAdmin() || (tmHas() && myEmail() in tmAcc().get('editors', [])); }
     function tmViewer() { return tmEditor() || (tmHas() && myEmail() in tmAcc().get('viewers', [])); }
     match /config/trainingAccess {
       allow read: if signedIn();
-      allow write: if hrAdmin();
+      allow write: if isAdmin() || hrAdmin();
     }
     match /training/{id} {
       allow read: if tmViewer();

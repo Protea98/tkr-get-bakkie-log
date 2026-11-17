@@ -11,7 +11,7 @@ const firebaseConfig = {
 };
 // Must match the Firestore rules (firestore-rules.txt, Training Matrix block).
 const ADMINS = ["muneer@tkroperations.com", "amogelang@tkroperations.com", "amogelangmabilu56@gmail.com"];
-const ACCESS_ADMINS = ["amogelang@tkroperations.com", "amogelangmabilu56@gmail.com"];   // only Amogelang gives or removes access
+const ACCESS_ADMINS = ["muneer@tkroperations.com", "amogelang@tkroperations.com", "amogelangmabilu56@gmail.com"];   // Muneer and Amogelang give or remove access
 const toLogin = v => { v = String(v || "").trim(); return v.includes("@") ? v : v.toLowerCase().replace(/[^a-z0-9]/g, "") + "@mgr.tkroperations.app"; };
 
 const fbApp = initializeApp(firebaseConfig);
@@ -372,13 +372,13 @@ async function brandedXlsx(fname, months, withMatrix) {
 }
 
 /* ================= shell ================= */
-/* ================= Access (Amogelang only) ================= */
+/* ================= Access (Muneer and Amogelang) ================= */
 function viewAccess() {
   const row = (em, role) => `<tr><td>${esc(em)}</td><td>${role === "editors" ? "Full access (add and change)" : "View only"}</td><td><button class="sm danger" data-rm="${esc(em)}" data-role="${role}">Remove</button></td></tr>`;
   const n = tmAcc.editors.length + tmAcc.viewers.length;
   $("main").innerHTML = `<div class="card"><h2>Give access to the Training Matrix</h2><form class="form" id="addUser"><label>Email or username<input id="uEmail" required></label><label>Password<input id="uPass" type="text" minlength="6" placeholder="Leave empty if they already sign in to the TKR app"></label>
     <label>Access<select id="uRole"><option value="editors">Full access (add and change)</option><option value="viewers">View only</option></select></label><div style="display:flex;align-items:end"><button class="primary">Add</button></div></form>
-    <p class="note" id="uMsg" role="status">Only Amogelang can give or remove access. Muneer and Amogelang always have full access.</p></div>
+    <p class="note" id="uMsg" role="status">Only Muneer and Amogelang can give or remove access. They always have full access.</p></div>
     <div class="card"><h2>Who has access <span class="note">${n}</span></h2>${n ? `<div class="tbl"><table><thead><tr><th>Email</th><th>Access</th><th></th></tr></thead><tbody>${tmAcc.editors.map(e => row(e, "editors")).join("")}${tmAcc.viewers.map(e => row(e, "viewers")).join("")}</tbody></table></div>` : '<p class="note">Nobody else has access yet.</p>'}</div>`;
   $("addUser").onsubmit = async ev => {
     ev.preventDefault(); const em = toLogin($("uEmail").value).toLowerCase(), pw = $("uPass").value, role = $("uRole").value, other = role === "editors" ? "viewers" : "editors", msg = $("uMsg");
