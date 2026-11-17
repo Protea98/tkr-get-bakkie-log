@@ -115,19 +115,20 @@ function viewMatrix() {
   let h = `<div class="bar"><input type="search" id="fQ" placeholder="Search an employee" value="${esc(fQ)}">
     <select id="fOcc"><option value="">All occupations</option>${occs.map(o => `<option${o === fOcc ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>
     <select id="fShow"><option value="">Everyone</option><option value="due"${fShow === "due" ? " selected" : ""}>Expired or expiring soon</option><option value="ex"${fShow === "ex" ? " selected" : ""}>Expired only</option></select>
-    <button id="xAll" class="primary">Download Excel</button></div>${keyHtml()}
+    ${canEdit() ? '<button id="imX">Import Excel</button>' : ""}<button id="xAll" class="primary">Download Excel</button></div>${keyHtml()}
     <p class="note" style="margin:-4px 0 8px">${list.length} of ${active().length} employees.${ed ? " Tap a date to change it, or a name to change the employee." : ""}</p>`;
   h += `<div class="mx"><table><thead><tr><th class="nm">Employee</th><th>Occupation</th>${meta.courses.map(c => `<th class="vt">${esc(c)}</th>`).join("")}</tr></thead><tbody>` +
     list.map(e => `<tr><td class="nm"${ed ? ` data-emp="${esc(e.id)}" style="cursor:pointer"` : ""}>${esc(e.name)}</td><td class="oc">${esc(e.occ)}</td>` +
       meta.courses.map((c, i) => { const d = (e.dates || {})[c], s = status(d, c); return `<td class="d${s ? " c-" + s : ""}${ed ? " ed" : ""}"${ed ? ` data-cell="${esc(e.id)}|${i}"` : ""} title="${esc(c)}${s ? " – " + STATUS[s] : ""}">${d ? esc(fmtD(d)) : ""}</td>`; }).join("") + "</tr>").join("") +
     `</tbody></table></div>`;
-  if (!active().length) h = `<div class="card note">No employees yet.${ed ? " Import the Training Matrix Excel on the Settings tab." : ""}</div>`;
+  if (!active().length) h = `<div class="card note">No employees yet.${ed ? ' <button class="primary" id="imX">Import Excel</button>' : ""}</div>`;
   $("main").innerHTML = h;
-  if (!active().length) return;
+  if (!active().length) { if ($("imX")) $("imX").onclick = importPick; return; }
   $("fQ").oninput = e => { fQ = e.target.value; const p = e.target.selectionStart; viewMatrix(); const q = $("fQ"); q.focus(); q.setSelectionRange(p, p); };
   $("fOcc").onchange = e => { fOcc = e.target.value; viewMatrix(); };
   $("fShow").onchange = e => { fShow = e.target.value; viewMatrix(); };
   $("xAll").onclick = () => downloadAll();
+  if ($("imX")) $("imX").onclick = importPick;
   document.querySelectorAll("[data-cell]").forEach(td => td.onclick = () => { const [id, i] = td.dataset.cell.split("|"); cellForm(emps.find(e => e.id === id), meta.courses[+i]); });
   document.querySelectorAll("[data-emp]").forEach(td => td.onclick = () => empForm(emps.find(e => e.id === td.dataset.emp)));
 }
@@ -210,10 +211,10 @@ function viewSet() {
   let parsed = null;
   $("imF").onchange = async e => {
     const f = e.target.files[0]; parsed = null; $("imGo").disabled = true; if (!f) return;
-    try { parsed = parseWorkbook(await f.arrayBuffer()); $("imMsg").textContent = `Found ${parsed.people.length} employees, ${parsed.courses.length} trainings and ${parsed.books.length} lines on ${parsed.sheets.length} monthly sheet(s)${parsed.sheets.length ? " (" + parsed.sheets.join(", ") + ")" : ""}.`; $("imGo").disabled = false; }
+    try { parsed = parseWorkbook(await f.arrayBuffer()); $("imMsg").textContent = foundMsg(parsed); $("imGo").disabled = false; }
     catch (er) { $("imMsg").textContent = "This file could not be read: " + er.message; }
   };
-  $("imGo").onclick = async () => { if (!parsed) return; $("imGo").disabled = true; $("imMsg").textContent = "Importing…"; try { const n = await importParsed(parsed); $("imMsg").textContent = `Imported: ${n.emp} employees and ${n.book} monthly lines.${n.skip ? ` ${n.skip} removed employee(s) skipped.` : ""}`; toast("Imported"); } catch (er) { fail(er); $("imMsg").textContent = ""; $("imGo").disabled = false; } };
+  $("imGo").onclick = async () => { if (!parsed) return; $("imGo").disabled = true; $("imMsg").textContent = "Importing…"; try { const n = await importParsed(parsed); $("imMsg").textContent = importDone(n); toast("Imported"); } catch (er) { fail(er); $("imMsg").textContent = ""; $("imGo").disabled = false; } };
   $("addE").onclick = () => empForm(null);
   document.querySelectorAll("[data-back]").forEach(b => b.onclick = async () => { try { await setDoc(ref(b.dataset.back), { removed: false }, { merge: true }); toast("Put back"); } catch (er) { fail(er); } });
   document.querySelectorAll("[data-man]").forEach(cb => cb.onchange = async () => {
@@ -263,16 +264,41 @@ function parseWorkbook(buf) {
 async function importParsed(p) {
   const courses = meta.courses.slice(); for (const c of p.courses) if (!courses.some(x => x.toLowerCase() === c.toLowerCase())) courses.push(c);
   const writes = [() => setDoc(ref("meta"), { courses, mandatory: meta.mandatory || [] }, { merge: true })];
-  let emp = 0, skip = 0;
+  let added = 0, changed = 0, dates = 0, skip = 0, book = 0;
   const seen = new Set();
   for (const x of p.people) {
     const id = empId(x.name), old = emps.find(e => e.id === id); if (seen.has(id)) continue; seen.add(id);
     if (old && old.removed) { skip++; continue; }
-    emp++; writes.push(() => setDoc(ref(id), { kind: "emp", name: x.name, occ: x.occ || old?.occ || "", removed: false, dates: Object.assign({}, old?.dates || {}, x.dates), updatedAt: Date.now(), updatedBy: email }, { merge: true }));
+    // the file is the master for the trainings in it: its dates replace the app's, and a date taken out of the file is taken out here
+    const nd = {}; for (const [c, d] of Object.entries(old?.dates || {})) if (!p.courses.includes(c)) nd[c] = d; Object.assign(nd, x.dates);
+    const od = old?.dates || {}, diff = new Set(Object.keys(od).concat(Object.keys(nd))); let n = 0; diff.forEach(c => { if ((od[c] || "") !== (nd[c] || "")) n++; });
+    const occ = x.occ || old?.occ || "";
+    if (old && !n && occ === (old.occ || "")) continue;
+    if (old) { changed++; dates += n; } else added++;
+    writes.push(() => setDoc(ref(id), { kind: "emp", name: x.name, occ, removed: false, dates: nd, updatedAt: Date.now(), updatedBy: email }));
   }
-  for (const b of p.books) { const id = bookId(b.name, b.course, b.month); writes.push(() => setDoc(ref(id), Object.assign({ kind: "book" }, books[id] || {}, b, { updatedAt: Date.now(), updatedBy: email }))); }
+  for (const b of p.books) {
+    const id = bookId(b.name, b.course, b.month), cur = books[id] || {};
+    if (["pos", "expiry", "cert", "provider", "booking", "progress"].every(k => (cur[k] || "") === (b[k] || "")) && cur.course === b.course) continue;
+    book++; writes.push(() => setDoc(ref(id), Object.assign({ kind: "book" }, cur, b, { updatedAt: Date.now(), updatedBy: email })));
+  }
   for (let i = 0; i < writes.length; i += 40) await Promise.all(writes.slice(i, i + 40).map(f => f()));
-  return { emp, book: p.books.length, skip };
+  return { added, changed, dates, book, skip };
+}
+const importDone = n => (n.added || n.changed || n.book) ? `Updated: ${n.added} new employee(s), ${n.dates} date(s) changed for ${n.changed} employee(s), ${n.book} monthly line(s) added or changed.${n.skip ? ` ${n.skip} removed employee(s) skipped.` : ""}` : "Nothing changed: the app already matches this file." + (n.skip ? ` ${n.skip} removed employee(s) skipped.` : "");
+const foundMsg = p => `Found ${p.people.length} employees, ${p.courses.length} trainings and ${p.books.length} lines on ${p.sheets.length} monthly sheet(s)${p.sheets.length ? " (" + p.sheets.join(", ") + ")" : ""}.`;
+function importPick() {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx,.xls";
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return; let p;
+    try { p = parseWorkbook(await f.arrayBuffer()); } catch (er) { toast("This file could not be read: " + er.message); return; }
+    modal("Import " + f.name, foundMsg(p), '<p class="note">The dates in the file replace the dates in the app. Employees removed in the app are not added back.</p><p class="note" id="imRes" role="status"></p>',
+      '<button id="mX">Cancel</button><button class="primary" id="mS">Import</button>');
+    $("mX").onclick = closeModal;
+    $("mS").onclick = async () => { $("mS").disabled = true; $("imRes").textContent = "Importing…";
+      try { const n = await importParsed(p); $("imRes").textContent = importDone(n); $("mS").hidden = true; $("mX").textContent = "Close"; toast("Imported"); } catch (er) { fail(er); $("imRes").textContent = ""; $("mS").disabled = false; } };
+  };
+  inp.click();
 }
 
 /* ---------- Excel downloads (same layout as the Training Matrix workbook) ---------- */
