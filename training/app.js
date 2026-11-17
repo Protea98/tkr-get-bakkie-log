@@ -98,7 +98,8 @@ function dashData() {
 function viewDash() {
   const { A, cnt, per, expired } = dashData();
   const kpi = (n, l, s, cls) => `<div class="kpi"${cls ? ` style="border-top-color:var(--${cls})"` : ""}><span>${l}</span><b>${n}</b>${s ? `<small>${s}</small>` : ""}</div>`;
-  let h = '<div class="bar"><span style="flex:1"></span><button id="rPdf">Download PDF report</button><button id="rPpt">Download PowerPoint report</button></div><div class="kpis">' + kpi(A.length, "Employees") + kpi(cnt.ex, "Expired", "trainings past their expiry date", "bad") +
+  periodDefaults();
+  let h = `<div class="card"><h2>Report</h2><div class="bar" style="margin:0"><label>From<input type="date" id="rFrom" value="${rFrom}"></label><label>Till<input type="date" id="rTo" value="${rTo}"></label><span style="flex:1"></span><button id="rPdf">Download PDF report</button><button id="rPpt">Download PowerPoint report</button></div><p class="note" style="margin:6px 0 0">The report shows every training that expires from the first date till the second date, with bookings and progress.</p></div>` + '<div class="kpis">' + kpi(A.length, "Employees") + kpi(cnt.ex, "Expired", "trainings past their expiry date", "bad") +
     kpi(cnt.m0, "Still to expire this month", "from today to the end of " + mName(ym())) + kpi(cnt.m1, "Expire next month", mName(addM(ym(), 1))) + kpi(cnt.ok, "Valid", "", "ok") +
     (meta.mandatory.length ? kpi(cnt.mi, "Mandatory missing", "", "bad") : "") + '</div>';
   const months = Array.from({ length: 6 }, (_, i) => addM(ym(), i));
@@ -112,6 +113,7 @@ function viewDash() {
   h += `<div class="card"><h2>Expired trainings <span class="note">${expired.length}</span></h2>${expired.length ? `<div class="tbl"><table><thead><tr><th>Employee</th><th>Occupation</th><th>Training</th><th>Expired on</th></tr></thead><tbody>${expired.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td class="flag">${fmtD(r[3])}</td></tr>`).join("")}</tbody></table></div>` : '<p class="note">None.</p>'}</div>`;
   $("main").innerHTML = h;
   document.querySelectorAll("[data-gom]").forEach(b => b.onclick = () => { month = b.dataset.gom; view = "month"; render(); });
+  $("rFrom").onchange = e => { if (e.target.value) rFrom = e.target.value; }; $("rTo").onchange = e => { if (e.target.value) rTo = e.target.value; };
   $("rPdf").onclick = () => reportPdf($("rPdf")); $("rPpt").onclick = () => reportPpt($("rPpt"));
 }
 
@@ -384,17 +386,28 @@ async function brandedXlsx(fname, months, withMatrix) {
 /* ---------- PDF and PowerPoint report ---------- */
 const loadJs = src => new Promise((res, rej) => { if (document.querySelector('script[src="' + src + '"]')) return res(); const t = document.createElement("script"); t.src = src; t.onload = res; t.onerror = () => rej(new Error("open the app once with signal, then try again")); document.head.appendChild(t); });
 async function logoData() { try { const b = await (await fetch("../icons/logo-96.png")).blob(); return await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); }); } catch { return null; } }
+let rFrom = "", rTo = "";
+const endOfMonth = m => { const [y, mo] = m.split("-").map(Number); return `${m}-${pad(new Date(y, mo, 0).getDate())}`; };
+function periodDefaults() { if (!rFrom) rFrom = ym() + "-01"; if (!rTo) rTo = endOfMonth(addM(ym(), 5)); }
 function reportData() {
-  const D = dashData(), m0 = ym(), m1 = addM(m0, 1);
-  const line = r => [r.name, r.pos, r.course, fmtD(r.expiry), fmtD(r.booking), r.progress];
-  D.tiles = [["Employees", D.A.length], ["Expired", D.cnt.ex], ["Still to expire this month", D.cnt.m0], ["Expire next month", D.cnt.m1], ["Valid", D.cnt.ok]].concat(meta.mandatory.length ? [["Mandatory missing", D.cnt.mi]] : []);
+  periodDefaults();
+  const from = rFrom <= rTo ? rFrom : rTo, to = rFrom <= rTo ? rTo : rFrom, t = today(), D = dashData();
+  const months = []; for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = addM(m, 1)) months.push(m);
+  const inP = r => isIso(r.expiry) ? r.expiry >= from && r.expiry <= to : true;
+  const rows = months.flatMap(m => monthRows(m).filter(inP)).sort((a, b) => (a.expiry || "").localeCompare(b.expiry || "") || a.name.localeCompare(b.name));
+  const done = r => r.progress === "Completed", expd = r => isIso(r.expiry) && r.expiry < t && !done(r) && r.progress !== "Resigned";
+  const cnt = p => rows.filter(r => r.progress === p).length;
+  D.period = fmtD(from) + " to " + fmtD(to); D.from = from; D.to = to;
+  D.tiles = [["Employees", D.A.length], ["Expiring in the period", rows.length], ["Completed", cnt("Completed")], ["Booked", cnt("Booked")], ["No bookings yet", cnt("No bookings yet")], ["Expired, not yet done", rows.filter(expd).length]];
+  D.months = months.map(m => { const r = rows.filter(x => x.month === m), c = p => r.filter(x => x.progress === p).length; return { m, n: r.length, done: c("Completed"), booked: c("Booked"), none: c("No bookings yet"), blank: c("") }; });
   D.monthHead = ["Month", "Trainings expiring", "Completed", "Booked", "No bookings yet", "No progress captured"];
   D.monthBody = D.months.map(x => [mName(x.m), x.n, x.done, x.booked, x.none, x.blank].map(String));
-  D.perHead = ["Training", "Employees with it", "Valid", "Expires " + MONTHS[+m0.slice(5) - 1], "Expires " + MONTHS[+m1.slice(5) - 1], "Expired"].concat(meta.mandatory.length ? ["Mandatory missing"] : []);
-  D.perBody = D.used.map(c => [c, D.per[c].n, D.per[c].ok, D.per[c].m0, D.per[c].m1, D.per[c].ex].concat(meta.mandatory.length ? [D.per[c].mi] : []).map(String));
-  D.listHead = ["Employee", "Position", "Training", "Expiry date", "Booking date", "Current progress"];
-  D.this = monthRows(m0).map(line); D.next = monthRows(m1).map(line); D.m0 = m0; D.m1 = m1;
-  D.file = "TKR_Training_Matrix_Report_" + today();
+  const per = {}; rows.forEach(r => { const k = r.course; per[k] = per[k] || { n: 0, done: 0, booked: 0, none: 0, ex: 0 }; per[k].n++; if (done(r)) per[k].done++; if (r.progress === "Booked") per[k].booked++; if (r.progress === "No bookings yet") per[k].none++; if (expd(r)) per[k].ex++; });
+  D.perHead = ["Training", "Expiring in the period", "Completed", "Booked", "No bookings yet", "Expired, not yet done"];
+  D.perBody = Object.keys(per).sort((a, b) => per[b].n - per[a].n || a.localeCompare(b)).map(c => [c, per[c].n, per[c].done, per[c].booked, per[c].none, per[c].ex].map(String));
+  D.listHead = ["Employee", "Position", "Training", "Expiry date", "Status", "Booking date", "Current progress"];
+  D.list = rows.map(r => [r.name, r.pos, r.course, fmtD(r.expiry), done(r) ? "Done" : expd(r) ? "Expired" : "Due", fmtD(r.booking), r.progress]);
+  D.file = "TKR_Training_Matrix_Report_" + from + "_to_" + to;
   return D;
 }
 async function reportPdf(btn) {
@@ -404,7 +417,7 @@ async function reportPdf(btn) {
     const D = reportData(), logo = await logoData(), { jsPDF } = window.jspdf, P = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" }), W = 297, GOLD = [212, 161, 42], BLACK = [17, 17, 17];
     const head = () => { P.setFillColor(...BLACK); P.rect(0, 0, W, 24, "F"); P.setFillColor(...GOLD); P.rect(0, 24, W, 1.4, "F"); if (logo) P.addImage(logo, "PNG", 10, 3.5, 17, 17);
       P.setTextColor(255, 255, 255); P.setFont("helvetica", "bold"); P.setFontSize(14); P.text("TKR OPERATIONS – TRAINING MATRIX REPORT", 32, 11);
-      P.setTextColor(...GOLD); P.setFontSize(11); P.text("As at " + fmtD(today()) + "   ·   " + D.A.length + " employees   ·   " + meta.courses.length + " trainings", 32, 18.5); };
+      P.setTextColor(...GOLD); P.setFontSize(11); P.text("Period " + D.period + "   ·   printed " + fmtD(today()), 32, 18.5); };
     const tbl = (y, title, hr, body, opt = {}) => { if (y > 180) { P.addPage(); y = 32; } P.setTextColor(...BLACK); P.setFont("helvetica", "bold"); P.setFontSize(11.5); P.text(title, 12, y);
       P.autoTable(Object.assign({ startY: y + 2, head: [hr], body: body.length ? body : [[{ content: "None", colSpan: hr.length }]], margin: { left: 12, right: 12, top: 30 }, theme: "grid",
         styles: { fontSize: 8.6, cellPadding: 1.6, textColor: BLACK, lineColor: [217, 211, 197] }, headStyles: { fillColor: [38, 38, 38], textColor: 255, fontStyle: "bold" }, alternateRowStyles: { fillColor: [255, 248, 230] }, didDrawPage: () => head() }, opt));
@@ -412,14 +425,11 @@ async function reportPdf(btn) {
     head();
     const tw = (W - 24 - (D.tiles.length - 1) * 3) / D.tiles.length;
     D.tiles.forEach(([k, v], i) => { const x = 12 + i * (tw + 3); P.setDrawColor(...GOLD); P.setFillColor(255, 248, 230); P.roundedRect(x, 31, tw, 20, 2, 2, "FD"); P.setTextColor(110, 100, 80); P.setFont("helvetica", "bold"); P.setFontSize(7.5); P.text(k.toUpperCase(), x + 3, 37);
-      P.setTextColor(...(k === "Expired" || k === "Mandatory missing" ? [179, 64, 47] : BLACK)); P.setFontSize(16); P.text(String(v), x + 3, 47); });
+      P.setTextColor(...(k === "Expired, not yet done" || k === "No bookings yet" ? [179, 64, 47] : BLACK)); P.setFontSize(16); P.text(String(v), x + 3, 47); });
     let y = 60;
-    y = tbl(y, "Expiring in the next six months", D.monthHead, D.monthBody);
+    y = tbl(y, "Per month", D.monthHead, D.monthBody);
     y = tbl(y, "Per training", D.perHead, D.perBody, { didParseCell: c => { if (c.section === "body" && c.column.index === 5 && c.cell.raw !== "0") { c.cell.styles.textColor = [179, 64, 47]; c.cell.styles.fontStyle = "bold"; } } });
-    y = tbl(y, "Expiring in " + mName(D.m0), D.listHead, D.this);
-    y = tbl(y, "Expiring in " + mName(D.m1), D.listHead, D.next);
-    y = tbl(y, "Expired trainings (" + D.expired.length + ")", ["Employee", "Occupation", "Training", "Expired on"], D.expired.map(r => [r[0], r[1], r[2], fmtD(r[3])]));
-    if (D.missing.length) tbl(y, "Mandatory trainings missing (" + D.missing.length + ")", ["Employee", "Occupation", "Training"], D.missing);
+    tbl(y, "Trainings expiring " + D.period + " (" + D.list.length + ")", D.listHead, D.list, { didParseCell: c => { if (c.section === "body" && c.column.index === 4) { if (c.cell.raw === "Expired") { c.cell.styles.textColor = [179, 64, 47]; c.cell.styles.fontStyle = "bold"; } if (c.cell.raw === "Done") c.cell.styles.textColor = [46, 125, 79]; } } });
     const n = P.getNumberOfPages(); for (let i = 1; i <= n; i++) { P.setPage(i); P.setFontSize(8); P.setTextColor(120); P.setFont("helvetica", "normal"); P.text("TKR Operations · Training Matrix   ·   printed " + fmtD(today()) + "   ·   page " + i + " of " + n, 12, 204); }
     P.save(D.file + ".pdf"); toast("PDF report downloaded");
   } catch (e) { console.warn(e); toast("The PDF couldn't be made: " + (e.message || "try again")); }
@@ -432,7 +442,7 @@ async function reportPpt(btn) {
     const G = "D4A12A", K = "111111", CR = "FFF8E6", RED = "B3402F";
     const base = title => { const s = pp.addSlide(); s.background = { color: "FFFFFF" }; s.addShape(pp.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.9, fill: { color: K } }); s.addShape(pp.ShapeType.rect, { x: 0, y: 0.9, w: 13.33, h: 0.06, fill: { color: G } });
       if (logo) s.addImage({ data: logo, x: 0.25, y: 0.1, w: 0.7, h: 0.7 }); s.addText(title, { x: 1.1, y: 0.08, w: 11.5, h: 0.5, fontFace: "Arial", fontSize: 22, bold: true, color: "FFFFFF" });
-      s.addText("Training Matrix · as at " + fmtD(today()), { x: 1.1, y: 0.52, w: 11, h: 0.32, fontFace: "Arial", fontSize: 12, color: G, bold: true });
+      s.addText("Training Matrix · " + D.period, { x: 1.1, y: 0.52, w: 11, h: 0.32, fontFace: "Arial", fontSize: 12, color: G, bold: true });
       s.addText("TKR Operations · Training Matrix", { x: 0.3, y: 7.1, w: 6, h: 0.3, fontFace: "Arial", fontSize: 9, color: "888888" }); return s; };
     const hdr = a => a.map(x => ({ text: String(x), options: { bold: true, color: "FFFFFF", fill: { color: "262626" } } }));
     const T = (s, rows, o) => s.addTable(rows, Object.assign({ x: 0.4, y: 1.2, w: 12.5, fontFace: "Arial", fontSize: 12, color: K, border: { type: "solid", pt: 0.5, color: "D9D3C5" }, autoPage: false }, o));
@@ -441,25 +451,20 @@ async function reportPpt(btn) {
     // 1 title (white, with the logo)
     let s = pp.addSlide(); s.background = { color: "FFFFFF" }; s.addShape(pp.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.25, fill: { color: G } }); if (logo) s.addImage({ data: logo, x: 0.6, y: 0.8, w: 1.4, h: 1.4 });
     s.addText("TRAINING MATRIX REPORT", { x: 0.6, y: 2.6, w: 12, h: 0.9, fontFace: "Arial", fontSize: 40, bold: true, color: K });
-    s.addText("As at " + fmtD(today()), { x: 0.6, y: 3.5, w: 12, h: 0.7, fontFace: "Arial", fontSize: 26, bold: true, color: G });
+    s.addText(D.period, { x: 0.6, y: 3.5, w: 12, h: 0.7, fontFace: "Arial", fontSize: 26, bold: true, color: G });
     s.addText(D.A.length + " employees · " + meta.courses.length + " trainings", { x: 0.6, y: 4.3, w: 12, h: 0.5, fontFace: "Arial", fontSize: 16, color: "555555" });
     s.addText("TKR Operations · Tharisa Mine", { x: 0.6, y: 6.6, w: 8, h: 0.4, fontFace: "Arial", fontSize: 12, color: "888888" });
     // 2 summary
     s = base("Summary");
     D.tiles.forEach(([k, v], i) => { const x = 0.5 + (i % 3) * 4.15, y = 1.4 + Math.floor(i / 3) * 2.6; s.addShape(pp.ShapeType.roundRect, { x, y, w: 3.9, h: 2.2, fill: { color: CR }, line: { color: G, width: 1.5 }, rectRadius: 0.1 });
-      s.addText(k.toUpperCase(), { x: x + 0.25, y: y + 0.2, w: 3.5, h: 0.4, fontFace: "Arial", fontSize: 12, bold: true, color: "6E6450" }); s.addText(String(v), { x: x + 0.25, y: y + 0.75, w: 3.5, h: 1, fontFace: "Arial", fontSize: 40, bold: true, color: k === "Expired" || k === "Mandatory missing" ? RED : K }); });
+      s.addText(k.toUpperCase(), { x: x + 0.25, y: y + 0.2, w: 3.5, h: 0.4, fontFace: "Arial", fontSize: 12, bold: true, color: "6E6450" }); s.addText(String(v), { x: x + 0.25, y: y + 0.75, w: 3.5, h: 1, fontFace: "Arial", fontSize: 40, bold: true, color: k === "Expired, not yet done" || k === "No bookings yet" ? RED : K }); });
     // 3 next six months
-    s = base("Expiring in the next six months");
+    s = base("Per month");
     s.addChart(pp.ChartType.bar, [{ name: "Trainings expiring", labels: D.months.map(x => MONTHS[+x.m.slice(5) - 1].slice(0, 3) + " " + x.m.slice(2, 4)), values: D.months.map(x => x.n) }], { x: 0.4, y: 1.15, w: 12.5, h: 2.7, chartColors: [G], showValue: true, dataLabelFontSize: 11, catAxisLabelFontSize: 11, valAxisHidden: true, valGridLine: { style: "none" } });
     T(s, [hdr(D.monthHead)].concat(D.monthBody), { y: 4.05, fontSize: 12 });
     // 4 per training
     paged("Per training", D.perHead, D.perBody.map(r => r.map((v, i) => i === 5 && v !== "0" ? { text: v, options: { bold: true, color: RED } } : v)), 14, 11);
-    // 5 and 6 this month and next month
-    paged("Expiring in " + mName(D.m0), D.listHead, D.this, 14, 11);
-    paged("Expiring in " + mName(D.m1), D.listHead, D.next, 14, 11);
-    // 7 expired
-    paged("Expired trainings (" + D.expired.length + ")", ["Employee", "Occupation", "Training", "Expired on"], D.expired.map(r => [r[0], r[1], r[2], fmtD(r[3])]), 20, 10);
-    if (D.missing.length) paged("Mandatory trainings missing (" + D.missing.length + ")", ["Employee", "Occupation", "Training"], D.missing, 16, 11);
+    paged("Trainings expiring " + D.period, D.listHead, D.list.map(r => r.map((v, i) => i === 4 && v === "Expired" ? { text: v, options: { bold: true, color: RED } } : i === 4 && v === "Done" ? { text: v, options: { color: "2E7D4F" } } : v)), 14, 10);
     await pp.writeFile({ fileName: D.file + ".pptx" }); toast("PowerPoint report downloaded");
   } catch (e) { console.warn(e); toast("The PowerPoint couldn't be made: " + (e.message || "try again")); }
   btn.disabled = false; btn.textContent = t;
