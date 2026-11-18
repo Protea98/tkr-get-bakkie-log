@@ -330,6 +330,10 @@ const REPORT_SEEDS = [
       ["2026-11-12", "rompad", "moil-lock", 3, "Phumzile"], ["2026-11-12", "rompad", "rp-m16n", 0, "Phumzile"], ["2026-11-12", "rompad", "rp-m16x200", 0, "Phumzile"], ["2026-11-12", "rompad", "rp-m20x140", 2, "Phumzile"],
       ["2026-11-03", "drill", "get-rod", 1, "Phumzile"], ["2026-11-03", "drill", "get-shank", 3, "Phumzile"], ["2026-11-03", "drill", "get-bit", 2, "Phumzile"],
       ["2026-11-12", "drill", "get-rod", 1, "Phumzile"], ["2026-11-12", "drill", "get-shank", 3, "Phumzile"], ["2026-11-12", "drill", "get-bit", 2, "Phumzile"]] },
+  /* GET at Drill Stores, as given by Muneer on 18/11: no GET issued from 01/11 to 18/11; on hand 1 rod, 3 shanks, 2 x 140 mm bits */
+  { id: "seed-2026-11-18-get", msg: "GET on hand 18/11: 1 rod, 3 shanks, 2 bits (140 mm)", m: [],
+    c: [["2026-11-01", "drill", "get-rod", 1, "Muneer"], ["2026-11-01", "drill", "get-shank", 3, "Muneer"], ["2026-11-01", "drill", "get-bit", 2, "Muneer"],
+      ["2026-11-18", "drill", "get-rod", 1, "Muneer"], ["2026-11-18", "drill", "get-shank", 3, "Muneer"], ["2026-11-18", "drill", "get-bit", 2, "Muneer"]] },
 ];
 let seedingRep = false;
 async function seedReports() {
