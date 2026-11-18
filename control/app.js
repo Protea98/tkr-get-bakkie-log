@@ -104,8 +104,10 @@ function hoursIn(machine, from, to) {
   return out;
 }
 /* one machine, one date (06:00 to 06:00 next day), up to now */
-function stateNow(m) { const s = statusNow(m); if (s) return s.type; const c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
-  const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1); return h != null ? C[h] : "?"; }
+function stateNow(m) { const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
+  const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
+  if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
+  return h != null ? C[h] : s ? s.type : "?"; }
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
 /* ---------- controllers on this device ---------- */
@@ -180,20 +182,37 @@ async function closeCarried() {
     for (const e of L) await put({ ...e, end: isoOf(c.start), endBy: "Shift change" }, `${e.machine}: ${TYPES[e.type].toLowerCase()} closed at ${c.label}, end of the shift`);
     return L.length; } finally { closing = false; }
 }
+/* the shift that is running now, and its totals for the whole fleet */
+function shiftNow() { const c = curShift(), [d, sh] = c.key.split("|"); return { d, sh, win: shiftWin(d, sh) }; }
+const pcOf = t => t.avail + t.down ? Math.round(t.avail / (t.avail + t.down) * 1000) / 10 + "%" : "–";
+function fleetSum(L, fn) { return L.reduce((a, m) => { const x = fn(m); if (x) for (const k of ["avail", "BD", "PM", "down"]) a[k] += x[k] || 0; return a; }, { avail: 0, BD: 0, PM: 0, down: 0 }); }
+/* breakdowns and maintenance in the running shift: logged times, plus hours picked in the sheet without a time */
+function shiftEvents() {
+  const { d, sh, win: [a, b] } = shiftNow(), now = Date.now(), out = evs().filter(e => toMs(e.start) < Math.min(b, now) && evEnd(e) > a).sort((x, y) => toMs(y.start) - toMs(x.start)).map(e => ({ e }));
+  for (const m of fleet().flatMap(([, L]) => L)) { const C = cellsOf(d, m);
+    for (const t of ["BD", "PM"]) { const hrs = HRS(sh).filter(h => C[h] === t && hStart(d, h) <= now && !evs().some(e => e.machine === m && e.type === t && toMs(e.start) < hStart(d, h) + 36e5 && evEnd(e) > hStart(d, h)));
+      if (hrs.length) out.push({ sheet: { machine: m, type: t, hrs } }); } }
+  return out;
+}
 function nowView() {
-  const F = fleet(), open = evs().filter(e => !e.end).sort((a, b) => toMs(a.start) - toMs(b.start));
-  const todays = evs().filter(e => e.start.slice(0, 10) === today() || !e.end || (e.end || "").slice(0, 10) === today()).sort((a, b) => toMs(b.start) - toMs(a.start));
-  const logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at);
-  return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }), `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
+  const F = fleet(), ALL = F.flatMap(([, L]) => L), open = evs().filter(e => !e.end).sort((a, b) => toMs(a.start) - toMs(b.start));
+  const { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh)), dayT = fleetSum(ALL, m => daySum(m, sd));
+  const SE = shiftEvents(), logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at);
+  const cnt = k => ALL.filter(m => stateNow(m) === k).length;
+  const seLine = x => x.e ? evLine(x.e) : `<div class="evrow"><span class="tag ${x.sheet.type}">${x.sheet.type}</span><div><b>${esc(x.sheet.machine)}</b> · ${TYPES[x.sheet.type]}<br><span class="t">${x.sheet.hrs.map(hLabel).join(", ")} · ${x.sheet.hrs.length} h, picked in the sheet</span></div></div>`;
+  return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
     + statusBar()
-    + `<div class="tiles">${[["BD", "Breakdowns now"], ["PM", "In maintenance now"], ["NU", "Not in use now"]].map(([k, l]) => { const n = F.flatMap(([, L]) => L).filter(m => statusNow(m)?.type === k).length; return `<div class="tile ${k === "BD" && n ? "alert" : ""}"><div class="l">${l}</div><div class="n">${n}</div></div>`; }).join("")}
-      <div class="tile good"><div class="l">Working now</div><div class="n">${F.flatMap(([, L]) => L).filter(m => stateNow(m) === "OP").length}</div><div class="s">of ${F.flatMap(([, L]) => L).length} machines · OP picked this shift</div></div>
-      ${(() => { const n = F.flatMap(([, L]) => L).filter(m => stateNow(m) === "?").length; return n ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${n}</div><div class="s">pick OP or BD in the sheet</div></div>` : ""; })()}</div>`
-    + `<div class="fleet">${F.map(([g, L]) => `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working</span></h3><div class="mlist">${L.map(m => { const s = statusNow(m);
-        const st = stateNow(m); return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : TYPES[st] || st}</small></button>`; }).join("")}</div>
-        <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`).join("")}</div>`
-    + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Every machine is working.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
-      ${sheet("todayev", "Today's breakdowns", `<div class="res">${todays.map(evLine).join("") || '<p class="muted">Nothing logged today.</p>'}</div>`, { icon: icon("bd"), count: todays.length, sub: "every event with its exact times" })}
+    + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${h2(shT.avail)} h available · ${h2(shT.down)} h down so far</div></div>
+      <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${h2(dayT.avail)} h available · ${h2(dayT.down)} h down</div></div>
+      <div class="tile good"><div class="l">Working now</div><div class="n">${cnt("OP")}</div><div class="s">of ${ALL.length} machines</div></div>
+      <div class="tile ${cnt("BD") ? "alert" : ""}"><div class="l">Breakdowns now</div><div class="n">${cnt("BD")}</div></div>
+      <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
+      ${cnt("NU") ? `<div class="tile"><div class="l">Not in use now</div><div class="n">${cnt("NU")}</div></div>` : ""}
+      ${cnt("?") ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${cnt("?")}</div><div class="s">pick OP, BD or PM in the sheet</div></div>` : ""}</div>`
+    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : TYPES[st] || st}</small></button>`; }).join("")}</div>
+        <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`; }).join("")}</div>`
+    + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
+      ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
       ${sheet("checks", "Data and documents checklist", checklist(today()), { icon: icon("docs"), sub: `${chkDone(today())} of ${CHECK.flatMap(([, i]) => i).length * COLS.length} ticked today` })}
       ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>` + workbookSection();
 }
@@ -309,7 +328,10 @@ function cellVal(d, mc, h, C = cellsOf(d, mc)) {
 }
 function shiftSum(mc, d, sh) {
   const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()), C = cellsOf(d, mc), V = HRS(sh).map(h => cellVal(d, mc, h, C)), filled = V.filter(Boolean).length;
-  const h = b > a ? hoursIn(mc, a, b) : { BD: 0, PM: 0 }, BD = h.BD || 0, PM = h.PM || 0, down = BD + PM;
+  let BD = 0, PM = 0;
+  HRS(sh).forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, b); if (y <= x) return; const e = hoursIn(mc, x, y);
+    if ((e.BD || 0) + (e.PM || 0) > 0) { BD += e.BD || 0; PM += e.PM || 0; } else if (V[k] === "BD") BD += (y - x) / 36e5; else if (V[k] === "PM") PM += (y - x) / 36e5; });
+  const down = BD + PM;
   return { filled, BD, PM, down, avail: Math.max(0, filled - down), SB: 0, NU: 0 };
 }
 function daySum(mc, d) {
