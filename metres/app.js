@@ -122,6 +122,7 @@ function homeView() {
       ${tile("Shifts captured", `${S.L.length} <small style="font-size:16px;color:var(--muted)">of ${S.sofar}</small>`, `${S.expected} shifts in ${MONTHS[+month.slice(5, 7) - 1]} (day and night)`, S.L.length < S.sofar ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Shifts without a tally sheet", String(S.noTally.length), S.noTally.length ? "tap to see which" : "every shift with metres has one", S.noTally.length ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Not exported yet", String(ch), lastExport ? `last export ${when(lastExport.at)}` : "nothing exported yet", ch && (days === null || days >= 3) ? "alert" : "", 'data-tab="export"')}</div>`
+    + conflictCard()
     + blocksCard(S)
     + delayCard(S)
     + chartCard()
@@ -164,7 +165,7 @@ function dayCheck(d, sh) {
 function shiftLine(s) {
   const nt = needsTally(s), nf = filesOf(s.id).length;
   return `<div class="ri"><div class="rt"><b>${dow(s.date)} ${fmt(s.date)} · ${s.shift} shift${s.supervisor ? " · " + esc(s.supervisor) : ""}</b>
-    <small>${rigs().map(r => { const g = rigOn(s, r); return g ? `${r}: ${M1(num(g.metres))} m ${g.status ? "(" + g.status.toLowerCase() + ")" : ""}` : ""; }).filter(Boolean).join(" · ") || "No machines filled in"} · ${nf} document${nf === 1 ? "" : "s"}${nt.length ? ` · <span style="color:var(--bad)">no tally sheet: ${nt.join(", ")}</span>` : ""}</small></div>
+    <small>${rigs().map(r => { const g = rigOn(s, r); return g ? `${r}: ${M1(num(g.metres))} m ${g.status ? "(" + g.status.toLowerCase() + ")" : ""}` : ""; }).filter(Boolean).join(" · ") || "No machines filled in"} · ${nf} document${nf === 1 ? "" : "s"}${nt.length ? ` · <span style="color:var(--bad)">no tally sheet: ${nt.join(", ")}</span>` : ""}${s.conflict ? ' · <b style="color:var(--bad)">Pending: changed on two devices</b>' : ""}</small></div>
     <div class="row" style="flex:none"><button class="sm" data-cap="${s.id}">Edit</button><button class="sm danger" data-del="${s.id}">Delete</button></div></div>`;
 }
 function registerView() {
@@ -182,14 +183,14 @@ function registerView() {
 /* shifts that are over and have nothing captured: filled with 0 m and Not working for every rig */
 const shiftOver = (d, sh) => Date.now() >= new Date(sh === "Day" ? d + "T18:00" : addDays(d, 1) + "T06:00").getTime();
 const emptyOver = m => daysOf(m + "-01", monthEnd(m)).flatMap(d => ["Day", "Night"].filter(sh => !shiftOf(d, sh) && shiftOver(d, sh)).map(sh => [d, sh]));
-async function fillEmpty(m) {
-  const L = emptyOver(m); if (!L.length) { toast("Every shift that is over is captured."); return; }
-  if (!confirm(`Fill ${L.length} empty shift${L.length === 1 ? "" : "s"} in ${monthName(m)} with 0 m and Not working for ${allRigs().join(", ")}? Shifts already captured stay as they are.`)) return;
+async function fillEmpty(m, quiet) {
+  const L = emptyOver(m); if (!L.length) { if (!quiet) toast("Every shift that is over is captured."); return 0; }
+  if (!quiet && !confirm(`Fill ${L.length} empty shift${L.length === 1 ? "" : "s"} in ${monthName(m)} with 0 m and Not working for ${allRigs().join(", ")}? Shifts already captured stay as they are.`)) return;
   const now = Date.now();
   await tx(["shifts"], "readwrite", t => { for (const [d, sh] of L) t.objectStore("shifts").put({ id: d + "|" + sh, date: d, shift: sh, supervisor: "", report: "", savedAt: now, editedAt: now, device: cfg.device || "", filled: 1,
     rigs: Object.fromEntries(allRigs().map(r => [r, { status: "Not working", metres: 0, block: "", hrsFrom: "", hrsTo: "", problem: "", delays: [] }])) }); });
-  await load(); render(); toast(`${L.length} shift${L.length === 1 ? "" : "s"} filled with 0 m and Not working.`);
-  if (fbUser && navigator.onLine) fcSync(false);
+  await load(); if (quiet) return L.length; render(); toast(`${L.length} shift${L.length === 1 ? "" : "s"} filled with 0 m and Not working.`);
+  if (fbUser && navigator.onLine) fcSync(false); return L.length;
 }
 function missingView() {
   const S = monthStats(month), days = daysOf(S.from, S.end), t = today();
@@ -575,19 +576,59 @@ async function fcPullDocs(from, to) {
   });
   return add.length;
 }
+/* the same shift changed on two devices before either had signal: both versions wait for an admin to pick the right one */
+let conflicts = [];
+const vKey = v => JSON.stringify([v.supervisor || "", v.report || "", Object.keys(v.rigs || {}).sort().map(r => { const g = v.rigs[r] || {};
+  return [r, g.status || "", r1(num(g.metres)), String(g.block || "").trim(), String(g.problem || "").trim(), g.hrsFrom || "", g.hrsTo || "", (g.delays || []).map(d => [d.cat || "", d.h == null ? null : Math.round(+d.h * 100) / 100, String(d.text || "").trim()])]; })]);
+const verOf = (x, by, device, at) => ({ supervisor: x.supervisor || "", report: x.report || "", rigs: x.rigs || {}, by: by || "", device: device || "", editedAt: at || 0 });
+async function loadConflicts() { const { db, collection, getDocs, query, where } = fb;
+  conflicts = (await getDocs(query(collection(db, "fcSettings"), where("ev_kind", "==", "conflict")))).docs.map(d => ({ id: d.id, ...d.data() })); }
+async function raiseConflict(loc, rem, remBy, remDevice, t) {
+  const { db, doc, setDoc } = fb, id = `cf_${loc.date}_${loc.shift}`;
+  await setDoc(doc(db, "fcSettings", id), { ev_kind: "conflict", ev_date: loc.date, date: loc.date, shift: loc.shift, status: "pending", createdAt: Date.now(),
+    a: verOf(loc, fbUser?.email, cfg.device || "this device", loc.editedAt), b: verOf(rem, remBy, remDevice, t) });
+  await tx(["shifts"], "readwrite", tt => { tt.objectStore("shifts").put({ ...loc, conflict: 1 }); });
+}
 async function fcPull(from, to) {
   const { db, collection, getDocs, query, where } = fb;
   const snap = await getDocs(query(collection(db, "fcMetres"), where("date", ">=", from), where("date", "<=", to)));
   const by = new Map(); snap.docs.forEach(d => { const x = { id: d.id, ...d.data() }; const k = x.date + "|" + (x.shift || "Day"); (by.get(k) || by.set(k, []).get(k)).push(x); });
+  try { await loadConflicts(); } catch (e) { console.warn(e); }
   let n = 0;
   for (const [k, L] of by) { const loc = shifts.find(s => s.id === k), t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
     const remFill = L.every(x => x.filled), real = L.filter(x => !x.filled);
     if (loc && remFill && !loc.filled) continue;                                   // a real capture here is never replaced by a "0 m · Not working" fill
-    if (loc && !(loc.filled && real.length) && ((loc.fcAt || 0) >= t || (loc.editedAt || 0) >= t)) continue;   // otherwise the newest change wins
+    const unsent = loc && !loc.filled && (!loc.fcAt || loc.editedAt > loc.fcAt), cf = conflicts.find(c => c.date === loc?.date && c.shift === loc?.shift);
+    if (fcAdmin() && unsent && real.length && t > (loc.fcAt || 0)) {                          // changed here and changed somewhere else since this device last synced
+      const done = cf && cf.status === "resolved" && (cf.resolvedAt || 0) >= (loc.editedAt || 0) && t >= (cf.resolvedAt || 0);   // an admin already picked, and the pick is on the server
+      if (!done) { const rem = fromForecast(real);
+        if (vKey(rem) === vKey(loc)) { await tx(["shifts"], "readwrite", tt => { tt.objectStore("shifts").put({ ...loc, fcAt: Math.max(t, loc.editedAt), conflict: 0 }); }); continue; }
+        if (!loc.conflict || !cf || cf.status !== "pending" || t > (cf.b?.editedAt || 0) || (loc.editedAt || 0) > (cf.a?.editedAt || 0)) await raiseConflict(loc, rem, real.map(x => x.by).find(Boolean), real.map(x => x.device).find(Boolean), t);
+        continue; }
+    } else if (loc && !(loc.filled && real.length) && ((loc.fcAt || 0) >= t || (loc.editedAt || 0) >= t)) continue;   // otherwise the newest change wins
     const s = fromForecast(remFill ? L : real); if (!Object.keys(s.rigs).length) continue; if (remFill) s.filled = 1;
     if (loc) s.savedAt = loc.savedAt;
     await tx(["shifts"], "readwrite", tt => { tt.objectStore("shifts").put(s); }); n++; }
+  try { await loadConflicts(); } catch (e) { console.warn(e); }
   return n;
+}
+async function resolveConflict(id, pick) {
+  const c = conflicts.find(x => x.id === id); if (!c) return; const v = c[pick], now = Date.now(), sid = c.date + "|" + c.shift, old = shifts.find(x => x.id === sid);
+  const rec = { id: sid, date: c.date, shift: c.shift, supervisor: v.supervisor || "", report: v.report || "", rigs: v.rigs || {}, savedAt: old?.savedAt || now, editedAt: now, device: cfg.device || "", conflict: 0 };
+  await tx(["shifts"], "readwrite", tt => { tt.objectStore("shifts").put(rec); });
+  await fire(); const { db, doc, setDoc } = fb;
+  await setDoc(doc(db, "fcSettings", id), { status: "resolved", chosen: pick, resolvedAt: now, resolvedBy: fbUser?.email || "" }, { merge: true });
+  c.status = "resolved"; await load(); await fcPush(); await load(); render(); toast(`${fmt(c.date)} ${c.shift}: kept ${v.by || "that"} version. Every device gets it.`);
+}
+function conflictCard() {
+  const P = conflicts.filter(c => c.status === "pending"); if (!P.length || !fcAdmin()) return "";
+  const side = (c, k) => { const v = c[k] || {}, R = Object.keys(v.rigs || {}).sort();
+    return `<div class="card" style="flex:1 1 280px;margin:0"><b>${esc(v.by || "Unknown")}</b><small class="muted"> · ${esc(v.device || "")} · saved ${v.editedAt ? when(v.editedAt) : ""}</small>
+      ${v.supervisor ? `<div class="muted">Supervisor: ${esc(v.supervisor)}</div>` : ""}
+      ${R.map(r => { const g = v.rigs[r] || {}; return `<div style="margin-top:6px"><b>${esc(r)}</b>: ${M1(num(g.metres))} m · ${esc(g.status || "no status")}${g.block ? " · block " + esc(g.block) : ""}${(g.delays || []).length ? `<br><small>${g.delays.map(d => esc((d.text || d.cat) + (d.h != null ? " (" + hm(d.h) + ")" : ""))).join(" · ")}</small>` : ""}${g.problem ? `<br><small>Problem: ${esc(g.problem)}</small>` : ""}</div>`; }).join("") || '<div class="muted">No rigs filled in</div>'}
+      <button class="primary" style="margin-top:10px;width:100%" data-cfkeep="${esc(c.id)}|${k}">Keep this one</button></div>`; };
+  return `<section class="card" style="border:2px solid var(--bad)"><h2 style="color:var(--bad)">Pending · ${P.length} shift${P.length === 1 ? "" : "s"} changed on two devices</h2><p class="muted" style="margin-top:0">The same shift was changed on two devices before they had signal. Nothing is overwritten until you pick the correct one.</p>
+    ${P.map(c => `<div style="margin-top:12px"><b>${dow(c.date)} ${fmt(c.date)} · ${c.shift} shift</b><div class="row" style="align-items:stretch;gap:10px;margin-top:6px">${side(c, "a")}${side(c, "b")}</div></div>`).join("")}</section>`;
 }
 const shrinkData = async (blob) => { let q = 0.7; let r = await shrink(blob, 1400, q); while (r.data.length > 900000 && q > 0.35) { q -= 0.1; r = await shrink(blob, 1400, q); } return r.data; };
 async function fcIndexDay(date) {
@@ -605,7 +646,7 @@ async function fcPush(say) {
   // shifts deleted on this device
   for (const g of (await metaGet("fcDel")) || []) { for (const x of await getDay(g.date)) if ((x.shift || "Day") === g.shift && cfg.rigs.includes(x.rig)) await deleteDoc(doc(db, "fcMetres", x.id)); }
   await metaSet("fcDel", []);
-  for (const s of shifts.filter(s => s.date >= FC_FROM && (!s.fcAt || s.editedAt > s.fcAt))) {
+  for (const s of shifts.filter(s => s.date >= FC_FROM && !s.conflict && (!s.fcAt || s.editedAt > s.fcAt))) {
     say?.(`Sending shifts to GET Forecast… ${++ns}`);
     const R = await getDay(s.date);
     if (s.filled && R.some(x => (x.shift || "Day") === s.shift && !x.filled)) continue;   // someone captured this shift for real: keep theirs, it comes in on the next check
@@ -614,7 +655,7 @@ async function fcPush(say) {
       if (!g) { if (R.some(x => x.id === mine)) await deleteDoc(doc(db, "fcMetres", mine)); continue; }
       const dt = delayText(g), note = (g.status || "") + (dt ? " – " + dt : "");
       await setDoc(doc(db, "fcMetres", mine), { date: s.date, shift: s.shift, rig: r, metres: num(g.metres), block: g.block || "", supervisor: s.supervisor || "", status: g.status || "", problem: g.problem || "", delays: g.delays, note,
-        hrsFrom: g.hrsFrom || "", hrsTo: g.hrsTo || "", report: s.report || "", by: me, src: "metres", filled: s.filled ? 1 : 0, createdAt: s.savedAt || Date.now(), editedAt: s.editedAt || Date.now() }); }
+        hrsFrom: g.hrsFrom || "", hrsTo: g.hrsTo || "", report: s.report || "", by: me, src: "metres", device: cfg.device || "", filled: s.filled ? 1 : 0, createdAt: s.savedAt || Date.now(), editedAt: s.editedAt || Date.now() }); }
     await tx(["shifts"], "readwrite", t => { t.objectStore("shifts").put({ ...s, fcAt: s.editedAt }); });
   }
   // documents removed on this device
@@ -642,10 +683,12 @@ async function fcSync(manual, say) {
   try {
     const t = today(), m0 = (month < t.slice(0, 7) ? month : t.slice(0, 7)) + "-01", from = m0 < FC_FROM ? FC_FROM : m0;
     const pulled = await fcPull(from, t); try { await fcPullDocs("2026-10-01", t); } catch (e) { console.warn(e); } await load(); await linkCtrl();
+    if (fcAdmin() && !(await metaGet("autofill-2026-11"))) { const n = await fillEmpty("2026-11", true); await metaSet("autofill-2026-11", Date.now()); if (n) toast(`November: ${n} empty shifts set to 0 m · Not working.`); }
     if (fcAdmin()) { await fcPush(x => { fcMsg = x; const el = $("fcMsg"); if (el) el.textContent = x; }); await load(); }
     fcLast = Date.now(); await metaSet("fcLast", fcLast);
     fcMsg = `Up to date with GET Forecast (${when(fcLast)})${pulled ? ` · ${pulled} shift${pulled === 1 ? "" : "s"} brought in` : ""}.`;
     if (manual) toast(fcAdmin() ? "GET Forecast is up to date." : `Brought in ${pulled} shifts. Only an admin can send shifts to GET Forecast.`);
+    const pend = conflicts.filter(c => c.status === "pending").length; if (pend && fcAdmin()) { toast(`${pend} shift${pend === 1 ? "" : "s"} pending: changed on two devices. Pick the correct one on the Metres page.`); fcMsg += ` ${pend} pending.`; }
   } catch (e) { console.warn(e); fcMsg = e?.code === "permission-denied" ? "This account can't change GET Forecast. Sign in as an admin." : "Couldn't reach GET Forecast. It tries again when there is signal."; if (manual) toast(fcMsg); }
   fcBusy = false; render();
 }
@@ -730,6 +773,7 @@ app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.tab) { tab = b.dataset.tab; render(); scrollTo(0, 0); return; }
   if (b.dataset.mnav) { month = shiftMonth(month, +b.dataset.mnav); render(); return; }
+  if (b.dataset.cfkeep) { const [id, k] = b.dataset.cfkeep.split("|"); if (!confirm("Keep this version for the shift? The other one is replaced on every device.")) return; b.disabled = true; try { await resolveConflict(id, k); } catch (x) { console.warn(x); toast("It didn't save. Try again with signal."); b.disabled = false; } return; }
   if (b.dataset.fillempty) { b.disabled = true; try { await fillEmpty(b.dataset.fillempty); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } b.disabled = false; return; }
   if (b.dataset.dayck) { $("dayck")?.remove(); const [d, sh] = b.dataset.dayck.split("|"); document.body.insertAdjacentHTML("beforeend", dayCheck(d, sh)); const ov = $("dayck");
     ov.addEventListener("click", ev => { const x = ev.target.closest("button"); if (ev.target === ov || x?.hasAttribute("data-ckx")) { ov.remove(); return; } if (x?.dataset.cap !== undefined) { ov.remove(); const v = x.dataset.cap; if (shifts.some(q => q.id === v)) openForm(v); else { const [d2, sh2] = v.split("|"); openForm(null, { date: d2, shift: sh2 }); } } }); return; }
