@@ -491,12 +491,13 @@ function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-
   h=dupPanel()+h;
   if(flagged.length)h='<div class="list" style="margin-bottom:14px"><h3>Marked resigned, absconded, dismissed or deceased this cycle ('+flagged.length+')</h3><p class="note" style="margin:0 0 8px">These people are still on the register. Remove them to take them off the marking list.</p><ul>'+
     flagged.map(f=>'<li>'+esc(f.x.name)+' <span class="note">'+esc(f.x.sheet)+' · '+esc(f.code)+' from '+short(f.d)+'</span> <button class="btn sm" data-remove="'+esc(f.x.id)+'" data-reason="'+esc(f.code)+'" data-last="'+addDays(f.d,-1)+'">Remove</button></li>').join("")+'</ul></div>'+h;
-  if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Update from the register Excel</h3><p class="note" style="margin:0 0 8px">Pick the register (one tab per sheet: rompad, support fleet, shared services, drilling, intern). The app puts everyone in the shift group they are under (SHIFT A, SHIFT B …), sets each group\'s DAY / NIGHT / OFF rota from the group row, and copies the marks for every date in the file. Anyone not yet on the register is added. Empty cells in the Excel do not clear marks in the app.</p><button class="btn gold" id="impReg">Choose register Excel</button><input type="file" id="regFile" accept=".xlsx,.xls,.xlsb" hidden><p class="note" id="regMsg" role="status">'+esc(regNote)+'</p></div>';
+  if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Update from the register Excel</h3><p class="note" style="margin:0 0 8px">Pick the register (one tab per sheet: rompad, support fleet, shared services, drilling, intern). The app puts everyone in the shift group they are under (SHIFT A, SHIFT B …), sets each group\'s DAY / NIGHT / OFF rota from the group row, and copies the marks for every date in the file. Anyone not yet on the register is added. Empty cells in the Excel do not clear marks in the app.</p><button class="btn gold" id="impReg">Choose register Excel</button> <button class="btn" id="impOld">Import old timesheets (marks only)</button><input type="file" id="regFile" accept=".xlsx,.xls,.xlsb" hidden><input type="file" id="oldFile" accept=".xlsx,.xls,.xlsb" hidden><br><span class="note">Old timesheets: only the marks are copied. Shift groups and the current register stay as they are; people who are no longer on the register are kept as removed, so past reports include them.</span><p class="note" id="regMsg" role="status">'+esc(regNote)+'</p></div>';
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Add employees from Excel</h3><p class="note" style="margin:0 0 8px">Pick an Excel list with the columns Employee, Number, Job Title and Department. People already on the register (same employee number) are skipped. Department decides the sheet: Rompad, Drilling and Shared Services go to their own sheet; Buses, Water Bowsers, Low Beds and TLB go to Support Fleet; Corporate goes to Shared Services. Each department becomes a shift group.</p><button class="btn gold" id="impEmps">Choose Excel file</button><input type="file" id="impFile" accept=".xlsx,.xls,.xlsb,.csv" hidden><p class="note" id="impMsg" role="status">'+esc(impNote)+'</p></div>';
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Import overtime from Excel</h3><p class="note" style="margin:0 0 8px">Pick the overtime report (columns: Name and Surname, Standby / Unplanned, Date, Payable Hours on Time Sheet). Each line puts the payable hours as overtime on that person\'s day, in whatever month the date falls. Lines with no hours (for example "no clockings") are skipped and listed. Importing the same file again replaces those days, it does not add them twice.</p><button class="btn gold" id="impOt">Choose overtime Excel</button><input type="file" id="otFile" accept=".xlsx,.xls,.xlsb,.csv" hidden><p class="note" id="otMsg" role="status" style="white-space:pre-line">'+esc(otNote)+'</p></div>';
   if(isAdmin()&&(S.emps||[]).length)h+='<div class="list" style="margin-top:18px"><h3>Remove all employees</h3><p class="note" style="margin:0 0 8px">Clears the whole employee list ('+(S.emps||[]).length+' people, including removed ones) so you can add your own. A copy of the data file downloads first, so you can load it back under Users if you need it. Marks already saved are not deleted.</p><button class="btn" id="clearEmps" style="border-color:var(--bad);color:var(--bad)">Remove all employees</button></div>';
   main.innerHTML=h;
   const rb=$("impReg");if(rb){rb.onclick=()=>$("regFile").click();$("regFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importRegister(f)}}
+  const obt=$("impOld");if(obt){obt.onclick=()=>$("oldFile").click();$("oldFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importRegister(f,true)}}
   const ob=$("impOt");if(ob){ob.onclick=()=>$("otFile").click();$("otFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importOvertime(f)}}
   const ib=$("impEmps");if(ib){ib.onclick=()=>$("impFile").click();$("impFile").onchange=ev=>{const f=ev.target.files[0];ev.target.value="";if(f)importEmps(f)}}
   const ce=$("clearEmps");if(ce)ce.onclick=async()=>{const n=(S.emps||[]).length;
@@ -539,7 +540,7 @@ function parseRegister(wb){const out=[];
       const marks={};(dateCols||[]).forEach(([i,dt])=>{const v=markVal(r[i]);if(v)marks[dt]=v});
       out.push({kind:"emp",sheet,section,shift,gid:gkey,name:b,number:c,dept:d,title:e,marks,row:order++})})});
   return out}
-async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");if(m)m.textContent=t};say("Reading "+file.name+"…");
+async function importRegister(file,old){const say=t=>{regNote=t;const m=$("regMsg");if(m)m.textContent=t};say("Reading "+file.name+"…");
   try{if(!window.XLSX)throw new Error("The Excel reader has not loaded yet. Try again.");
     const items=parseRegister(XLSX.read(await file.arrayBuffer(),{type:"array"}));const emps=items.filter(x=>x.kind==="emp");
     if(!emps.length){say("No employees found. Check that the tabs are named rompad, support fleet, shared services, drilling and intern.");return}
@@ -548,12 +549,22 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
     const used=new Set(),added=[],moved=[],stillOff=[],marks={},rotaGroups={};let nMarks=0,seq=0;
     items.filter(x=>x.kind==="group"&&x.rota).forEach(g=>{rotaGroups[g.gid]={sheet:g.sheet,section:g.section,shift:g.shift,rota:g.rota}});
     const sheetBase=sh=>(SHEETS.indexOf(sh)+1)*10000;
-    for(const r of emps){const n=r.number.toUpperCase();let x=(n&&byNum[n]&&byNum[n].length===1?byNum[n][0]:null)||((byName[normName(r.name)]||[]).find(y=>!used.has(y.id))||null);
-      if(x&&used.has(x.id))x=null;
+    for(const r of emps){const n=r.number.toUpperCase();let x=(n&&byNum[n]&&byNum[n].length===1?byNum[n][0]:null)||((byName[normName(r.name)]||[]).find(y=>old||!used.has(y.id))||null);
+      if(x&&used.has(x.id)&&!old)x=null;
       if(!x){const sur=normName(r.name).split(",")[0],first=(normName(r.name).split(",")[1]||"").split(" ")[0];
-        const c=list.filter(y=>!used.has(y.id)&&normName(y.name).split(",")[0]===sur&&((n&&String(y.number||"").toUpperCase().startsWith(n))||(first.length>=3&&(normName(y.name).split(",")[1]||"").startsWith(first.slice(0,4)))));
+        const c=list.filter(y=>(old||!used.has(y.id))&&normName(y.name).split(",")[0]===sur&&((n&&String(y.number||"").toUpperCase().startsWith(n))||(first.length>=3&&(normName(y.name).split(",")[1]||"").startsWith(first.slice(0,4)))));
         if(c.length===1)x=c[0]}
       const g={sheet:r.sheet,group:r.gid,section:r.section,shift:r.shift,order:sheetBase(r.sheet)+(seq++)};
+      if(old){   // old timesheet: copy the marks only
+        if(!x){const ds=Object.keys(r.marks).sort(),res=ds.find(d=>r.marks[d]==="RESIGNED"),last=ds.filter(d=>r.marks[d]!=="RESIGNED").pop()||ds[0]||"";
+          x=Object.assign({id:(r.number||r.name).replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"")+"-"+Date.now().toString(36)+seq,active:false,historic:true,name:r.name,number:r.number,dept:r.dept,title:r.title,
+            leftDate:res||(last?addDays(last,1):""),leftReason:res?"Resigned":"Not on the current register (old timesheet)"},g,{order:900000+seq});list.push(x);added.push(r.name);
+          byName[normName(r.name)]=[x];if(r.number)byNum[r.number.toUpperCase()]=[x]}
+        else if(x.historic&&!x.active){const ds=Object.keys(r.marks).sort(),res=ds.find(d=>r.marks[d]==="RESIGNED"),last=ds.filter(d=>r.marks[d]!=="RESIGNED").pop();
+          const nl=res||(last?addDays(last,1):"");if(nl&&(!x.leftDate||nl>x.leftDate)&&!(x.leftReason==="Resigned"&&!res))x.leftDate=nl;if(res)x.leftReason="Resigned"}
+        used.add(x.id);const sid=SHEET_ID[x.sheet]||SHEET_ID[r.sheet];
+        for(const dt in r.marks){if(x.active===false&&x.leftDate&&dt>=x.leftDate&&!x.historic)continue;const m=dt.slice(0,7);((marks[m]=marks[m]||{})[sid]=marks[m][sid]||{sheet:x.sheet||r.sheet,month:m,marks:{}}).marks[x.id]=Object.assign(marks[m][sid].marks[x.id]||{},{[dt]:r.marks[dt]});nMarks++}
+        continue}
       if(x&&x.active===false){   // removed people stay removed even if the Excel still lists them; only their marks from before they left are copied
         stillOff.push(x.name);used.add(x.id);const sid=SHEET_ID[x.sheet]||SHEET_ID[r.sheet];
         for(const dt in r.marks){if(x.leftDate&&dt>=x.leftDate)continue;const m=dt.slice(0,7);((marks[m]=marks[m]||{})[sid]=marks[m][sid]||{sheet:x.sheet||r.sheet,month:m,marks:{}}).marks[x.id]=Object.assign(marks[m][sid].marks[x.id]||{},{[dt]:r.marks[dt]});nMarks++}
@@ -562,6 +573,11 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
       else{x=Object.assign({id:(r.number||r.name).replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"")+"-"+Date.now().toString(36)+seq,active:true,name:r.name,number:r.number,dept:r.dept,title:r.title},g);list.push(x);added.push(r.name)}
       used.add(x.id);
       for(const dt in r.marks){const m=dt.slice(0,7),sid=SHEET_ID[r.sheet];((marks[m]=marks[m]||{})[sid]=marks[m][sid]||{sheet:r.sheet,month:m,marks:{}}).marks[x.id]=Object.assign(marks[m][sid].marks[x.id]||{},{[dt]:r.marks[dt]});nMarks++}}
+    if(old){const ds=emps.flatMap(e=>Object.keys(e.marks)).sort();
+      if(!confirm("Copy the marks from "+file.name+"?\n\n"+nMarks+" marks from "+(ds[0]?fmtD(ds[0]):"")+" to "+(ds.length?fmtD(ds.at(-1)):"")+" for "+used.size+" employees."+(added.length?"\n"+added.length+" people are no longer on the register: they are kept as removed so the reports for those dates include them.":"")+"\n\nShift groups and the current register do not change."))return say("Not imported.");
+      say("Saving…");await saveEmps(list);
+      for(const m in marks)for(const sid in marks[m]){const d=marks[m][sid];await S.db.doc("months/"+m+"/sheets/"+sid).update({sheet:d.sheet,month:m,marks:d.marks,updatedBy:email,updatedAt:Date.now()})}
+      say("Done: "+nMarks+" marks copied for "+used.size+" employees"+(added.length?"; "+added.length+" people who are no longer on the register kept as removed ("+added.join(", ")+")":"")+".");toast("Old timesheets imported");return}
     const notIn=list.filter(x=>x.active!==false&&!used.has(x.id));notIn.forEach(x=>{x.order=900000+(x.order||0)});
     const dates=Object.values(rotaGroups).flatMap(g=>Object.keys(g.rota)).sort();
     if(!confirm("Update TKR Attendance from "+file.name+"?\n\n"+used.size+" employees in "+new Set(emps.map(x=>x.gid)).size+" shift groups ("+added.length+" new, "+moved.length+" moved to a new group)"+(stillOff.length?"\n"+stillOff.length+" removed employees are still in the Excel and stay removed":"")+"\n"+nMarks+" marks"+(dates.length?"\nRotas for "+short(dates[0])+" – "+short(dates.at(-1)):"")))return say("Nothing changed.");
