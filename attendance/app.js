@@ -452,6 +452,30 @@ function viewGroups(){const gs=allGroups().filter(g=>S.sheet==="All"||g.sheet===
   main.querySelectorAll("[data-gmove]").forEach(sel=>sel.onchange=()=>{const to=allGroups().find(x=>x.id===sel.value);if(!to)return;const list=(S.emps||[]).slice();const x=list.find(y=>y.id===sel.dataset.gmove);
     const order=orderFor(to.id,to.sheet,list,x.id);saveEmps(list.map(y=>y.id===x.id?Object.assign({},y,{group:to.id,section:to.section,shift:to.shift,order}):y)).then(()=>toast(x.name+" moved to "+gName(to)))});
 }
+/* duplicate employees: same employee number, or the same name (words in any order, ignoring commas and spaces) */
+const dupKey=n=>String(n||"").toLowerCase().replace(/[^a-z\s,]/g,"").split(/[\s,]+/).filter(Boolean).sort().join(" ");
+function dupGroups(){const A=activeEmps(),par=new Map(A.map(e=>[e.id,e.id])),f=x=>{while(par.get(x)!==x)x=par.get(x);return x},u=(a,b)=>par.set(f(a),f(b));
+  const by=(k,e)=>{if(!k)return;const o=by.m.get(k);if(o)u(e.id,o);else by.m.set(k,e.id)};by.m=new Map();
+  A.forEach(e=>{const n=String(e.number||"").trim().toUpperCase();if(n)by("#"+n,e)});A.forEach(e=>by("n:"+dupKey(e.name),e));
+  const G=new Map();A.forEach(e=>{const r=f(e.id);(G.get(r)||G.set(r,[]).get(r)).push(e)});return [...G.values()].filter(g=>g.length>1)}
+function marksCount(e){let n=0;for(const m in S.mm){const sd=(S.mm[m]||{})[SHEET_ID[e.sheet]];n+=Object.values(((sd||{}).marks||{})[e.id]||{}).filter(Boolean).length}return n}
+function dupPanel(){const G=dupGroups();if(!G.length)return "";
+  return '<div class="list" style="margin-bottom:14px;border:2px solid var(--bad,#b3402f)"><h3>Possible duplicates ('+G.length+')</h3><p class="note" style="margin:0 0 8px">The same person is on the register more than once (same employee number or same name). Press <b>Keep this one</b> on the correct entry: the other entries are taken off, and any days marked on them are moved onto the one you keep where it has no mark. They do not show as removed in History.</p>'+
+    G.map(g=>'<div style="margin:10px 0"><table class="tbl"><thead><tr><th>Employee</th><th>Number</th><th>Sheet · group</th><th>Job title</th><th>Days marked</th><th></th></tr></thead><tbody>'+g.map(e=>'<tr><td><b>'+esc(e.name)+'</b></td><td>'+esc(e.number||"")+'</td><td>'+esc(e.sheet+" · "+groupLabel(e))+'</td><td>'+esc(e.title||"")+'</td><td>'+marksCount(e)+'</td><td>'+(S.canWrite?'<button class="btn sm gold" data-keepdup="'+esc(e.id)+'" data-dups="'+esc(g.map(x=>x.id).join(","))+'">Keep this one</button>':"")+'</td></tr>').join("")+'</tbody></table></div>').join("")+'</div>'}
+async function keepDup(keepId,ids){if(!S.canWrite){toast("You can view this register but not change it.");return}
+  const L=S.emps||[],keep=L.find(e=>e.id===keepId),drop=L.filter(e=>ids.includes(e.id)&&e.id!==keepId);if(!keep||!drop.length)return;
+  if(!confirm("Keep "+keep.name+" ("+keep.sheet+(keep.number?", "+keep.number:"")+") and take off "+drop.length+" duplicate"+(drop.length>1?"s":"")+"?\nDays marked on the duplicate are moved onto the one you keep where it has no mark."))return;
+  toast("Merging…");const from=addDays(iso(new Date()),-400),to=addDays(iso(new Date()),60);try{await loadRange(from,to)}catch(e){console.warn(e)}
+  let moved=0;const kid=SHEET_ID[keep.sheet];
+  for(const m in S.mm){const mo=S.mm[m]||{},patch={marks:{},ot:{},ottype:{}};
+    for(const d of drop){const sd=mo[SHEET_ID[d.sheet]]||{};for(const f of ["marks","ot","ottype"]){const src=(sd[f]||{})[d.id]||{},have=((mo[kid]||{})[f]||{})[keep.id]||{};
+      for(const day in src){if(src[day]!==""&&src[day]!=null&&(have[day]===undefined||have[day]===""||have[day]===null)&&patch[f][day]===undefined){patch[f][day]=src[day];if(f==="marks")moved++}}}}
+    const up={};for(const f of ["marks","ot","ottype"])if(Object.keys(patch[f]).length)up[f]={[keep.id]:patch[f]};
+    if(Object.keys(up).length){const sdk=mo[kid]=mo[kid]||{marks:{},ot:{},ottype:{}};for(const f in up){sdk[f]=sdk[f]||{};sdk[f][keep.id]=Object.assign({},sdk[f][keep.id]||{},up[f][keep.id])}
+      try{await S.db.doc("months/"+m+"/sheets/"+kid).update(Object.assign({sheet:keep.sheet,month:m,updatedBy:email,updatedAt:Date.now()},up))}catch(e){toast("Not saved: "+(e.message||"try again"));return}}}
+  const aliases=[...new Set((keep.aliases||[]).concat(drop.map(d=>d.name)).filter(n=>n&&n!==keep.name))],nums=[...new Set((keep.altNumbers||[]).concat(drop.map(d=>d.number)).filter(n=>n&&n!==keep.number))];
+  const list=L.filter(e=>!drop.some(d=>d.id===e.id)).map(e=>e.id===keep.id?Object.assign({},e,{aliases,altNumbers:nums,number:e.number||nums[0]||"",title:e.title||drop.map(d=>d.title).find(Boolean)||"",dept:e.dept||drop.map(d=>d.dept).find(Boolean)||""}):e);
+  await saveEmps(list);toast(drop.length+" duplicate"+(drop.length>1?"s":"")+" taken off"+(moved?", "+moved+" marked days moved onto "+keep.name:"")+".")}
 function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-SHEETS.indexOf(b.sheet)||a.order-b.order);const e=editing||{};
   const groups=allGroups().map(g=>({group:g.id,sheet:g.sheet,section:g.section,shift:g.shift}));
   let h='<form class="form" id="empForm"><label>Sheet<select id="f-sheet" required>'+SHEETS.map(s=>'<option'+(e.sheet===s?" selected":"")+'>'+esc(s)+'</option>').join("")+'</select></label>'+
@@ -464,6 +488,7 @@ function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-
    list.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.number)+'</td><td>'+esc(x.sheet+" · "+groupLabel(x))+'</td><td>'+esc(x.title)+'</td><td><button class="btn sm" data-edit="'+esc(x.id)+'">Edit</button> <button class="btn sm" data-remove="'+esc(x.id)+'">Remove</button></td></tr>').join("")+'</tbody></table></div>';
   h+='<p class="note">Removing takes the person off the register after their last working day. Their days up to then stay in the reports and Excel downloads.</p>';
   const c=cycleOf(S.date);const flagged=activeEmps().map(x=>{const d=c.dates.find(d=>["RESIGNED","ABSCONDED","DISMISSED","DECEASED"].includes(rawMark(x,d)));return d?{x,d,code:rawMark(x,d)}:null}).filter(Boolean);
+  h=dupPanel()+h;
   if(flagged.length)h='<div class="list" style="margin-bottom:14px"><h3>Marked resigned, absconded, dismissed or deceased this cycle ('+flagged.length+')</h3><p class="note" style="margin:0 0 8px">These people are still on the register. Remove them to take them off the marking list.</p><ul>'+
     flagged.map(f=>'<li>'+esc(f.x.name)+' <span class="note">'+esc(f.x.sheet)+' · '+esc(f.code)+' from '+short(f.d)+'</span> <button class="btn sm" data-remove="'+esc(f.x.id)+'" data-reason="'+esc(f.code)+'" data-last="'+addDays(f.d,-1)+'">Remove</button></li>').join("")+'</ul></div>'+h;
   if(S.canWrite)h+='<div class="list" style="margin-top:18px"><h3>Update from the register Excel</h3><p class="note" style="margin:0 0 8px">Pick the register (one tab per sheet: rompad, support fleet, shared services, drilling, intern). The app puts everyone in the shift group they are under (SHIFT A, SHIFT B …), sets each group\'s DAY / NIGHT / OFF rota from the group row, and copies the marks for every date in the file. Anyone not yet on the register is added. Empty cells in the Excel do not clear marks in the app.</p><button class="btn gold" id="impReg">Choose register Excel</button><input type="file" id="regFile" accept=".xlsx,.xls,.xlsb" hidden><p class="note" id="regMsg" role="status">'+esc(regNote)+'</p></div>';
@@ -519,7 +544,7 @@ async function importRegister(file){const say=t=>{regNote=t;const m=$("regMsg");
     const items=parseRegister(XLSX.read(await file.arrayBuffer(),{type:"array"}));const emps=items.filter(x=>x.kind==="emp");
     if(!emps.length){say("No employees found. Check that the tabs are named rompad, support fleet, shared services, drilling and intern.");return}
     let list=(S.emps||[]).map(x=>Object.assign({},x));const byNum={},byName={};
-    list.forEach(x=>{const n=String(x.number||"").trim().toUpperCase();if(n)(byNum[n]=byNum[n]||[]).push(x);(byName[normName(x.name)]=byName[normName(x.name)]||[]).push(x)});
+    list.forEach(x=>{[x.number].concat(x.altNumbers||[]).forEach(v=>{const n=String(v||"").trim().toUpperCase();if(n)(byNum[n]=byNum[n]||[]).push(x)});[x.name].concat(x.aliases||[]).forEach(v=>(byName[normName(v)]=byName[normName(v)]||[]).push(x))});
     const used=new Set(),added=[],moved=[],stillOff=[],marks={},rotaGroups={};let nMarks=0,seq=0;
     items.filter(x=>x.kind==="group"&&x.rota).forEach(g=>{rotaGroups[g.gid]={sheet:g.sheet,section:g.section,shift:g.shift,rota:g.rota}});
     const sheetBase=sh=>(SHEETS.indexOf(sh)+1)*10000;
@@ -870,6 +895,7 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
     const es=filtered().filter(e=>e.group===t.dataset.fill&&!markOf(e,S.date));if(!es.length){toast("Everyone in this group is already marked");return}
     const by={};es.forEach(e=>{(by[e.sheet]=by[e.sheet]||{})[e.id]={[S.date]:t.dataset.val}});for(const sh in by)writeSheet(sh,by[sh]);toast(es.length+" marked "+t.dataset.val);return}
   if(t.dataset.edit){editing=(S.emps||[]).find(x=>x.id===t.dataset.edit);render();window.scrollTo({top:0});return}
+  if(t.dataset.keepdup){t.disabled=true;keepDup(t.dataset.keepdup,t.dataset.dups.split(",")).finally(()=>{t.disabled=false});return}
   if(t.dataset.remove){const x=(S.emps||[]).find(y=>y.id===t.dataset.remove);if(x)openRemove(x,t.dataset.reason,t.dataset.last);return}
   if(t.dataset.restore){const x=(S.emps||[]).find(y=>y.id===t.dataset.restore);const {leftDate,leftReason,...rest}=x;saveEmps(S.emps.map(y=>y.id===x.id?Object.assign(rest,{active:true}):y)).then(()=>toast(x.name+" is back on the register"));return}
   if(t.id==="cancelEdit"){editing=null;render();return}
