@@ -179,6 +179,18 @@ function registerView() {
       || `<tr><td colspan="${6 + R.length * 3}" class="muted">No shifts captured in ${monthName(month)}.</td></tr>`}
       ${L.length ? `<tr class="tot"><td>Total</td><td></td><td></td>${R.map(r => `<td class="num">${M1(S.rig(r))}</td><td></td><td></td>`).join("")}<td>All rigs: ${M1(S.metres)} m</td><td></td><td></td></tr>` : ""}</tbody></table></div>`;
 }
+/* shifts that are over and have nothing captured: filled with 0 m and Not working for every rig */
+const shiftOver = (d, sh) => Date.now() >= new Date(sh === "Day" ? d + "T18:00" : addDays(d, 1) + "T06:00").getTime();
+const emptyOver = m => daysOf(m + "-01", monthEnd(m)).flatMap(d => ["Day", "Night"].filter(sh => !shiftOf(d, sh) && shiftOver(d, sh)).map(sh => [d, sh]));
+async function fillEmpty(m) {
+  const L = emptyOver(m); if (!L.length) { toast("Every shift that is over is captured."); return; }
+  if (!confirm(`Fill ${L.length} empty shift${L.length === 1 ? "" : "s"} in ${monthName(m)} with 0 m and Not working for ${allRigs().join(", ")}? Shifts already captured stay as they are.`)) return;
+  const now = Date.now();
+  await tx(["shifts"], "readwrite", t => { for (const [d, sh] of L) t.objectStore("shifts").put({ id: d + "|" + sh, date: d, shift: sh, supervisor: "", report: "", savedAt: now, editedAt: now, device: cfg.device || "", filled: 1,
+    rigs: Object.fromEntries(allRigs().map(r => [r, { status: "Not working", metres: 0, block: "", hrsFrom: "", hrsTo: "", problem: "", delays: [] }])) }); });
+  await load(); render(); toast(`${L.length} shift${L.length === 1 ? "" : "s"} filled with 0 m and Not working.`);
+  if (fbUser && navigator.onLine) fcSync(false);
+}
 function missingView() {
   const S = monthStats(month), days = daysOf(S.from, S.end), t = today();
   const state = (d, sh) => { if (d > t) return "fut"; const s = shiftOf(d, sh); if (!s) return "miss"; return anyTally(s) && !needsTally(s).length ? "ok" : "part"; };
@@ -188,6 +200,7 @@ function missingView() {
   return pageHead("What's missing", monthName(month), "", "", `${S.expected} shifts this month (day and night, every day). Tap a box to see what is entered and what is not for that shift, and fill it in.`)
     + `<div class="mhead">${monthBar()}</div>`
     + `<div class="tiles">${tile("Shifts captured", `${S.L.length} of ${S.sofar}`, `so far · ${S.expected} in the month`, notCap.length ? "alert" : "good")}${tile("Not captured", String(notCap.length), "up to today", notCap.length ? "alert" : "good")}${tile("Without a tally sheet", String(noTally.length), "shifts with metres", noTally.length ? "alert" : "good")}${tile("Without a job card or checklist", String(noDocs.length), "working shifts", noDocs.length ? "alert" : "good")}</div>`
+    + (() => { const n = emptyOver(month).length; return n ? `<div class="row" style="margin:0 0 10px"><button class="primary" data-fillempty="${month}">Fill ${n} empty shift${n === 1 ? "" : "s"} with 0 m · Not working</button><span class="muted">Only shifts that are over and have nothing captured. Captured shifts stay as they are.</span></div>` : ""; })()
     + `<div class="legend2"><span><i style="background:var(--ok)"></i>Captured, tally sheet attached for every rig that drilled</span><span><i style="background:var(--gold)"></i>Captured, no tally sheet attached</span><span><i style="background:var(--bad)"></i>Not captured</span></div>`
     + `<div class="mgrid">${cells.map(c => `<button class="mcell ${c.st}" data-dayck="${c.d}|${c.sh}" ${c.st === "fut" ? "disabled" : ""}><b>${c.d.slice(8)}</b>${c.sh}</button>`).join("")}</div>`
     + `<div class="grid2c"><section class="card"><h2>Not captured (${notCap.length})</h2><div class="res miss-list">${notCap.slice().reverse().map(c => `<div class="ri"><div class="rt"><b>${dow(c.d)} ${fmt(c.d)} · ${c.sh} shift</b></div><button class="sm primary" data-cap="${c.d}|${c.sh}">Capture</button></div>`).join("") || '<p class="muted">Every shift up to today is captured.</p>'}</div></section>
@@ -714,6 +727,7 @@ app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.tab) { tab = b.dataset.tab; render(); scrollTo(0, 0); return; }
   if (b.dataset.mnav) { month = shiftMonth(month, +b.dataset.mnav); render(); return; }
+  if (b.dataset.fillempty) { b.disabled = true; try { await fillEmpty(b.dataset.fillempty); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } b.disabled = false; return; }
   if (b.dataset.dayck) { $("dayck")?.remove(); const [d, sh] = b.dataset.dayck.split("|"); document.body.insertAdjacentHTML("beforeend", dayCheck(d, sh)); const ov = $("dayck");
     ov.addEventListener("click", ev => { const x = ev.target.closest("button"); if (ev.target === ov || x?.hasAttribute("data-ckx")) { ov.remove(); return; } if (x?.dataset.cap !== undefined) { ov.remove(); const v = x.dataset.cap; if (shifts.some(q => q.id === v)) openForm(v); else { const [d2, sh2] = v.split("|"); openForm(null, { date: d2, shift: sh2 }); } } }); return; }
   if (b.dataset.cap !== undefined) { const v = b.dataset.cap; if (!v) openForm(null); else if (shifts.some(s => s.id === v)) openForm(v); else { const [d, sh] = v.split("|"); openForm(null, { date: d, shift: sh }); } return; }
