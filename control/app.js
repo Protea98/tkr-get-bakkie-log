@@ -213,6 +213,7 @@ function nowView() {
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`; }).join("")}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
+      ${sheet("delays", `Delay summary · ${monthName(today().slice(0, 7))}`, delaySummary(today().slice(0, 7)), { icon: icon("bd"), sub: "lost time per machine and per cause this month" })}
       ${sheet("checks", "Data and documents checklist", checklist(today()), { icon: icon("docs"), sub: `${chkDone(today())} of ${CHECK.flatMap(([, i]) => i).length * COLS.length} ticked today` })}
       ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>` + workbookSection();
 }
@@ -238,7 +239,35 @@ function availView() {
       return `<section class="card"><h2>${esc(g)}</h2><div class="tbl"><table class="avt"><thead><tr><th>Machine</th><th>Available h</th><th>Breakdown h</th><th>Planned maint. h</th><th>Standby h</th><th>Not in use h</th><th>Availability</th></tr></thead><tbody>
         ${rows.map(([m, s]) => `<tr><td><b>${esc(m)}</b></td>${s ? `<td class="num">${h2(s.avail)}</td><td class="num ${s.BD ? "hot" : ""}">${h2(s.BD)}</td><td class="num">${h2(s.PM)}</td><td class="num">${h2(s.SB)}</td><td class="num">${h2(s.NU)}</td><td class="num pct">${pc(s.pct)}</td>` : '<td colspan="6" class="muted">not started</td>'}</tr>`).join("")}
         <tr class="tot"><td>Total</td><td class="num">${h2(tot.avail || 0)}</td><td class="num">${h2(tot.BD || 0)}</td><td class="num">${h2(tot.PM || 0)}</td><td class="num">${h2(tot.SB || 0)}</td><td class="num">${h2(tot.NU || 0)}</td><td class="num pct">${pc((tot.avail || 0) + (tot.down || 0) ? tot.avail / (tot.avail + tot.down) : null)}</td></tr></tbody></table></div></section>`; }).join("")
+    + delaySummary(d.slice(0, 7))
     + `<div class="openers">${sheet("month", `Month: ${monthName(d.slice(0, 7))}`, monthGrid(d.slice(0, 7)), { icon: icon("shifts"), sub: "available hours per machine per day, with month totals" })}</div>`;
+}
+/* delay summary for the month, per machine and per cause (like the Delay summary sheet in the metres workbook) */
+const CAUSES = [["Waiting for GET / drill bits", /\bget\b|\bbits?\b|drill bit/], ["Stuck rods / retrieving rods", /stuck|retriev|recover/], ["Service and maintenance", /service|maint|250\s*hr|weekly|daily/],
+  ["Tyres", /tyre|tire|puncture|flat/], ["Engine", /engine|overheat|starter|stater|battery|alternator/], ["Hydraulics", /hydr|hose|pipe|burst|leak|oil|cylinder/], ["Electrical", /electric|wiring|fuse|light|radio|power|sensor/],
+  ["Brakes and steering", /brake|steer/], ["Compressor", /compressor|air/], ["Diesel / refuelling", /diesel|refuel|refill|fuel/], ["Waiting for parts or mechanic", /waiting|parts|spares|mechanic|fitter|boilermaker/],
+  ["Tramming", /tram/], ["Blasting", /blast/], ["No operator", /operator|driver/]];
+function causeOf(e) { const t = String(e.reason || "").toLowerCase().trim(); if (e.type === "PM" && !t) return "Planned maintenance"; if (!t) return "No reason written";
+  for (const [n, rx] of CAUSES) if (rx.test(t)) return n; return e.reason.trim().replace(/^./, c => c.toUpperCase()); }
+function delaySummary(m) {
+  const a = toMs(m + "-01T06:00"), b = Math.min(toMs(addDays(monthEnd(m), 1) + "T06:00"), Date.now()), ALL = fleet().flatMap(([, L]) => L);
+  const days = []; for (let x = m + "-01"; x <= monthEnd(m) && x <= today(); x = addDays(x, 1)) days.push(x);
+  const per = ALL.map(mc => { const t = days.reduce((o, x) => { const z = daySum(mc, x); if (z) for (const k of ["avail", "BD", "PM", "down"]) o[k] += z[k]; return o; }, { avail: 0, BD: 0, PM: 0, down: 0 });
+    const E = evs().filter(e => e.machine === mc && (e.type === "BD" || e.type === "PM") && toMs(e.start) < b && evEnd(e) > a);
+    return { mc, g: groupOf(mc), ...t, nBD: E.filter(e => e.type === "BD").length, nPM: E.filter(e => e.type === "PM").length }; });
+  const lines = evs().filter(e => (e.type === "BD" || e.type === "PM") && toMs(e.start) < b && evEnd(e) > a).map(e => ({ e, h: (Math.min(evEnd(e), b) - Math.max(toMs(e.start), a)) / 36e5, cause: causeOf(e) }))
+    .sort((x, y) => toMs(x.e.start) - toMs(y.e.start));
+  const C = new Map(); for (const l of lines) { const c = C.get(l.cause) || { cause: l.cause, h: 0, n: 0, M: new Map() }; c.h += l.h; c.n++; c.M.set(l.e.machine, (c.M.get(l.e.machine) || 0) + l.h); C.set(l.cause, c); }
+  const causes = [...C.values()].sort((x, y) => y.h - x.h), pc = t => t.avail + t.down ? Math.round(t.avail / (t.avail + t.down) * 1000) / 10 + "%" : "–";
+  const T = per.reduce((o, x) => { for (const k of ["avail", "BD", "PM", "down", "nBD", "nPM"]) o[k] += x[k]; return o; }, { avail: 0, BD: 0, PM: 0, down: 0, nBD: 0, nPM: 0 });
+  return `<section class="card"><h2>Delay summary · ${monthName(m)}</h2><p class="muted" style="margin-top:0">${fmt(m + "-01")} to ${fmt(days.at(-1) || m + "-01")} · lost time per machine, from the sheet and the logged times.</p>
+    <div class="tbl"><table class="avt"><thead><tr><th>Group</th><th>Machine</th><th>Available h</th><th>Breakdown h</th><th>Planned maint. h</th><th>Down h</th><th>Availability</th><th>Times broken down</th><th>Times in maintenance</th></tr></thead><tbody>
+      ${per.map(x => `<tr><td class="muted">${esc(x.g)}</td><td><b>${esc(x.mc)}</b></td><td class="num">${h2(x.avail)}</td><td class="num ${x.BD ? "hot" : ""}">${h2(x.BD)}</td><td class="num">${h2(x.PM)}</td><td class="num">${h2(x.down)}</td><td class="num pct">${pc(x)}</td><td class="num">${x.nBD}</td><td class="num">${x.nPM}</td></tr>`).join("")}
+      <tr class="tot"><td></td><td>Total</td><td class="num">${h2(T.avail)}</td><td class="num">${h2(T.BD)}</td><td class="num">${h2(T.PM)}</td><td class="num">${h2(T.down)}</td><td class="num pct">${pc(T)}</td><td class="num">${T.nBD}</td><td class="num">${T.nPM}</td></tr></tbody></table></div>
+    <div class="tbl" style="margin-top:12px"><table class="avt"><thead><tr><th>Cause</th><th>Hours</th><th>Times recorded</th><th>Machines</th></tr></thead><tbody>
+      ${causes.map(c => `<tr><td>${esc(c.cause)}</td><td class="num">${h2(c.h)}</td><td class="num">${c.n}</td><td>${[...c.M].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${esc(k)} ${hm(v)}`).join(" · ")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No breakdowns or maintenance logged this month.</td></tr>'}</tbody></table></div>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Every breakdown and maintenance, one by one (${lines.length})</summary><div class="tbl"><table class="avt"><thead><tr><th>Date</th><th>Machine</th><th>Type</th><th>From</th><th>To</th><th>Hours</th><th>Cause</th><th>Reason / comments</th></tr></thead><tbody>
+      ${lines.map(l => `<tr><td>${fmt(l.e.start.slice(0, 10))}</td><td><b>${esc(l.e.machine)}</b></td><td>${TYPES[l.e.type]}</td><td>${hhmm(l.e.start)}</td><td>${l.e.end ? (l.e.end.slice(0, 10) !== l.e.start.slice(0, 10) ? fmt(l.e.end.slice(0, 10)).slice(0, 5) + " " : "") + hhmm(l.e.end) : "still going"}</td><td class="num">${hm(l.h)}</td><td>${esc(l.cause)}</td><td>${esc(l.e.reason || "")}</td></tr>`).join("")}</tbody></table></div></details></section>`;
 }
 function monthGrid(m) {
   const days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);

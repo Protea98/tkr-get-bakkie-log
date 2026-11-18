@@ -123,6 +123,7 @@ function homeView() {
       ${tile("Shifts without a tally sheet", String(S.noTally.length), S.noTally.length ? "tap to see which" : "every shift with metres has one", S.noTally.length ? "alert" : "good", 'data-tab="missing"')}
       ${tile("Not exported yet", String(ch), lastExport ? `last export ${when(lastExport.at)}` : "nothing exported yet", ch && (days === null || days >= 3) ? "alert" : "", 'data-tab="export"')}</div>`
     + blocksCard(S)
+    + delayCard(S)
     + chartCard()
     + `<div class="sect">Last shifts captured</div><div class="res">${latest.map(shiftLine).join("") || '<div class="card muted">Nothing captured yet. Tap + Capture a shift.</div>'}</div>`;
 }
@@ -135,6 +136,18 @@ function blocksCard(S) {
   const B = blocksOf(S), drilled = B.filter(b => b.metres > 0);
   return `<section class="card"><h2>Blocks · ${monthName(month)}</h2><p class="muted" style="margin-top:0"><b style="color:var(--fg);font-size:20px">${drilled.length}</b> block${drilled.length === 1 ? "" : "s"} drilled${B.length > drilled.length ? ` · ${B.length - drilled.length} other place${B.length - drilled.length === 1 ? "" : "s"} where rigs stood (no metres)` : ""}</p>
     ${B.length ? `<div class="tbl"><table class="reg"><thead><tr><th>Block</th><th>Metres</th><th>Rigs</th><th>Shifts</th><th>From</th><th>To</th></tr></thead><tbody>${B.map(b => `<tr><td><b>${esc(b.block)}</b></td><td class="num">${M1(b.metres)}</td><td>${[...b.rigs].join(", ")}</td><td class="num">${b.shifts}</td><td>${fmt(b.first)}</td><td>${fmt(b.last)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="muted">No block filled in on any shift yet this month.</p>'}</section>`;
+}
+/* delay summary for the month, as in the Delay summary sheet of the metres workbook */
+function delayCard(S) {
+  const B = bdData(slotsFor(S.from, S.end), S.from, S.end, rigs()), R = B.rigs, h1 = v => (Math.round((v || 0) * 10) / 10).toFixed(1);
+  if (!B.all.length) return `<section class="card"><h2>Delay summary · ${monthName(month)}</h2><p class="muted" style="margin:0">No shifts captured this month yet.</p></section>`;
+  return `<section class="card"><h2>Delay summary · ${monthName(month)}</h2><p class="muted" style="margin-top:0">Lost time per machine, from the delays on each shift (Control Room breakdown times included).</p>
+    <div class="tbl"><table class="reg"><thead><tr><th>Machine</th><th>Shifts working</th><th>Shifts not working</th><th>Metres</th><th>Delay hours</th></tr></thead><tbody>${B.mach.map(m => `<tr><td><b>${esc(m.rig)}</b></td><td class="num">${m.working}</td><td class="num">${m.down}</td><td class="num">${M1(m.metres)}</td><td class="num">${h1(m.hours)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="tbl" style="margin-top:12px"><table class="reg"><thead><tr><th>Delay</th>${R.map(r => `<th>${esc(r)} hours</th>`).join("")}<th>Total hours</th>${R.map(r => `<th>Times ${esc(r)}</th>`).join("")}</tr></thead><tbody>
+      ${B.cats.map(c => `<tr><td>${esc(c.cat)}</td>${c.per.map(v => `<td class="num">${h1(v)}</td>`).join("")}<td class="num"><b>${h1(c.total)}</b></td>${c.times.map(v => `<td class="num">${v}</td>`).join("")}</tr>`).join("")}
+      <tr class="tot" style="font-weight:700"><td>Total</td>${R.map((r, i) => `<td class="num">${h1(B.cats.reduce((n, c) => n + c.per[i], 0))}</td>`).join("")}<td class="num">${h1(B.total)}</td>${R.map((r, i) => `<td class="num">${B.cats.reduce((n, c) => n + c.times[i], 0)}</td>`).join("")}</tr></tbody></table></div>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Every delay, shift by shift (${B.lines.length})</summary><div class="tbl"><table class="reg"><thead><tr><th>Delay</th><th>Date</th><th>Shift</th><th>Machine</th><th>Category</th><th>Hours</th></tr></thead><tbody>
+      ${B.lines.map(l => `<tr><td>${esc(l.text)}</td><td>${fmt(l.date)}</td><td>${l.shift}</td><td>${esc(l.rig)}</td><td>${esc(l.cat || "")}</td><td class="num">${l.hours == null ? "" : h1(l.hours)}</td></tr>`).join("")}</tbody></table></div></details></section>`;
 }
 /* one shift: what is entered and what is not */
 function dayCheck(d, sh) {
