@@ -581,8 +581,10 @@ async function fcPull(from, to) {
   const by = new Map(); snap.docs.forEach(d => { const x = { id: d.id, ...d.data() }; const k = x.date + "|" + (x.shift || "Day"); (by.get(k) || by.set(k, []).get(k)).push(x); });
   let n = 0;
   for (const [k, L] of by) { const loc = shifts.find(s => s.id === k), t = Math.max(...L.map(x => x.editedAt || x.createdAt || 0));
-    if (loc && ((loc.fcAt || 0) >= t || (loc.editedAt || 0) >= t)) continue;
-    const s = fromForecast(L); if (!Object.keys(s.rigs).length) continue;
+    const remFill = L.every(x => x.filled), real = L.filter(x => !x.filled);
+    if (loc && remFill && !loc.filled) continue;                                   // a real capture here is never replaced by a "0 m · Not working" fill
+    if (loc && !(loc.filled && real.length) && ((loc.fcAt || 0) >= t || (loc.editedAt || 0) >= t)) continue;   // otherwise the newest change wins
+    const s = fromForecast(remFill ? L : real); if (!Object.keys(s.rigs).length) continue; if (remFill) s.filled = 1;
     if (loc) s.savedAt = loc.savedAt;
     await tx(["shifts"], "readwrite", tt => { tt.objectStore("shifts").put(s); }); n++; }
   return n;
@@ -606,12 +608,13 @@ async function fcPush(say) {
   for (const s of shifts.filter(s => s.date >= FC_FROM && (!s.fcAt || s.editedAt > s.fcAt))) {
     say?.(`Sending shifts to GET Forecast… ${++ns}`);
     const R = await getDay(s.date);
+    if (s.filled && R.some(x => (x.shift || "Day") === s.shift && !x.filled)) continue;   // someone captured this shift for real: keep theirs, it comes in on the next check
     for (const r of cfg.rigs) { const g = s.rigs[r], mine = lineId(s.date, s.shift, r);
       for (const x of R.filter(x => (x.shift || "Day") === s.shift && x.rig === r && x.id !== mine)) await deleteDoc(doc(db, "fcMetres", x.id));
       if (!g) { if (R.some(x => x.id === mine)) await deleteDoc(doc(db, "fcMetres", mine)); continue; }
       const dt = delayText(g), note = (g.status || "") + (dt ? " – " + dt : "");
       await setDoc(doc(db, "fcMetres", mine), { date: s.date, shift: s.shift, rig: r, metres: num(g.metres), block: g.block || "", supervisor: s.supervisor || "", status: g.status || "", problem: g.problem || "", delays: g.delays, note,
-        hrsFrom: g.hrsFrom || "", hrsTo: g.hrsTo || "", report: s.report || "", by: me, src: "metres", createdAt: s.savedAt || Date.now(), editedAt: s.editedAt || Date.now() }); }
+        hrsFrom: g.hrsFrom || "", hrsTo: g.hrsTo || "", report: s.report || "", by: me, src: "metres", filled: s.filled ? 1 : 0, createdAt: s.savedAt || Date.now(), editedAt: s.editedAt || Date.now() }); }
     await tx(["shifts"], "readwrite", t => { t.objectStore("shifts").put({ ...s, fcAt: s.editedAt }); });
   }
   // documents removed on this device
