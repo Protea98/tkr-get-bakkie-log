@@ -134,3 +134,17 @@ table.xl td.hc.lk .lkv small{font-size:10px}
 /* the control room uses the full width of the screen, so the whole shift fits */
 .wrap{max-width:min(1900px,100%)}
 .xlwin .xlsheet{max-height:min(84vh,1100px)}
+
+/* hour boxes: tap to pick, tap the same again to clear */
+table.xl td.hc button.hbtn{width:54px;height:30px;font-weight:700;text-align:center;border:1px solid #c9c9c9;border-radius:3px;background:#fff;color:#9a9a9a;cursor:pointer;padding:0}
+table.xl td.hc button.hbtn.OP{background:#e2f0d9;color:#375623}
+table.xl td.hc button.hbtn.BD{background:#fde2df;color:#9c0006}
+table.xl td.hc button.hbtn.PM{background:#ddebf7;color:#1f4e78}
+table.xl td.hc button.hbtn.carry{opacity:.6;border-style:dashed}
+table.xl td.hc button.hbtn:focus-visible{outline:2px solid var(--gold,#d4a12a);outline-offset:1px}
+.hpop{position:absolute;z-index:9999;display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff;border:1px solid #bbb;border-radius:8px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:240px}
+.hpop button{min-width:52px;min-height:40px;font-weight:800;border:1px solid #c9c9c9;border-radius:6px;cursor:pointer;background:#fff;color:#111}
+.hpop button.OP{background:#e2f0d9;color:#375623}.hpop button.BD{background:#fde2df;color:#9c0006}.hpop button.PM{background:#ddebf7;color:#1f4e78}
+.hpop button.cur{outline:3px solid #111;outline-offset:1px}
+.hpop button.clr{background:#f2f2f2;color:#333}
+.hpop small{flex-basis:100%;color:#555;font-size:12px}

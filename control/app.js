@@ -377,7 +377,8 @@ function shiftTable(d, sh) {
       const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
         if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv ${v}">${v || "–"} <small>🔒</small></span></td>`;
-        return `<td class="hc"><select data-cell="${esc(mc)}|${h}" class="ty ${v}${!C[h] && v && v !== "OP" ? " carry" : ""}" ${!C[h] && v && v !== "OP" ? 'title="Carried on from a breakdown that has not been closed. Pick OP if it was working."' : ""}>${opt(v)}</select></td>`; }).join("");
+        const carry = !C[h] && v && v !== "OP";
+        return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" class="hbtn ty ${v}${carry ? " carry" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, BD or PM. Tap the same one again to clear it."}">${v || "–"}</button></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${cells}
         <td class="tm">${E.length ? E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>") : `<span data-newev="${esc(mc)}" title="Log a breakdown with exact times" style="color:#999">+ time</span>`}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
@@ -397,7 +398,11 @@ async function setCell(d, mc, h, val) {
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else delete cells[h];
   await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
   if (a > now) return;
-  if (!current) for (const e of downEvs(mc).filter(e => e.grid && e.type !== val && toMs(e.start) < b && evEnd(e) > a)) {   // an hour box changed: take that hour off the old grid time
+  if (!val && current) {   // cleared in the hour that is running: take away the breakdown or maintenance picked by mistake
+    for (const e of downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a && !lockedV(e, "start"))) {
+      if (toMs(e.start) >= a) await put({ ...e, deleted: true }, `${mc}: ${TYPES[e.type].toLowerCase()} from ${hhmm(e.start)} taken away`); else await put({ ...e, end: isoOf(a), endBy: me.name }); }
+    return; }
+  if (!current) for (const e of downEvs(mc).filter(e => (e.grid || !val) && e.type !== val && toMs(e.start) < b && evEnd(e) > a && !(!e.grid && lockedV(e, "start")))) {   // an hour box changed: take that hour off the old grid time
     const s0 = toMs(e.start), e0 = evEnd(e);
     if (s0 >= a && e0 <= b) await put({ ...e, deleted: true }); else if (s0 >= a) await put({ ...e, start: isoOf(b) }); else if (e0 <= b) await put({ ...e, end: isoOf(a) });
     else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
@@ -688,7 +693,21 @@ async function viewDoc(id) {
 }
 
 /* ---------- events ---------- */
+function cellMenu(btn) {
+  document.getElementById("hpop")?.remove(); const v = btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
+  pop.innerHTML = ["OP", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${o}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
+    + (v ? `<small>Tap ${v} again to clear it</small>` : "");
+  pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
+  const w = pop.offsetWidth, h = pop.offsetHeight; pop.style.left = scrollX + Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) + "px"; pop.style.top = scrollY + (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + "px";
+}
+document.addEventListener("click", async ev => {
+  const pk = ev.target.closest("[data-hpick]"), pop = document.getElementById("hpop");
+  if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick; pop.remove();
+    if (val === cur) return; await setCell($("fDay").dataset.date, mc, +h, val); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render(); return; }
+  if (pop && !ev.target.closest("#hpop") && !ev.target.closest("[data-hcell]")) pop.remove();
+}, true);
 async function clickH(ev) {
+  const hb = ev.target.closest("[data-hcell]"); if (hb) { cellMenu(hb); return; }
   if (sheetClick(ev, app)) return;
   const ne = ev.target.closest("[data-newev]"); if (ne) { openEv(evForm({}, ne.dataset.newev), "Log breakdown"); return; }
   const lc = ev.target.closest("[data-lockcell]"); if (lc) { const [mc, h] = lc.dataset.lockcell.split("|"); openEv(reqForm({ type: "cell", d: $("fDay").dataset.date, mc, h: +h }), "Ask the admin to change it"); return; }
