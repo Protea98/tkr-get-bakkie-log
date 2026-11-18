@@ -296,10 +296,10 @@ async function pptCycle(){const btn=$("pptCycle");btn.disabled=true;btn.textCont
     const T=(s,rows,o)=>s.addTable(rows,Object.assign({x:0.4,y:1.2,w:12.5,fontFace:"Arial",fontSize:12,color:K,border:{type:"solid",pt:0.5,color:"D9D3C5"},autoPage:false},o));
     const hdr=a=>a.map(t=>({text:String(t),options:{bold:true,color:"FFFFFF",fill:{color:"262626"}}}));
     // 1 title
-    let s=pp.addSlide();s.background={color:K};if(logo)s.addImage({data:logo,x:0.6,y:0.6,w:1.4,h:1.4});
-    s.addText("ATTENDANCE CYCLE REPORT",{x:0.6,y:2.4,w:12,h:0.9,fontFace:"Arial",fontSize:40,bold:true,color:"FFFFFF"});
+    let s=pp.addSlide();s.background={color:"FFFFFF"};s.addShape(pp.ShapeType.rect,{x:0,y:0,w:13.33,h:0.25,fill:{color:G}});if(logo)s.addImage({data:logo,x:0.6,y:0.6,w:1.4,h:1.4});
+    s.addText("ATTENDANCE CYCLE REPORT",{x:0.6,y:2.4,w:12,h:0.9,fontFace:"Arial",fontSize:40,bold:true,color:K});
     s.addText(D.period,{x:0.6,y:3.3,w:12,h:0.7,fontFace:"Arial",fontSize:26,bold:true,color:G});
-    s.addText(D.sheetLbl+" · days counted "+D.upto.length+" of "+D.c.dates.length+" (to "+nice(D.last)+" "+yr(D.last)+")",{x:0.6,y:4.1,w:12,h:0.5,fontFace:"Arial",fontSize:16,color:"DDDDDD"});
+    s.addText(D.sheetLbl+" · days counted "+D.upto.length+" of "+D.c.dates.length+" (to "+nice(D.last)+" "+yr(D.last)+")",{x:0.6,y:4.1,w:12,h:0.5,fontFace:"Arial",fontSize:16,color:"555555"});
     s.addText("TKR Operations · Tharisa Mine",{x:0.6,y:6.6,w:8,h:0.4,fontFace:"Arial",fontSize:12,color:"AAAAAA"});
     // 2 summary
     s=base("Summary");const tiles=[["People on the register",String(D.rows.length)],["Present days",String(D.all.present)],["Exception days",String(D.all.exc)],["Cycle attendance",pc1(pct(D.all.present,D.all.exc))],["Days counted",D.upto.length+" of "+D.c.dates.length],["New / removed",D.H.filter(h=>h.type==="Added").length+" / "+D.H.filter(h=>h.type==="Removed").length]];
@@ -353,15 +353,15 @@ async function pptSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making t
   try{await loadJs("../lib/pptxgen.bundle.js");const logo=await logoData(),pp=new window.PptxGenJS();pp.layout="LAYOUT_WIDE";pp.author="TKR Operations";const G="D4A12A",K="111111";
     const base=t=>{const s=pp.addSlide();s.addShape(pp.ShapeType.rect,{x:0,y:0,w:13.33,h:0.9,fill:{color:K}});s.addShape(pp.ShapeType.rect,{x:0,y:0.9,w:13.33,h:0.06,fill:{color:G}});if(logo)s.addImage({data:logo,x:0.25,y:0.1,w:0.7,h:0.7});
       s.addText(t,{x:1.1,y:0.08,w:11,h:0.5,fontFace:"Arial",fontSize:22,bold:true,color:"FFFFFF"});s.addText(sp.sub,{x:1.1,y:0.52,w:11,h:0.32,fontFace:"Arial",fontSize:12,color:G,bold:true});return s};
-    let s=pp.addSlide();s.background={color:K};if(logo)s.addImage({data:logo,x:0.6,y:0.6,w:1.4,h:1.4});
-    s.addText(sp.title,{x:0.6,y:2.4,w:12,h:0.9,fontFace:"Arial",fontSize:40,bold:true,color:"FFFFFF"});s.addText(sp.sub,{x:0.6,y:3.3,w:12,h:0.7,fontFace:"Arial",fontSize:24,bold:true,color:G});
+    let s=pp.addSlide();s.background={color:"FFFFFF"};s.addShape(pp.ShapeType.rect,{x:0,y:0,w:13.33,h:0.25,fill:{color:G}});if(logo)s.addImage({data:logo,x:0.6,y:0.6,w:1.4,h:1.4});
+    s.addText(sp.title,{x:0.6,y:2.4,w:12,h:0.9,fontFace:"Arial",fontSize:40,bold:true,color:K});s.addText(sp.sub,{x:0.6,y:3.3,w:12,h:0.7,fontFace:"Arial",fontSize:24,bold:true,color:G});
     s.addText("TKR Operations · Tharisa Mine",{x:0.6,y:6.6,w:8,h:0.4,fontFace:"Arial",fontSize:12,color:"AAAAAA"});
     s=base("Summary");const per=Math.ceil(sp.tiles.length/2),tw=12.3/per;
     sp.tiles.forEach(([k,v],i)=>{const x=0.5+(i%per)*tw,y=1.4+Math.floor(i/per)*2.6;s.addShape(pp.ShapeType.roundRect,{x,y,w:tw-0.25,h:2.2,fill:{color:"FFF8E6"},line:{color:G,width:1.5},rectRadius:0.1});
       s.addText(String(k).toUpperCase(),{x:x+0.2,y:y+0.2,w:tw-0.6,h:0.4,fontFace:"Arial",fontSize:12,bold:true,color:"6E6450"});s.addText(String(v),{x:x+0.2,y:y+0.75,w:tw-0.6,h:1,fontFace:"Arial",fontSize:36,bold:true,color:K})});
     const hdr=a=>a.map(t=>({text:String(t),options:{bold:true,color:"FFFFFF",fill:{color:"262626"}}}));
-    for(const sec of sp.sections){for(let i=0;i<Math.max(1,sec.rows.length);i+=14){s=base(sec.title+(sec.rows.length>14?" ("+(i/14+1)+")":""));
-      s.addTable([hdr(sec.head)].concat(sec.rows.slice(i,i+14).map(r=>r.map(c=>typeof c==="object"?{text:c.content,options:{bold:true,fill:{color:"FFF2CC"}}}:String(c)))),{x:0.4,y:1.2,w:12.5,fontFace:"Arial",fontSize:13,color:K,border:{type:"solid",pt:0.5,color:"D9D3C5"}})}}
+    for(const sec of sp.sections){const per=sec.per||14;for(let i=0;i<Math.max(1,sec.rows.length);i+=per){s=base(sec.title+(sec.rows.length>per?" ("+(i/per+1)+")":""));
+      s.addTable([hdr(sec.head)].concat(sec.rows.slice(i,i+per).map(r=>r.map(c=>typeof c==="object"?{text:c.content,options:{bold:true,fill:{color:"FFF2CC"}}}:String(c)))),{x:0.4,y:1.2,w:12.5,fontFace:"Arial",fontSize:sec.fs||13,color:K,border:{type:"solid",pt:0.5,color:"D9D3C5"},...(sec.colW?{colW:sec.colW}:{})})}}
     await pp.writeFile({fileName:sp.file+".pptx"});toast("PowerPoint report downloaded")}
   catch(e){console.warn(e);toast("The PowerPoint couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent=label}
@@ -651,7 +651,7 @@ function viewFlags(){const F=S.flg;if(!F.from){[F.from,F.to]=F.type==="custom"?[
   const key=F.from+"|"+F.to;if(F.key!==key){F.key=key;F.loading=true;loadRange(F.from,F.to).then(()=>{F.loading=false;if(S.view==="flags")render()},e=>{F.loading=false;toast("Could not load those dates: "+(e.message||"try again"))})}
   let h='<div class="bar" role="group" aria-label="Check period">'+PRESETS.map(([k,l])=>'<button class="chip" data-flg="'+k+'" aria-pressed="'+(F.type===k)+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="form"><label>From<input type="date" id="flg-from" value="'+F.from+'"></label><label>To<input type="date" id="flg-to" value="'+F.to+'"></label>'+
-    '<div style="display:flex;align-items:end"><button class="btn gold" id="xlsFlags"'+(F.loading?" disabled":"")+'>Download Excel</button></div></div>';
+    '<div style="display:flex;align-items:end;gap:8px;flex-wrap:wrap"><button class="btn gold" id="xlsFlags"'+(F.loading?" disabled":"")+'>Download Excel</button><button class="btn gold" id="pdfFlags"'+(F.loading?" disabled":"")+'>Download PDF report</button><button class="btn gold" id="pptFlags"'+(F.loading?" disabled":"")+'>Download PowerPoint report</button></div></div>';
   h+='<div class="bar" role="group" aria-label="Flag type"><span class="lbl" style="margin:0">Flag type</span>'+FLAG_KINDS.map(([k,l])=>'<button class="chip" data-kind="'+esc(k)+'" aria-pressed="'+(F.kind===k)+'">'+l+'</button>').join("")+'</div>';
   h+='<h2 class="sheet-h">AWOP, sick, leave and flags <small>'+periodText(F.from,F.to)+'</small></h2>';
   if(F.loading){main.innerHTML=h+'<div class="empty"><b>Loading these dates</b>Fetching marks for the period.</div>';return}
@@ -664,6 +664,20 @@ function viewFlags(){const F=S.flg;if(!F.from){[F.from,F.to]=F.type==="custom"?[
    shown.map(r=>'<tr><td>'+esc(r.e.name)+'<br><span class="note">'+esc([r.e.number,r.e.sheet,groupLabel(r.e)].filter(Boolean).join(" · "))+'</span></td><td style="text-align:left">'+flagText(r.f).map(t=>'<span class="flag">'+esc(t)+'</span>').join(" ")+'</td>'+
      cols.map(([c])=>{const n=r.f[c].length;const hot=n>=FLAG_AT&&HOT_CODES.includes(c);return '<td class="'+(hot?"lowpc":"")+'">'+n+'</td><td style="text-align:left;white-space:normal;min-width:110px">'+r.f[c].map(short).join(", ")+'</td>'}).join("")+'</tr>').join("")+'</tbody></table></div>';
   main.innerHTML=h}
+/* flags report as PDF or PowerPoint: same period and flag type as the screen */
+async function flagsReport(fmt,btn){const F=S.flg;try{await loadRange(F.from,F.to)}catch(e){toast("Could not load those dates: "+(e.message||"try again"));return}
+  const rows=flagged(F.from,F.to),kind=F.kind,shown=byKind(rows,kind),cols=kindCols(kind),kl=FLAG_KINDS.find(k=>k[0]===kind)[1];
+  const lbl=c=>c==="FAMILY RESPONSIBILITY"?"Family responsibility":c==="ANNUAL LEAVE"?"Annual leave":c==="STUDY LEAVE"?"Study leave":c==="SICK"?"Sick":c;
+  const sum=c=>rows.reduce((a,r)=>a+r.f[c].length,0),ppl=c=>rows.filter(r=>r.f[c].length).length;
+  const tiles=[["Flagged: "+FLAG_AT+"+ AWOP",rows.filter(r=>r.f.AWOP.length>=FLAG_AT).length],["Flagged: "+FLAG_AT+"+ family resp.",rows.filter(r=>r.f["FAMILY RESPONSIBILITY"].length>=FLAG_AT).length]]
+    .concat(cols.map(([c])=>[(c==="FAMILY RESPONSIBILITY"?"Family resp.":lbl(c))+" days",sum(c)]));
+  const fl=shown.filter(r=>flagText(r.f).length);
+  const sections=[{title:"Flagged employees ("+fl.length+")",head:["Employee","Number","Sheet","Group","Flag"],rows:fl.length?fl.map(r=>[r.e.name,r.e.number||"",r.e.sheet,groupLabel(r.e),flagText(r.f).join(", ")]):[["No one flagged in this period","","","",""]]}]
+    .concat(cols.filter(([c])=>shown.some(r=>r.f[c].length)).map(([c])=>{const L=shown.filter(r=>r.f[c].length).sort((a,b)=>b.f[c].length-a.f[c].length||a.e.name.localeCompare(b.e.name));
+      return {title:(()=>{const d=L.reduce((a,r)=>a+r.f[c].length,0);return lbl(c)+" ("+L.length+" employee"+(L.length===1?"":"s")+", "+d+" day"+(d===1?"":"s")+")"})(),head:["Employee","Sheet","Days","Dates"],fs:11,per:12,colW:[3.4,2,0.9,6.2],
+        rows:L.length?L.map(r=>{const n=r.f[c].length,hot=n>=FLAG_AT&&HOT_CODES.includes(c);return [r.e.name,r.e.sheet,hot?{content:String(n)}:String(n),r.f[c].map(short).join(", ")]}):[["None","","",""]]}}));
+  const sp={title:"ATTENDANCE FLAGS REPORT",sub:periodText(F.from,F.to)+"   ·   "+kl,file:"TKR_Attendance_Flags_"+(kind==="all"?"":kl.replace(/\W+/g,"_")+"_")+(F.from===F.to?F.from:F.from+"_to_"+F.to),tiles,sections};
+  if(fmt==="pdf")pdfSpec(sp,btn,"Download PDF report");else pptSpec(sp,btn,"Download PowerPoint report")}
 async function xlsFlags(from,to){try{await loadRange(from,to)}catch(e){toast("Could not load those dates: "+(e.message||"try again"));return}
   const kind=S.flg.kind;const rows=byKind(flagged(from,to),kind);const cols=kindCols(kind);const kl=FLAG_KINDS.find(k=>k[0]===kind)[1];
   const aoa=[["TKR Operations – Attendance Flags"],["Period",periodText(from,to)],["Flag type",kl],["Counts of "+FLAG_AT+" or more are marked in the Flag column. Flagged at "+FLAG_AT+" or more AWOP days, or "+FLAG_AT+" or more family responsibility days."],[],
@@ -875,6 +889,8 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
   if(t.dataset.flg){const F=S.flg;F.type=t.dataset.flg;if(F.type!=="custom")[F.from,F.to]=preset(F.type,F.from||S.date);render();return}
   if(t.dataset.kind){S.flg.kind=t.dataset.kind;render();return}
   if(t.id==="xlsFlags"){xlsFlags(S.flg.from,S.flg.to);return}
+  if(t.id==="pdfFlags"){flagsReport("pdf",t);return}
+  if(t.id==="pptFlags"){flagsReport("ppt",t);return}
   if(t.id==="copyDaily"){const txt=dailyText();navigator.clipboard.writeText(txt).then(()=>toast("Report copied. Paste it into WhatsApp."),()=>{$("sheetHost").innerHTML='<div class="scrim" id="scrim"><div class="panel"><h2>Daily report</h2><div class="sub">Select all and copy.</div><textarea id="txt" style="width:100%;height:300px;background:var(--surface-2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px;font:13px var(--mono)">'+esc(txt)+'</textarea><button class="btn" id="closeP">Close</button></div></div>';$("closeP").onclick=()=>$("sheetHost").innerHTML="";$("txt").select()});return}
 });
 
