@@ -140,14 +140,14 @@ function blocksCard(S) {
 }
 /* delay summary for the month, as in the Delay summary sheet of the metres workbook */
 function delayCard(S) {
-  const B = bdData(slotsFor(S.from, S.end), S.from, S.end, rigs()), R = B.rigs, h1 = v => (Math.round((v || 0) * 10) / 10).toFixed(1);
+  const B = bdData(slotsFor(S.from, S.end), S.from, S.end, rigs()), R = B.rigs, h1 = v => { const t = Math.round((v || 0) * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
   if (!B.all.length) return `<section class="card"><h2>Delay summary · ${monthName(month)}</h2><p class="muted" style="margin:0">No shifts captured this month yet.</p></section>`;
-  return `<section class="card"><h2>Delay summary · ${monthName(month)}</h2><p class="muted" style="margin-top:0">Lost time per machine, from the delays on each shift (Control Room breakdown times included).</p>
-    <div class="tbl"><table class="reg"><thead><tr><th>Machine</th><th>Shifts working</th><th>Shifts not working</th><th>Metres</th><th>Delay hours</th></tr></thead><tbody>${B.mach.map(m => `<tr><td><b>${esc(m.rig)}</b></td><td class="num">${m.working}</td><td class="num">${m.down}</td><td class="num">${M1(m.metres)}</td><td class="num">${h1(m.hours)}</td></tr>`).join("")}</tbody></table></div>
-    <div class="tbl" style="margin-top:12px"><table class="reg"><thead><tr><th>Delay</th>${R.map(r => `<th>${esc(r)} hours</th>`).join("")}<th>Total hours</th>${R.map(r => `<th>Times ${esc(r)}</th>`).join("")}</tr></thead><tbody>
+  return `<section class="card"><h2>Delay summary · ${monthName(month)}</h2><p class="muted" style="margin-top:0">Lost time per machine, from the delays on each shift (Control Room breakdown times included). Times are hours:minutes.</p>
+    <div class="tbl"><table class="reg"><thead><tr><th>Machine</th><th>Shifts working</th><th>Shifts not working</th><th>Metres</th><th>Delay time</th></tr></thead><tbody>${B.mach.map(m => `<tr><td><b>${esc(m.rig)}</b></td><td class="num">${m.working}</td><td class="num">${m.down}</td><td class="num">${M1(m.metres)}</td><td class="num">${h1(m.hours)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="tbl" style="margin-top:12px"><table class="reg"><thead><tr><th>Delay</th>${R.map(r => `<th>${esc(r)} time</th>`).join("")}<th>Total time</th>${R.map(r => `<th>Times ${esc(r)}</th>`).join("")}</tr></thead><tbody>
       ${B.cats.map(c => `<tr><td>${esc(c.cat)}</td>${c.per.map(v => `<td class="num">${h1(v)}</td>`).join("")}<td class="num"><b>${h1(c.total)}</b></td>${c.times.map(v => `<td class="num">${v}</td>`).join("")}</tr>`).join("")}
       <tr class="tot" style="font-weight:700"><td>Total</td>${R.map((r, i) => `<td class="num">${h1(B.cats.reduce((n, c) => n + c.per[i], 0))}</td>`).join("")}<td class="num">${h1(B.total)}</td>${R.map((r, i) => `<td class="num">${B.cats.reduce((n, c) => n + c.times[i], 0)}</td>`).join("")}</tr></tbody></table></div>
-    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Every delay, shift by shift (${B.lines.length})</summary><div class="tbl"><table class="reg"><thead><tr><th>Delay</th><th>Date</th><th>Shift</th><th>Machine</th><th>Category</th><th>Hours</th></tr></thead><tbody>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Every delay, shift by shift (${B.lines.length})</summary><div class="tbl"><table class="reg"><thead><tr><th>Delay</th><th>Date</th><th>Shift</th><th>Machine</th><th>Category</th><th>Time</th></tr></thead><tbody>
       ${B.lines.map(l => `<tr><td>${esc(l.text)}</td><td>${fmt(l.date)}</td><td>${l.shift}</td><td>${esc(l.rig)}</td><td>${esc(l.cat || "")}</td><td class="num">${l.hours == null ? "" : h1(l.hours)}</td></tr>`).join("")}</tbody></table></div></details></section>`;
 }
 /* one shift: what is entered and what is not */

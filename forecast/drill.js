@@ -377,13 +377,13 @@ export function makeDrill(ctx) {
     const all = [...slots(from, to).values()].sort((a, b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.rig.localeCompare(b.rig));
     const rigs = RIGS.filter(r => all.some(s => s.rig === r));
     const mach = rigs.map(r => { const L = all.filter(s => s.rig === r); return { rig: r, working: L.filter(s => s.status === "Working").length, down: L.filter(s => s.status === "Not working").length, metres: r1(L.reduce((n, s) => n + s.metres, 0)),
-      hours: Math.round(L.flatMap(s => s.delays).reduce((n, d) => n + (d.hours || 0), 0) * 10) / 10 }; });
+      hours: Math.round(L.flatMap(s => s.delays).reduce((n, d) => n + (d.hours || 0), 0) * 60) / 60 }; });
     const lines = all.flatMap(s => s.delays.map(d => ({ ...d, date: s.date, shift: s.shift, rig: s.rig })));
-    const cats = [...new Set(lines.map(l => l.cat))].map(c => { const L = lines.filter(l => l.cat === c), per = rigs.map(r => Math.round(L.filter(l => l.rig === r).reduce((n, l) => n + (l.hours || 0), 0) * 10) / 10);
-      return { cat: c, per, times: rigs.map(r => L.filter(l => l.rig === r).length), total: Math.round(L.reduce((n, l) => n + (l.hours || 0), 0) * 10) / 10 }; }).sort((a, b) => b.total - a.total || b.times.reduce((x, y) => x + y, 0) - a.times.reduce((x, y) => x + y, 0));
-    return { all, rigs, mach, lines, cats, total: Math.round(lines.reduce((n, l) => n + (l.hours || 0), 0) * 10) / 10 };
+    const cats = [...new Set(lines.map(l => l.cat))].map(c => { const L = lines.filter(l => l.cat === c), per = rigs.map(r => Math.round(L.filter(l => l.rig === r).reduce((n, l) => n + (l.hours || 0), 0) * 60) / 60);
+      return { cat: c, per, times: rigs.map(r => L.filter(l => l.rig === r).length), total: Math.round(L.reduce((n, l) => n + (l.hours || 0), 0) * 60) / 60 }; }).sort((a, b) => b.total - a.total || b.times.reduce((x, y) => x + y, 0) - a.times.reduce((x, y) => x + y, 0));
+    return { all, rigs, mach, lines, cats, total: Math.round(lines.reduce((n, l) => n + (l.hours || 0), 0) * 60) / 60 };
   }
-  const H1 = v => (Math.round(v * 10) / 10).toFixed(1);
+  const H1 = v => { const t = Math.round((v || 0) * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };   // hours:minutes
   function bdView() {
     ensureIndex(); bdFrom = bdFrom || month + "-01"; bdTo = bdTo || (monthEnd(month) < today() ? monthEnd(month) : today());
     const B = bdData(bdFrom, bdTo), max = Math.max(1, ...B.cats.map(c => c.total)), col = ["#d4a12a", "#3a3a3a", "#2e7d4f"];
@@ -417,7 +417,7 @@ export function makeDrill(ctx) {
     labels.forEach((l, i) => { const y = top + i * rowH; g.fillStyle = "#1a1a1a"; g.font = "12px Arial"; g.textAlign = "right"; g.fillText(l.length > 42 ? l.slice(0, 41) + "…" : l, left - 10, y + rowH / 2 - 3);
       const bh = Math.min(16, (rowH - 8) / series.length);
       series.forEach((s, si) => { const v = s.vals[i] || 0, bw = (right - left) * v / max, by = y + 2 + si * bh; g.fillStyle = s.color; g.fillRect(left, by, bw, bh - 2);
-        if (v) { g.fillStyle = "#1a1a1a"; g.font = "bold 10px Arial"; g.textAlign = "left"; g.fillText((opt.dec === 0 ? Math.round(v) : v.toFixed(1)) + (opt.unit || ""), left + bw + 5, by + bh / 2 - 1); } });
+        if (v) { g.fillStyle = "#1a1a1a"; g.font = "bold 10px Arial"; g.textAlign = "left"; g.fillText(opt.unit === " h" ? H1(v) + " h" : (opt.dec === 0 ? Math.round(v) : v.toFixed(1)) + (opt.unit || ""), left + bw + 5, by + bh / 2 - 1); } });
       g.strokeStyle = "#e6e0d2"; g.beginPath(); g.moveTo(16, y + rowH - 1); g.lineTo(w - 16, y + rowH - 1); g.stroke(); });
     return { png: c.toDataURL("image/png"), w, h };
   }
@@ -461,7 +461,7 @@ export function makeDrill(ctx) {
     const line = (ws, r, vals, i, o = {}) => { const row = ws.getRow(r); row.height = o.h || 18;
       vals.forEach((v, k) => { const x = row.getCell(k + 1); x.value = v === "" || v == null ? null : v; x.border = box; x.font = F({ bold: !!o.bold || k === 0 });
         x.alignment = { vertical: o.top ? "top" : "middle", horizontal: typeof v === "number" || v instanceof Date ? "center" : "left", wrapText: true };
-        if (typeof v === "number") x.numFmt = (o.fmt || {})[k] || DEC1; if (v instanceof Date) x.numFmt = "dd/mm/yyyy";
+        if (typeof v === "number") { if ((o.hm || []).includes(k)) { x.value = v / 24; x.numFmt = "[h]:mm"; } else x.numFmt = (o.fmt || {})[k] || DEC1; } if (v instanceof Date) x.numFmt = "dd/mm/yyyy";
         if (o.tot) { x.fill = fill(X.TOT); x.border = { ...box, top: { style: "medium", color: { argb: X.GOLD } } }; x.font = F({ bold: true }); } else if (i % 2) x.fill = fill(X.CREAM);
         const c = (o.color || {})[k]; if (c === "g") { x.fill = fill(X.GREENF); x.font = F({ bold: true, color: { argb: X.GREEN } }); } if (c === "r") { x.fill = fill(X.REDF); x.font = F({ bold: true, color: { argb: X.RED } }); } });
       return r + 1; };
@@ -536,20 +536,21 @@ export function makeDrill(ctx) {
 
     // 6. Delay summary
     ws = sheet(only ? "Breakdown report" : "Delay summary", [40, 14, 14, 14, 16, 16, 16], only ? "BREAKDOWN REPORT" : "DELAY SUMMARY", "Time lost per machine and per cause, as written on the shifts"); r = 7;
-    r = head(ws, r, ["Machine", "Shifts working", "Shifts not working", "Metres", "Hours lost"]);
-    B.mach.forEach((m, k) => { r = line(ws, r, [m.rig, m.working, m.down, m.metres, m.hours], k, { fmt: { 1: INT, 2: INT } }); }); r++;
-    r = head(ws, r, ["Delay", ...B.rigs.map(x => x + " hours"), "Total hours", ...B.rigs.map(x => "Times recorded " + x)]);
-    B.cats.forEach((c, k) => { r = line(ws, r, [c.cat, ...c.per, c.total, ...c.times], k, { fmt: Object.fromEntries(c.times.map((_, j) => [B.rigs.length + 2 + j, INT])) }); });
-    r = line(ws, r, ["Total", ...B.mach.map(m => m.hours), B.total, ...B.rigs.map(x => B.lines.filter(l => l.rig === x).length)], 0, { tot: true, fmt: Object.fromEntries(B.rigs.map((_, j) => [B.rigs.length + 2 + j, INT])) }); r++;
-    r = text(ws, r, "Hours are as written on the shift. A delay with no time written counts in Times recorded, not in hours."); r++;
+    r = head(ws, r, ["Machine", "Shifts working", "Shifts not working", "Metres", "Time lost (h:mm)"]);
+    B.mach.forEach((m, k) => { r = line(ws, r, [m.rig, m.working, m.down, m.metres, m.hours], k, { fmt: { 1: INT, 2: INT }, hm: [4] }); }); r++;
+    const hmCols = B.rigs.map((_, j) => j + 1).concat([B.rigs.length + 1]);
+    r = head(ws, r, ["Delay", ...B.rigs.map(x => x + " (h:mm)"), "Total (h:mm)", ...B.rigs.map(x => "Times recorded " + x)]);
+    B.cats.forEach((c, k) => { r = line(ws, r, [c.cat, ...c.per, c.total, ...c.times], k, { fmt: Object.fromEntries(c.times.map((_, j) => [B.rigs.length + 2 + j, INT])), hm: hmCols }); });
+    r = line(ws, r, ["Total", ...B.mach.map(m => m.hours), B.total, ...B.rigs.map(x => B.lines.filter(l => l.rig === x).length)], 0, { tot: true, fmt: Object.fromEntries(B.rigs.map((_, j) => [B.rigs.length + 2 + j, INT])), hm: hmCols }); r++;
+    r = text(ws, r, "Times are hours:minutes, as written on the shift. A delay with no time written counts in Times recorded only."); r++;
     const col = ["#d4a12a", "#111111", "#2e7d4f"];
     if (B.cats.length) { const c1 = chartPng("Hours lost per cause, by machine", B.cats.map(c => c.cat), B.rigs.map((x, k) => ({ name: x, color: col[k], vals: B.cats.map(c => c.per[k]) })), { unit: " h" });
       ws.addImage(wb.addImage({ base64: c1.png, extension: "png" }), { tl: { col: 0, row: r }, ext: { width: 820, height: Math.round(820 * c1.h / c1.w) } }); r += Math.ceil(820 * c1.h / c1.w / 20) + 2;
       const c2 = chartPng("Shifts working and not working, by machine", B.mach.map(m => m.rig), [{ name: "Working", color: "#2e7d4f", vals: B.mach.map(m => m.working) }, { name: "Not working", color: "#b3261e", vals: B.mach.map(m => m.down) }], { dec: 0 });
       ws.addImage(wb.addImage({ base64: c2.png, extension: "png" }), { tl: { col: 0, row: r }, ext: { width: 820, height: Math.round(820 * c2.h / c2.w) } }); r += Math.ceil(820 * c2.h / c2.w / 20) + 2; }
     ws.getCell(r, 1).value = "Every delay, shift by shift"; ws.getCell(r, 1).font = F({ size: 12, bold: true }); r++;
-    r = head(ws, r, ["Delay (as written on the shift)", "Date", "Shift", "Machine", "Category", "Hours"]);
-    B.lines.forEach((l, k) => { r = line(ws, r, [l.text, D(l.date), l.shift, l.rig, l.cat, l.hours == null ? "" : l.hours], k, { h: Math.max(18, rowsFor(l.text, 46) * 13 + 4), fmt: { 5: "0.00" } }); });
+    r = head(ws, r, ["Delay (as written on the shift)", "Date", "Shift", "Machine", "Category", "Time (h:mm)"]);
+    B.lines.forEach((l, k) => { r = line(ws, r, [l.text, D(l.date), l.shift, l.rig, l.cat, l.hours == null ? "" : l.hours], k, { h: Math.max(18, rowsFor(l.text, 46) * 13 + 4), hm: [5] }); });
 
     if (!only) {
       // 7. Supporting documents
