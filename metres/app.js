@@ -724,6 +724,15 @@ async function crData(r) { const parts = [];
       if (!p && navigator.onLine) { await fire(); const x = await fb.getDoc(fb.doc(fb.db, "ctrl", `file_${r.fid}_${i}`)); p = x.exists() ? x.data().data : ""; }
       if (!p) return null; parts.push(p); } } finally { d?.close(); }
   return parts.join(""); }
+/* every shift's metres and delays, shared with the Control Room so its availability report shows the same figures as here */
+async function pushMetresCtrl() {
+  if (!navigator.onLine || !fbUser) return; const { db, doc, setDoc } = fb, sent = JSON.parse(localStorage.getItem("tkr-mtrctrl") || "{}");
+  for (const m of [shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]) {
+    const data = [...slotsFor(m + "-01", monthEnd(m)).values()].map(x => ({ date: x.date, shift: x.shift, rig: x.rig, metres: x.metres, status: x.status, block: x.block, delays: x.delays }));
+    const key = JSON.stringify(data); if (sent[m] === key) continue;
+    await setDoc(doc(db, "ctrl", "mtr_" + m), { id: "mtr_" + m, kind: "mtr", ym: m, data: key, editedAt: Date.now() }); sent[m] = key; }
+  try { localStorage.setItem("tkr-mtrctrl", JSON.stringify(sent)); } catch {}
+}
 async function pushMdocs() {
   if (!navigator.onLine || !fbUser) return; const from = shiftMonth(today().slice(0, 7), -1) + "-01";
   const L = files.filter(f => !f.cr && /^TDR/.test(f.rig || "") && f.date >= from), sent = JSON.parse(localStorage.getItem("tkr-mdocs") || "{}"), now = {}, { db, doc, setDoc } = fb;
@@ -753,6 +762,7 @@ async function linkCtrl() {
   try { await readCtrlLocal(); } catch (e) { console.warn(e); }
   try { await readCtrlRemote(); } catch (e) { console.warn("control room not reachable", e?.code || e); }
   withCtrlFiles(); try { await pushMdocs(); } catch (e) { console.warn("metres documents not shared with the Control Room", e); }
+  try { await pushMetresCtrl(); } catch (e) { console.warn("metres not shared with the Control Room", e); }
   if (!ctrlEvs.size) return 0;
   const now = Date.now(), changed = [];
   for (const s of shifts) { if (s.date < FC_FROM) continue; const R2 = { ...(s.rigs || {}) }; let ch = false;

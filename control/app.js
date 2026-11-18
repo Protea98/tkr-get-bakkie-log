@@ -3,6 +3,7 @@
    "not in use" are logged with the exact start and end time; the documents checklist and the invoicing lists are
    ticked off. Everything is saved on this device at once, and goes to the TKR app when there is signal. */
 import { tabBar, pageHead, sheet, sheetClick, afterRender, closeSheet, icon } from "../lib/ui.js";
+import { bdData, chartPng } from "../lib/metres-xlsx.js";
 
 const $ = id => document.getElementById(id);
 const app = $("app");
@@ -84,10 +85,23 @@ function lockedF(r, f) { if (!r || !me || me.admin) return false; if (r.fs?.[f] 
 const valOf = (r, f) => /^h\d+$/.test(f) && r?.cells ? r.cells[f.slice(1)] : r?.[f];
 const lockedV = (r, f) => !!r && filled(valOf(r, f)) && lockedF(r, f);
 const evLocked = e => ["machine", "type", "start"].some(f => lockedV(e, f));
+/* every change since the last Save, so Discard can put things back the way they were */
+let undo = [];
+function journal(id, old) { if (!me || undo.some(u => u.id === id)) return; undo.push({ id, prev: old ? JSON.parse(JSON.stringify(old)) : null }); metaSet("undo", undo).catch(() => {}); }
+async function clearUndo() { undo = []; await metaSet("undo", []).catch(() => {}); }
+async function discardChanges() {
+  const now = Date.now(), L = undo.slice().reverse(), out = [];
+  for (const u of L) { const cur = recs.find(x => x.id === u.id); if (!cur && !u.prev) continue;
+    out.push(u.prev ? { ...u.prev, editedAt: now, synced: 0 } : { ...cur, deleted: true, editedAt: now, synced: 0 }); }
+  await tx("readwrite", t => { for (const r of out) t.objectStore("rec").put(r); });
+  for (const r of out) { const i = recs.findIndex(x => x.id === r.id); if (i >= 0) recs[i] = r; else recs.push(r); }
+  const n = undo.filter(u => recs.find(x => x.id === u.id)?.kind !== "log").length; await clearUndo(); syncSoon(); return n;
+}
 async function put(r, log) {
-  const old = recs.find(x => x.id === r.id);
+  const old = recs.find(x => x.id === r.id); journal(r.id, old);
   const rec = { ...stamp(r, old), editedAt: Date.now(), by: me?.name || r.by || "", synced: 0 };
   const L = log ? { id: "log_" + uid(), kind: "log", ym: (r.date || r.start || today()).slice(0, 7), date: (r.date || r.start || today()).slice(0, 10), at: Date.now(), by: me?.name || "", what: log, editedAt: Date.now(), synced: 0 } : null;
+  if (L) journal(L.id, null);
   await tx("readwrite", t => { t.objectStore("rec").put(rec); if (L) t.objectStore("rec").put(L); });
   const i = recs.findIndex(x => x.id === rec.id); if (i >= 0) recs[i] = rec; else recs.push(rec); if (L) recs.push(L);
   syncSoon(); return rec;
@@ -202,8 +216,8 @@ function nowView() {
   const seLine = x => x.e ? evLine(x.e) : `<div class="evrow"><span class="tag ${x.sheet.type}">${x.sheet.type}</span><div><b>${esc(x.sheet.machine)}</b> · ${TYPES[x.sheet.type]}<br><span class="t">${x.sheet.hrs.map(hLabel).join(", ")} · ${x.sheet.hrs.length} h, picked in the sheet</span></div></div>`;
   return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
     + statusBar()
-    + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${h2(shT.avail)} h available · ${h2(shT.down)} h down so far</div></div>
-      <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${h2(dayT.avail)} h available · ${h2(dayT.down)} h down</div></div>
+    + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${hm(shT.avail)} available · ${hm(shT.down)} down so far (hours:minutes)</div></div>
+      <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${hm(dayT.avail)} available · ${hm(dayT.down)} down</div></div>
       <div class="tile good"><div class="l">Working now</div><div class="n">${cnt("OP")}</div><div class="s">of ${ALL.length} machines</div></div>
       <div class="tile ${cnt("BD") ? "alert" : ""}"><div class="l">Breakdowns now</div><div class="n">${cnt("BD")}</div></div>
       <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
@@ -249,25 +263,61 @@ const CAUSES = [["Waiting for GET / drill bits", /\bget\b|\bbits?\b|drill bit/],
   ["Tramming", /tram/], ["Blasting", /blast/], ["No operator", /operator|driver/]];
 function causeOf(e) { const t = String(e.reason || "").toLowerCase().trim(); if (e.type === "PM" && !t) return "Planned maintenance"; if (!t) return "No reason written";
   for (const [n, rx] of CAUSES) if (rx.test(t)) return n; return e.reason.trim().replace(/^./, c => c.toUpperCase()); }
-function delaySummary(m) {
-  const a = toMs(m + "-01T06:00"), b = Math.min(toMs(addDays(monthEnd(m), 1) + "T06:00"), Date.now()), ALL = fleet().flatMap(([, L]) => L);
-  const days = []; for (let x = m + "-01"; x <= monthEnd(m) && x <= today(); x = addDays(x, 1)) days.push(x);
+/* metres and tally-sheet delays per drill rig, shared by the Metres section (same figures as its Delay summary) */
+const rigKey = r => String(r || "").replace(/\s+/g, "").toUpperCase();
+function mtrSlots(from, to) { const S = new Map();
+  for (const r of R("mtr")) { if (r.ym < from.slice(0, 7) || r.ym > to.slice(0, 7)) continue; let L = []; try { L = JSON.parse(r.data || "[]"); } catch {}
+    for (const x of L) if (x.date >= from && x.date <= to) S.set(`${x.date}|${x.shift}|${x.rig}`, x); }
+  return S; }
+function dsData(from, to) {
+  const a = toMs(from + "T06:00"), b = Math.min(toMs(addDays(to, 1) + "T06:00"), Date.now()), ALL = fleet().flatMap(([, L]) => L);
+  const days = []; for (let x = from; x <= to && x <= today(); x = addDays(x, 1)) days.push(x);
   const per = ALL.map(mc => { const t = days.reduce((o, x) => { const z = daySum(mc, x); if (z) for (const k of ["avail", "BD", "PM", "down"]) o[k] += z[k]; return o; }, { avail: 0, BD: 0, PM: 0, down: 0 });
     const E = evs().filter(e => e.machine === mc && (e.type === "BD" || e.type === "PM") && toMs(e.start) < b && evEnd(e) > a);
     return { mc, g: groupOf(mc), ...t, nBD: E.filter(e => e.type === "BD").length, nPM: E.filter(e => e.type === "PM").length }; });
   const lines = evs().filter(e => (e.type === "BD" || e.type === "PM") && toMs(e.start) < b && evEnd(e) > a).map(e => ({ e, h: (Math.min(evEnd(e), b) - Math.max(toMs(e.start), a)) / 36e5, cause: causeOf(e) }))
     .sort((x, y) => toMs(x.e.start) - toMs(y.e.start));
   const C = new Map(); for (const l of lines) { const c = C.get(l.cause) || { cause: l.cause, h: 0, n: 0, M: new Map() }; c.h += l.h; c.n++; c.M.set(l.e.machine, (c.M.get(l.e.machine) || 0) + l.h); C.set(l.cause, c); }
-  const causes = [...C.values()].sort((x, y) => y.h - x.h), pc = t => t.avail + t.down ? Math.round(t.avail / (t.avail + t.down) * 1000) / 10 + "%" : "–";
   const T = per.reduce((o, x) => { for (const k of ["avail", "BD", "PM", "down", "nBD", "nPM"]) o[k] += x[k]; return o; }, { avail: 0, BD: 0, PM: 0, down: 0, nBD: 0, nPM: 0 });
-  return `<section class="card"><h2>Delay summary · ${monthName(m)}</h2><p class="muted" style="margin-top:0">${fmt(m + "-01")} to ${fmt(days.at(-1) || m + "-01")} · lost time per machine, from the sheet and the logged times.</p>
-    <div class="tbl"><table class="avt"><thead><tr><th>Group</th><th>Machine</th><th>Available h</th><th>Breakdown h</th><th>Planned maint. h</th><th>Down h</th><th>Availability</th><th>Times broken down</th><th>Times in maintenance</th></tr></thead><tbody>
-      ${per.map(x => `<tr><td class="muted">${esc(x.g)}</td><td><b>${esc(x.mc)}</b></td><td class="num">${h2(x.avail)}</td><td class="num ${x.BD ? "hot" : ""}">${h2(x.BD)}</td><td class="num">${h2(x.PM)}</td><td class="num">${h2(x.down)}</td><td class="num pct">${pc(x)}</td><td class="num">${x.nBD}</td><td class="num">${x.nPM}</td></tr>`).join("")}
-      <tr class="tot"><td></td><td>Total</td><td class="num">${h2(T.avail)}</td><td class="num">${h2(T.BD)}</td><td class="num">${h2(T.PM)}</td><td class="num">${h2(T.down)}</td><td class="num pct">${pc(T)}</td><td class="num">${T.nBD}</td><td class="num">${T.nPM}</td></tr></tbody></table></div>
+  const tdr = ALL.filter(mc => /^TDR/i.test(mc)), slots = mtrSlots(from, to);
+  const B = bdData(slots, from, to, [...new Set([...slots.values()].map(x => x.rig))].sort((x, y) => tdr.findIndex(t => rigKey(t) === rigKey(x)) - tdr.findIndex(t => rigKey(t) === rigKey(y))));
+  return { from, to: days.at(-1) || from, days, per, lines, causes: [...C.values()].sort((x, y) => y.h - x.h), T, B, avOf: rig => per.find(p => rigKey(p.mc) === rigKey(rig)) };
+}
+/* the graphs, the same on screen and in the Excel */
+function dsCharts(D) {
+  const out = [], per = D.per.filter(x => x.avail + x.down > 0), B = D.B, col = ["#d4a12a", "#111111", "#2e7d4f"];
+  if (per.length) {
+    out.push(chartPng("Availability per machine (%)", per.map(x => x.mc), [{ name: "Availability %", color: "#2e7d4f", vals: per.map(x => Math.round(x.avail / (x.avail + x.down) * 1000) / 10) }], { unit: "%" }));
+    const dn = per.filter(x => x.BD + x.PM > 0);
+    if (dn.length) out.push(chartPng("Hours down per machine (Control Room)", dn.map(x => x.mc), [{ name: "Breakdown", color: "#b3261e", vals: dn.map(x => Math.round(x.BD * 10) / 10) }, { name: "Planned maintenance", color: "#1f4e78", vals: dn.map(x => Math.round(x.PM * 10) / 10) }], { unit: " h" })); }
+  if (D.causes.length) out.push(chartPng("Hours down per cause (Control Room)", D.causes.map(c => c.cause), [{ name: "Hours", color: "#d4a12a", vals: D.causes.map(c => Math.round(c.h * 10) / 10) }], { unit: " h" }));
+  if (B.cats.length) out.push(chartPng("Drill rigs: hours lost per cause (shift reports)", B.cats.map(c => c.cat), B.rigs.map((x, k) => ({ name: x, color: col[k % 3], vals: B.cats.map(c => c.per[k]) })), { unit: " h" }));
+  if (B.mach.length) { out.push(chartPng("Drill rigs: metres drilled", B.mach.map(m => m.rig), [{ name: "Metres", color: "#d4a12a", vals: B.mach.map(m => m.metres) }], { unit: " m" }));
+    out.push(chartPng("Drill rigs: shifts working and not working", B.mach.map(m => m.rig), [{ name: "Working", color: "#2e7d4f", vals: B.mach.map(m => m.working) }, { name: "Not working", color: "#b3261e", vals: B.mach.map(m => m.down) }], { dec: 0 })); }
+  return out;
+}
+const pcOfT = t => t && t.avail + t.down ? Math.round(t.avail / (t.avail + t.down) * 1000) / 10 + "%" : "–";
+function delaySummary(m) {
+  const D = dsData(m + "-01", monthEnd(m)), { per, causes, lines, T, B } = D, h1 = v => (Math.round((v || 0) * 10) / 10).toFixed(1);
+  const drill = B.all.length ? `<h3 style="margin:16px 0 6px">Drill rigs · metres and delays from the Metres section</h3>
+    <div class="tbl"><table class="avt"><thead><tr><th>Machine</th><th>Shifts working</th><th>Shifts not working</th><th>Metres</th><th>Delay hours (shift reports)</th><th>Available (Control Room)</th><th>Availability</th></tr></thead><tbody>
+      ${B.mach.map(x => { const av = D.avOf(x.rig); return `<tr><td><b>${esc(x.rig)}</b></td><td class="num">${x.working}</td><td class="num">${x.down}</td><td class="num">${(+x.metres || 0).toFixed(1)}</td><td class="num">${h1(x.hours)}</td><td class="num">${av ? hm(av.avail) : "–"}</td><td class="num pct">${pcOfT(av)}</td></tr>`; }).join("")}</tbody></table></div>
+    <div class="tbl" style="margin-top:10px"><table class="avt"><thead><tr><th>Delay</th>${B.rigs.map(r => `<th>${esc(r)} hours</th>`).join("")}<th>Total hours</th>${B.rigs.map(r => `<th>Times recorded ${esc(r)}</th>`).join("")}</tr></thead><tbody>
+      ${B.cats.map(c => `<tr><td>${esc(c.cat)}</td>${c.per.map(v => `<td class="num">${h1(v)}</td>`).join("")}<td class="num"><b>${h1(c.total)}</b></td>${c.times.map(v => `<td class="num">${v}</td>`).join("")}</tr>`).join("")}
+      <tr class="tot"><td>Total</td>${B.rigs.map((r, i) => `<td class="num">${h1(B.cats.reduce((n, c) => n + c.per[i], 0))}</td>`).join("")}<td class="num">${h1(B.total)}</td>${B.rigs.map((r, i) => `<td class="num">${B.cats.reduce((n, c) => n + c.times[i], 0)}</td>`).join("")}</tr></tbody></table></div>
+    <details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Every delay on the shift reports (${B.lines.length})</summary><div class="tbl"><table class="avt"><thead><tr><th>Delay (as written on the shift report)</th><th>Date</th><th>Shift</th><th>Machine</th><th>Category</th><th>Hours</th></tr></thead><tbody>
+      ${B.lines.map(l => `<tr><td>${esc(l.text)}</td><td>${fmt(l.date)}</td><td>${l.shift}</td><td>${esc(l.rig)}</td><td>${esc(l.cat || "")}</td><td class="num">${l.hours == null ? "" : h1(l.hours)}</td></tr>`).join("")}</tbody></table></div></details>`
+    : `<p class="muted" style="margin-top:14px">Drill rig metres and shift-report delays show here once the Metres section has synced this month.</p>`;
+  return `<section class="card"><h2>Delay summary · ${monthName(m)}</h2><p class="muted" style="margin-top:0">${fmt(D.from)} to ${fmt(D.to)} · hours are shown as hours:minutes (0:58 = 58 minutes).</p>
+    <div class="tbl"><table class="avt"><thead><tr><th>Group</th><th>Machine</th><th>Available</th><th>Breakdown</th><th>Planned maint.</th><th>Down</th><th>Availability</th><th>Times broken down</th><th>Times in maintenance</th></tr></thead><tbody>
+      ${per.map(x => `<tr><td class="muted">${esc(x.g)}</td><td><b>${esc(x.mc)}</b></td><td class="num">${hm(x.avail)}</td><td class="num ${x.BD ? "hot" : ""}">${hm(x.BD)}</td><td class="num">${hm(x.PM)}</td><td class="num">${hm(x.down)}</td><td class="num pct">${pcOfT(x)}</td><td class="num">${x.nBD}</td><td class="num">${x.nPM}</td></tr>`).join("")}
+      <tr class="tot"><td></td><td>Total</td><td class="num">${hm(T.avail)}</td><td class="num">${hm(T.BD)}</td><td class="num">${hm(T.PM)}</td><td class="num">${hm(T.down)}</td><td class="num pct">${pcOfT(T)}</td><td class="num">${T.nBD}</td><td class="num">${T.nPM}</td></tr></tbody></table></div>
     <div class="tbl" style="margin-top:12px"><table class="avt"><thead><tr><th>Cause</th><th>Hours</th><th>Times recorded</th><th>Machines</th></tr></thead><tbody>
-      ${causes.map(c => `<tr><td>${esc(c.cause)}</td><td class="num">${h2(c.h)}</td><td class="num">${c.n}</td><td>${[...c.M].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${esc(k)} ${hm(v)}`).join(" · ")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No breakdowns or maintenance logged this month.</td></tr>'}</tbody></table></div>
+      ${causes.map(c => `<tr><td>${esc(c.cause)}</td><td class="num">${hm(c.h)}</td><td class="num">${c.n}</td><td>${[...c.M].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${esc(k)} ${hm(v)}`).join(" · ")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No breakdowns or maintenance logged this month.</td></tr>'}</tbody></table></div>
     <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Every breakdown and maintenance, one by one (${lines.length})</summary><div class="tbl"><table class="avt"><thead><tr><th>Date</th><th>Machine</th><th>Type</th><th>From</th><th>To</th><th>Hours</th><th>Cause</th><th>Reason / comments</th></tr></thead><tbody>
-      ${lines.map(l => `<tr><td>${fmt(l.e.start.slice(0, 10))}</td><td><b>${esc(l.e.machine)}</b></td><td>${TYPES[l.e.type]}</td><td>${hhmm(l.e.start)}</td><td>${l.e.end ? (l.e.end.slice(0, 10) !== l.e.start.slice(0, 10) ? fmt(l.e.end.slice(0, 10)).slice(0, 5) + " " : "") + hhmm(l.e.end) : "still going"}</td><td class="num">${hm(l.h)}</td><td>${esc(l.cause)}</td><td>${esc(l.e.reason || "")}</td></tr>`).join("")}</tbody></table></div></details></section>`;
+      ${lines.map(l => `<tr><td>${fmt(l.e.start.slice(0, 10))}</td><td><b>${esc(l.e.machine)}</b></td><td>${TYPES[l.e.type]}</td><td>${hhmm(l.e.start)}</td><td>${l.e.end ? (l.e.end.slice(0, 10) !== l.e.start.slice(0, 10) ? fmt(l.e.end.slice(0, 10)).slice(0, 5) + " " : "") + hhmm(l.e.end) : "still going"}</td><td class="num">${hm(l.h)}</td><td>${esc(l.cause)}</td><td>${esc(l.e.reason || "")}</td></tr>`).join("")}</tbody></table></div></details>
+    ${drill}
+    <details style="margin-top:12px" open><summary style="cursor:pointer;font-weight:600">Graphs</summary><div style="display:grid;gap:12px;margin-top:8px">${(() => { try { return dsCharts(D).map(c => `<img src="${c.png}" alt="" style="width:100%;max-width:900px;height:auto;border:1px solid #e6e0d2;border-radius:6px">`).join(""); } catch { return ""; } })()}</div></details></section>`;
 }
 function monthGrid(m) {
   const days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);
@@ -390,7 +440,7 @@ function shiftTable(d, sh) {
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
   return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operational / standby · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
+    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
 async function setCell(d, mc, h, val) {
@@ -478,7 +528,7 @@ function daySheet(d) {
       <tr class="gt"><td>Hours updated</td><td colspan="4">${hourLog.filter(([, L]) => L.length).length} of 24</td></tr></tbody></table></div></form>`;
 }
 async function saveShift(sh, upload = true) {
-  const f = $("fDay"); if (!f) return; const d = f.dataset.date;
+  const f = $("fDay"); if (!f) return; const d = f.dataset.date; setTimeout(clearUndo, 0);
   const dayR = recs.find(r => r.id === "day_" + d) || { id: "day_" + d, kind: "day", ym: d.slice(0, 7), date: d };
   const ctl = { dayCtl: f.elements.dayCtl.value.trim() || (sh === "Day" ? me.name : dayR.dayCtl || ""), nightCtl: f.elements.nightCtl.value.trim() || (sh === "Night" ? me.name : dayR.nightCtl || "") };
   if (ctl.dayCtl !== (dayR.dayCtl || "") || ctl.nightCtl !== (dayR.nightCtl || "")) await put({ ...dayR, ...ctl }, `Controllers: day ${ctl.dayCtl || "–"}, night ${ctl.nightCtl || "–"}`);
@@ -534,7 +584,7 @@ async function logout(swap) {
   if (!me) return;
   if (!me.admin && !confirm(`${swap ? "Change controller: l" : "L"}og out ${me.name} and end your shift?\n\nYour entries are saved and turn grey (locked). Hour boxes you left empty stay open for the next controller. To change a locked entry later, ask the admin.`)) return;
   await put({ id: "log_" + uid(), kind: "log", ym: today().slice(0, 7), date: today(), at: Date.now(), what: `${me.name} logged out${me.admin ? "" : " – end of shift"}` });
-  me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
+  me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); await clearUndo(); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
   toast(swap ? "Logged out. The next controller taps their name, or Add yourself." : "Logged out. Everything is saved on this PC."); syncNow(false);
 }
 
@@ -761,6 +811,8 @@ async function clickH(ev) {
   if (b.dataset.addm) { const gi = +b.dataset.addm, inp = app.querySelector(`[data-newm="${gi}"]`); if (await addMachine(gi, inp.value)) render(); return; }
   if (b.dataset.rmm) { const [, m] = b.dataset.rmm.split("|"); if (!confirm(`Take ${m} off the list? Its logged times stay.`)) return; await removeMachine(m); render(); return; }
   if (b.dataset.rmu) { if (!confirm("Remove yourself from this PC?")) return; const u = recs.find(r => r.id === b.dataset.rmu); await put({ ...u, deleted: true }); me = null; await metaSet("me", null); render(); return; }
+  if (b.dataset.discard) { const n = undo.length; if (!n) return; if (!confirm("Discard everything changed since the last Save? The hour boxes, times, reasons and ticks go back to how they were.")) return;
+    b.disabled = true; await discardChanges(); sheetDirty = false; render(); toast("Changes discarded. Everything is back to the last Save."); return; }
   if (b.id === "xl") { const f = $("cxFrom")?.value || month + "-01", t = $("cxTo")?.value || monthEnd(month); if (t < f) { toast("The To date must be after the From date."); return; }
     b.disabled = true; try { await exportXlsx(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; return; }
   if (b.id === "bk") { const blob = new Blob([JSON.stringify({ kind: "tkr-control-backup", at: Date.now(), recs })], { type: "application/json" }); const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_backup_${today()}.json`); return; }
@@ -850,10 +902,24 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); sync.last = Date.now(); await metaSet("syncLast", sync.last); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
+}
+/* live: changes made on any other PC or phone show here within seconds, dashboards included */
+let liveKey = "", liveOff = null, liveT = 0;
+const canRedraw = () => me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.getElementById("hpop") && !document.querySelector(".sheet:not([hidden])");
+function liveWatch(yms) {
+  const k = yms.join(","); if (k === liveKey && liveOff) return; liveOff?.(); liveKey = k;
+  const { db, collection, query, where, onSnapshot } = fb;
+  liveOff = onSnapshot(query(collection(db, "ctrl"), where("ym", "in", yms)), async snap => {
+    let n = 0; const docs = snap.docChanges ? snap.docChanges().filter(c => c.type !== "removed").map(c => c.doc) : snap.docs;
+    for (const d of docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
+      if (r.id && (!have || (r.editedAt || 0) > (have.editedAt || 0))) { await tx("readwrite", t => t.objectStore("rec").put({ ...r, synced: r.editedAt })); n++; } }
+    if (!n) return; recs = await all();
+    const go = () => { if (canRedraw()) render(); else { clearTimeout(liveT); liveT = setTimeout(go, 3000); } }; go();
+  }, e => { console.warn("live updates stopped", e); liveOff = null; liveKey = ""; });
 }
 function syncCard() {
   return `<section class="card"><h2>Send to the TKR app</h2><p style="margin-top:0">Everything is sent by itself whenever this PC has signal, and changes from the other PCs come in the same way. No sign-in needed. ${waiting() ? `<b>${waiting()}</b> changes waiting on this PC.` : "Nothing waiting."}${sync.last ? ` Last sent ${fmt(ymd(new Date(sync.last)))} ${new Date(sync.last).toTimeString().slice(0, 5)}.` : ""} ${esc(sync.msg)}</p><div class="row"><button class="primary" id="syncNow">Send and check now</button></div></section>`;
@@ -886,7 +952,7 @@ async function exportXlsx(from, to) {
   const row = (ws, r, L, o = {}) => { L.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v === "" ? null : v; c.border = box; c.font = F({ bold: !!o.bold || (o.boldCol || []).includes(i) });
     c.alignment = { vertical: "middle", wrapText: !!o.wrap, horizontal: i < 2 || (o.left || []).includes(i) ? "left" : "center" }; if (typeof v === "number") c.numFmt = (o.fmt || {})[i] || "0.00"; if (o.fill) c.fill = fill(o.fill);
     const cc = COLR[v]; if (cc && !o.fill) { c.fill = fill(cc[0]); c.font = F({ bold: true, color: { argb: cc[1] } }); } }); };
-  const days = []; for (let x = from; x <= to; x = addDays(x, 1)) days.push(x);
+  const days = []; for (let x = from; x <= to && (x <= today() || x === from); x = addDays(x, 1)) days.push(x);   // days still to come are left out
   const rec = id => recs.find(x => x.id === id && !x.deleted) || {};
   // 1. supporting documents per service
   let ws = wb.addWorksheet(monthName(m), { views: [{ showGridLines: false }] }); ws.columns = [20, 30, 9, 22, 16].map(w => ({ width: w }));
@@ -911,7 +977,29 @@ async function exportXlsx(from, to) {
     row(ws, r, [`${g} total`, "", ...gt.per.map(v => Math.round(v * 100) / 100), gt.avail, gt.BD, gt.PM, gt.down, pct(gt.avail, gt.down)], { bold: true, fill: "FFFFF2CC" }); ws.getCell(r, nc).numFmt = "0%"; r++;
     gt.per.forEach((v, i) => fleetT.per[i] += v); for (const k of ["avail", "BD", "PM", "SB", "down"]) fleetT[k] += gt[k]; }
   row(ws, r, ["Fleet total", "", ...fleetT.per.map(v => Math.round(v * 100) / 100), fleetT.avail, fleetT.BD, fleetT.PM, fleetT.down, pct(fleetT.avail, fleetT.down)], { bold: true, fill: "FFD9D9D9" }); ws.getCell(r, nc).numFmt = "0%";
-  // 4. one sheet per day, like the control room capture sheets
+  // 4. delay summary per machine (Control Room), and the drill rigs as in the Metres Delay summary
+  { const D = dsData(from, to), B = D.B; ws = wb.addWorksheet("Delay summary", { views: [{ showGridLines: false }] }); const nw = Math.max(9, 2 + B.rigs.length * 2);
+    ws.columns = [34, 14, 13, 13, 13, 13, 13, 13, 13, 13, 13].slice(0, Math.max(nw, 9)).map(w => ({ width: w }));
+    top(ws, nw, `Delay summary – ${period}`, "TKR OPERATIONS  ·  THARISA MINE", `Dates: ${fmt(D.from)} to ${fmt(D.to)}  ·  hours as decimals (0.97 = 58 minutes)`); r = 7;
+    band(ws, r++, nw, "Availability per machine (Control Room)"); head(ws, r++, ["Machine", "Group", "Available hrs", "Breakdown hrs", "Planned maint. hrs", "Down hrs", "Availability %", "Times broken down", "Times in maintenance"]);
+    for (const x of D.per) { row(ws, r, [x.mc, x.g, x.avail, x.BD, x.PM, x.down, pct(x.avail, x.down), x.nBD, x.nPM], { boldCol: [0], fmt: { 7: "0", 8: "0" } }); ws.getCell(r, 7).numFmt = "0.0%"; r++; }
+    row(ws, r, ["Total", "", D.T.avail, D.T.BD, D.T.PM, D.T.down, pct(D.T.avail, D.T.down), D.T.nBD, D.T.nPM], { bold: true, fill: "FFFFF2CC", fmt: { 7: "0", 8: "0" } }); ws.getCell(r, 7).numFmt = "0.0%"; r += 2;
+    band(ws, r++, nw, "Breakdowns and maintenance per cause (Control Room)"); head(ws, r++, ["Cause", "Hours", "Times recorded", "Machines"]);
+    for (const c of D.causes) row(ws, r++, [c.cause, c.h, c.n, [...c.M].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${hm(v)}`).join(" · ")], { left: [3], fmt: { 2: "0" } });
+    if (!D.causes.length) row(ws, r++, ["No breakdowns or maintenance logged", "", "", ""]);
+    if (B.all.length) { r++; band(ws, r++, nw, "Drill rigs – metres and delays from the shift reports (Metres section)"); head(ws, r++, ["Machine", "Shifts working", "Shifts not working", "Metres", "Delay hours", "Available hrs (Control Room)", "Availability %"]);
+      for (const x of B.mach) { const av = D.avOf(x.rig); row(ws, r, [x.rig, x.working, x.down, x.metres, x.hours, av ? av.avail : "", av ? pct(av.avail, av.down) : ""], { boldCol: [0], fmt: { 1: "0", 2: "0", 3: "#,##0.0", 4: "0.0" } }); ws.getCell(r, 7).numFmt = "0.0%"; r++; }
+      r++; head(ws, r++, ["Delay", ...B.rigs.map(x => x + " hours"), "Total hours", ...B.rigs.map(x => "Times recorded " + x)]);
+      for (const c of B.cats) row(ws, r++, [c.cat, ...c.per, c.total, ...c.times], { fmt: Object.fromEntries(B.rigs.map((_, i) => [B.rigs.length + 2 + i, "0"])) });
+      row(ws, r++, ["Total", ...B.rigs.map((_, i) => B.cats.reduce((n, c) => n + c.per[i], 0)), B.total, ...B.rigs.map((_, i) => B.cats.reduce((n, c) => n + c.times[i], 0))], { bold: true, fill: "FFFFF2CC", fmt: Object.fromEntries(B.rigs.map((_, i) => [B.rigs.length + 2 + i, "0"])) });
+      r++; band(ws, r++, nw, "Every delay, shift by shift"); head(ws, r++, ["Delay (as written on the shift report)", "Date", "Shift", "Machine", "Category", "Hours"]);
+      for (const l of B.lines) row(ws, r++, [l.text, fmt(l.date), l.shift, l.rig, l.cat || "", l.hours == null ? "" : l.hours], { left: [4] }); }
+    r++; band(ws, r++, nw, "Every breakdown and maintenance (Control Room)"); head(ws, r++, ["Reason / comments", "Date", "Machine", "Type", "From", "To", "Hours", "Cause"]);
+    for (const l of D.lines) row(ws, r++, [l.e.reason || "", fmt(l.e.start.slice(0, 10)), l.e.machine, TYPES[l.e.type], hhmm(l.e.start), l.e.end ? hhmm(l.e.end) : "still going", l.h, l.cause], { left: [7] });
+    const G = dsCharts(D); if (G.length) { const gs = wb.addWorksheet("Delay graphs", { views: [{ showGridLines: false }] }); gs.columns = Array(10).fill({ width: 12 });
+      top(gs, 10, `Delay graphs – ${period}`, "TKR OPERATIONS  ·  THARISA MINE", "Availability, breakdowns and delays per machine"); let gr = 6;
+      for (const c of G) { const w = 860, h = Math.round(w * c.h / c.w); gs.addImage(wb.addImage({ base64: c.png, extension: "png" }), { tl: { col: 0, row: gr }, ext: { width: w, height: h } }); gr += Math.ceil(h / 20) + 2; } } }
+  // 5. one sheet per day, like the control room capture sheets
   for (const d of days) {
     ws = wb.addWorksheet(`${d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1].slice(0, 3)}`, { views: [{ showGridLines: false }] });
     ws.columns = [16, 12, ...Array(12).fill(7.5), 12, 12, 30, 9, 9, 9, 9].map(w => ({ width: w }));
@@ -961,6 +1049,7 @@ async function exportXlsx(from, to) {
     if (f && f.groups.some(([, L]) => L.includes("TKR08"))) await put({ ...f, groups: f.groups.map(([g, L]) => [g, L.map(m => m === "TKR08" ? "TKR09" : m)]) });
     await metaSet("fix130", 1); }
   try { await closeCarried(); } catch (e) { console.warn(e); }
+  try { undo = (await metaGet("undo")) || []; } catch { undo = []; }
   const s = await metaGet("me");
   if (s && s.until > Date.now()) { const u = s.admin ? R("admin").find(a => a.id === s.id) : R("user").find(u => u.id === s.id);
     if (u) { me = { ...u, admin: !!s.admin, sid: s.sid || "s_" + uid(), start: s.start || s.until - 14 * 36e5 }; if (!s.sid) await metaSet("me", { ...s, sid: me.sid, start: me.start }); } }
