@@ -383,7 +383,7 @@ function sheetTabs() {
 function workbookSection() {
   if (!sheetSel) sheetSel = date;
   return `<h2 class="sect" style="margin-top:26px">Control room workbook</h2>${!me ? '<p class="muted" style="margin-top:-4px"><b>Viewing only.</b> The hours are filled in by the controller on shift.</p>' : ""}`
-    + `<p class="muted" style="margin-top:-4px">The same sheets as the Excel. Pick OP, BD or PM in each hour box, like on the Excel. When you pick BD or PM the exact time is logged by itself, and again when you pick OP. At the end of the shift tap <b>Save and upload</b>.</p>`
+    + `<p class="muted ctl-only" style="margin-top:-4px">The same sheets as the Excel. Pick OP, BD or PM in each hour box, like on the Excel. When you pick BD or PM the exact time is logged by itself, and again when you pick OP. At the end of the shift tap <b>Save and upload</b>.</p>`
     + `<div class="xlwin"><div class="xlsheet">${sheetSel === "month" ? monthSheet(date.slice(0, 7)) : daySheet(sheetSel)}</div>${sheetTabs()}</div>`;
 }
 function monthSheet(m) {
