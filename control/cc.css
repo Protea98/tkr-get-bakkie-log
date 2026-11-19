@@ -148,3 +148,11 @@ table.xl td.hc button.hbtn:focus-visible{outline:2px solid var(--gold,#d4a12a);o
 .hpop button.cur{outline:3px solid #111;outline-offset:1px}
 .hpop button.clr{background:#f2f2f2;color:#333}
 .hpop small{flex-basis:100%;color:#555;font-size:12px}
+
+/* view only: anyone can look, only a controller can change */
+.viewcard{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:16px;border:2px solid var(--gold,#d4a12a)}
+.viewcard .muted{flex:1 1 260px}
+.ro [data-log],.ro [data-upload],.ro [data-addmg],.ro [data-rmmg],.ro [data-discard],.ro [data-logout],.ro .savebar,.ro [data-newev],.ro [data-msg]{display:none!important}
+.ro [data-mach],.ro [data-hcell],.ro input,.ro select,.ro textarea{pointer-events:none}
+.ro [data-mach]{cursor:default}
+.ro table.xl td.hc button.hbtn{cursor:default}

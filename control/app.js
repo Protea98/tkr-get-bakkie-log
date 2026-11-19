@@ -118,6 +118,9 @@ function hoursIn(machine, from, to) {
   return out;
 }
 /* one machine, one date (06:00 to 06:00 next day), up to now */
+/* first hour of the run of BD / PM that is going on now in the sheet */
+function sheetSince(m, t) { const c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now(); const H = HRS(sh).filter(x => hStart(d, x) <= now);
+  let k = H.length - 1; while (k >= 0 && !C[H[k]]) k--; if (k < 0 || C[H[k]] !== t) return ""; while (k > 0 && C[H[k - 1]] === t) k--; return pad(H[k] % 24) + ":00"; }
 function stateNow(m) { const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
@@ -164,7 +167,11 @@ const pendingReqs = () => R("req").filter(q => q.status === "pending").length;
 const tabs = () => { const n = pendingReqs(); return [TABS[0], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(1)]; };
 function render() {
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
-  if (!me) { app.innerHTML = gateView(); return; }
+  if (!me && viewer) { $("who").innerHTML = `Viewing only · <button class="sm" data-unview="1" style="min-height:36px;padding:2px 12px">Controller sign-in</button>`;
+    const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; tab = "now";
+    app.innerHTML = `<div class="ro">${nowView()}</div>`; afterRender(app);
+    const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; } return; }
+  if (!me) { app.innerHTML = `<div class="card viewcard"><b>Just want to see the machines?</b><span class="muted">Anyone can view the live board and the hours. Only controllers can change them.</span><button class="primary" data-view="1">View the dashboard</button></div>` + gateView(); return; }
   let body = "";
   if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView();
   if (askMail && me && !me.admin) body = mailToView();
@@ -174,6 +181,7 @@ function render() {
   app.innerHTML = tabBar(tabs(), tab) + body; afterRender(app);
   const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; }
 }
+let viewer = false;
 const dateBar = () => `<div class="dnav"><button data-dnav="-1" aria-label="Day before">‹</button><input type="date" id="dPick" value="${date}" max="${today()}"><button data-dnav="1" aria-label="Next day" ${date >= today() ? "disabled" : ""}>›</button>${date !== today() ? '<button data-today class="sm">Today</button>' : ""}</div>`;
 function statusBar() {
   const logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at), last = logs[0];
@@ -223,13 +231,14 @@ function nowView() {
       <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
       ${cnt("NU") ? `<div class="tile"><div class="l">Not in use now</div><div class="n">${cnt("NU")}</div></div>` : ""}
       ${cnt("?") ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${cnt("?")}</div><div class="s">pick OP, BD or PM in the sheet</div></div>` : ""}</div>`
-    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : TYPES[st] || st}</small></button>`; }).join("")}</div>
+    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small></button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`; }).join("")}</div>`
+    + workbookSection()
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
       ${sheet("delays", `Delay summary · ${monthName(today().slice(0, 7))}`, delaySummary(today().slice(0, 7)), { icon: icon("bd"), sub: "lost time per machine and per cause this month" })}
       ${sheet("checks", "Data and documents checklist", checklist(today()), { icon: icon("docs"), sub: `${chkDone(today())} of ${CHECK.flatMap(([, i]) => i).length * COLS.length} ticked today` })}
-      ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>` + workbookSection();
+      ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>`;
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
@@ -373,7 +382,8 @@ function sheetTabs() {
 }
 function workbookSection() {
   if (!sheetSel) sheetSel = date;
-  return `<h2 class="sect" style="margin-top:26px">Control room workbook</h2><p class="muted" style="margin-top:-4px">The same sheets as the Excel. Pick OP, BD or PM in each hour box, like on the Excel. When you pick BD or PM the exact time is logged by itself, and again when you pick OP. At the end of the shift tap <b>Save and upload</b>.</p>`
+  return `<h2 class="sect" style="margin-top:26px">Control room workbook</h2>${!me ? '<p class="muted" style="margin-top:-4px"><b>Viewing only.</b> The hours are filled in by the controller on shift.</p>' : ""}`
+    + `<p class="muted" style="margin-top:-4px">The same sheets as the Excel. Pick OP, BD or PM in each hour box, like on the Excel. When you pick BD or PM the exact time is logged by itself, and again when you pick OP. At the end of the shift tap <b>Save and upload</b>.</p>`
     + `<div class="xlwin"><div class="xlsheet">${sheetSel === "month" ? monthSheet(date.slice(0, 7)) : daySheet(sheetSel)}</div>${sheetTabs()}</div>`;
 }
 function monthSheet(m) {
@@ -481,7 +491,7 @@ async function setReason(mc, d, sh, reason) {
     if ((rec.notes?.[sh] || "") !== reason) await put({ ...rec, deleted: false, notes: { ...(rec.notes || {}), [sh]: reason } }, `${mc} ${sh.toLowerCase()} shift comment: ${reason || "cleared"}`); }
 }
 function shiftMessage(d, sh) {
-  const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me.name;
+  const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me?.name || "";
   const L = [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}* (${sh === "Day" ? "06:00–18:00" : "18:00–06:00"})`, `Controller: ${ctl}`, ""];
   for (const [g, M] of fleet()) {
     const rows = M.map(mc => [mc, evsIn(mc, d, sh).filter(e => e.type === "BD" || e.type === "PM"), shiftSum(mc, d, sh)]), S = rows.reduce((t, [, , s]) => { if (s) { t.avail += s.avail; t.down += s.down; } return t; }, { avail: 0, down: 0 });
@@ -511,7 +521,7 @@ function daySheet(d) {
   const hours = []; for (let h = 6; h < 30; h++) hours.push(h % 24);
   const hourLog = hours.map(h => { const st = toMs((h < 6 ? addDays(d, 1) : d) + `T${pad(h)}:00`), L = logs.filter(l => l.at >= st && l.at < st + 36e5); return [h, L]; });
   return `<form id="fDay" data-date="${d}" autocomplete="off"><div class="xlhead"><b>Control Room Capture – ${parse(d).getDate()} ${MONTHS[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}</b><span>TKR OPERATIONS · THARISA MINE</span><small>Day shift 06:00 to 18:00 · Night shift 18:00 to 06:00</small></div>
-    <div class="xlinfo"><label>Date <input value="${fmt(d)}" readonly></label><label>Day controller <input name="dayCtl" value="${esc(day.dayCtl || "")}" placeholder="${esc(me.name)}"></label><label>Night controller <input name="nightCtl" value="${esc(day.nightCtl || "")}" placeholder="${esc(me.name)}"></label>
+    <div class="xlinfo"><label>Date <input value="${fmt(d)}" readonly></label><label>Day controller <input name="dayCtl" value="${esc(day.dayCtl || "")}" placeholder="${esc((me?.name || ""))}"></label><label>Night controller <input name="nightCtl" value="${esc(day.nightCtl || "")}" placeholder="${esc((me?.name || ""))}"></label>
       <label>Last update <input value="${last ? new Date(last.at).toTimeString().slice(0, 5) : ""}" readonly></label><label>Next update <input value="${last ? new Date(last.at + 36e5).toTimeString().slice(0, 5) : ""}" readonly></label>
       <label>Status <input value="${d !== today() ? "" : !last ? "Not started" : Date.now() - last.at > 36e5 ? "Update due" : "Up to date"}" readonly></label></div>
     <div class="xlband">Data and documents</div>
@@ -757,7 +767,10 @@ document.addEventListener("click", async ev => {
   if (pop && !ev.target.closest("#hpop") && !ev.target.closest("[data-hcell]")) pop.remove();
 }, true);
 async function clickH(ev) {
-  const hb = ev.target.closest("[data-hcell]"); if (hb) { cellMenu(hb); return; }
+  const vb = ev.target.closest("[data-view],[data-unview]");
+  if (vb) { viewer = !!vb.dataset.view; if (!viewer) { pinFor = null; adminStep = ""; } render(); if (viewer) syncNow(false).then(() => { if (viewer && !me) render(); }); return; }
+  if (!me) { if (viewer) { if (sheetClick(ev, app)) return; const b = ev.target.closest("[data-sh],[data-wbm]"); if (!b) return; } }   // viewing only: nothing can be changed
+  const hb = ev.target.closest("[data-hcell]"); if (hb) { if (!me) return; cellMenu(hb); return; }
   if (sheetClick(ev, app)) return;
   const ne = ev.target.closest("[data-newev]"); if (ne) { openEv(evForm({}, ne.dataset.newev), "Log breakdown"); return; }
   const lc = ev.target.closest("[data-lockcell]"); if (lc) { const [mc, h] = lc.dataset.lockcell.split("|"); openEv(reqForm({ type: "cell", d: $("fDay").dataset.date, mc, h: +h }), "Ask the admin to change it"); return; }
@@ -861,6 +874,7 @@ async function submitH(ev) {
   if (f.id === "fSync") { if (!navigator.onLine) { toast("Signing in needs signal."); return; } try { await fire(); await fb.signInWithEmailAndPassword(fb.auth, toLogin(f.elements.e.value), f.elements.p.value); toast("Signed in. The control room now sends to the TKR app by itself."); } catch { toast("Email or password is wrong."); } return; }
 }
 async function changeH(ev) {
+  if (!me) return;
   const t = ev.target;
   if (t.dataset.cell !== undefined) { const [mc, h] = t.dataset.cell.split("|"); await setCell($("fDay").dataset.date, mc, +h, t.value); render(); app.querySelector(`select[data-cell="${CSS.escape(t.dataset.cell)}"]`)?.focus({ preventScroll: true }); return; }
   if (t.dataset.reason !== undefined) { const f = $("fDay"), tr = t.closest("table.av"); await setReason(t.dataset.reason, f.dataset.date, tr.dataset.shift, t.value.trim()); toast("Saved"); return; }
