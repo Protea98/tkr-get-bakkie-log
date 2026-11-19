@@ -238,12 +238,23 @@ function nowView() {
       ${cnt("?") ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${cnt("?")}</div><div class="s">pick OP, BD or PM in the sheet</div></div>` : ""}</div>`
     + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`; }).join("")}</div>`
-    + workbookSection()
+    + hourBoard()
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
       ${sheet("delays", `Delay summary · ${monthName(today().slice(0, 7))}`, delaySummary(today().slice(0, 7)), { icon: icon("bd"), sub: "lost time per machine and per cause this month" })}
       ${sheet("checks", "Data and documents checklist", checklist(today()), { icon: icon("docs"), sub: `${chkDone(today())} of ${CHECK.flatMap(([, i]) => i).length * COLS.length} ticked today` })}
-      ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>`;
+      ${sheet("ulog", "Update log", `<div class="res">${logs.map(l => `<div class="ri"><div class="rt"><b>${new Date(l.at).toTimeString().slice(0, 5)} · ${esc(l.by)}</b><small>${esc(l.what)}</small></div></div>`).join("") || '<p class="muted">No updates yet today.</p>'}</div>`, { icon: icon("hours"), count: logs.length, sub: "every change, with the time and who did it" })}</div>`
+    + workbookSection();
+}
+/* this shift hour by hour: one big block per hour per machine, easy to read on a phone */
+function hourBoard() {
+  const { d, sh } = shiftNow(), H = HRS(sh), now = Date.now(), lab = h => pad(h % 24);
+  const cell = (mc, h) => { const a = hStart(d, h), v = a <= now ? cellVal(d, mc, h) : "", cur = a <= now && now < a + 36e5;
+    return `<div class="hb ${v || "fut"}${cur ? " now" : ""}" title="${lab(h)}:00–${lab(h + 1)}:00 ${v ? TYPES[v] || "Operational" : ""}"><i>${lab(h)}</i><b>${v || ""}</b></div>`; };
+  return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
+      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operational <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance</span></div>
+    ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
+      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Working" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${H.map(h => cell(mc, h)).join("")}</div></div>`; }).join("")}</div>`).join("")}</section>`;
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
