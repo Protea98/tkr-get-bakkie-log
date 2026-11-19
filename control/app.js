@@ -121,6 +121,11 @@ function hoursIn(machine, from, to) {
 /* first hour of the run of BD / PM that is going on now in the sheet */
 function sheetSince(m, t) { const c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now(); const H = HRS(sh).filter(x => hStart(d, x) <= now);
   let k = H.length - 1; while (k >= 0 && !C[H[k]]) k--; if (k < 0 || C[H[k]] !== t) return ""; while (k > 0 && C[H[k - 1]] === t) k--; return pad(H[k] % 24) + ":00"; }
+/* why a machine is not working now: the reason on its breakdown or maintenance, or the shift comment in the sheet */
+function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.trim();
+  const c = curShift(), [d, sh] = c.key.split("|"), [a] = shiftWin(d, sh), now = Date.now();
+  const e = evs().filter(e => e.machine === m && toMs(e.start) <= now && evEnd(e) > a && e.reason).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
+  if (e) return e.reason.trim(); return (recs.find(r => r.id === `hr_${d}_${m}`)?.notes?.[sh] || "").trim(); }
 function stateNow(m) { const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
@@ -231,7 +236,7 @@ function nowView() {
       <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
       ${cnt("NU") ? `<div class="tile"><div class="l">Not in use now</div><div class="n">${cnt("NU")}</div></div>` : ""}
       ${cnt("?") ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${cnt("?")}</div><div class="s">pick OP, BD or PM in the sheet</div></div>` : ""}</div>`
-    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small></button>`; }).join("")}</div>
+    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`; }).join("")}</div>`
     + workbookSection()
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
