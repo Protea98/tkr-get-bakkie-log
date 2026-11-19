@@ -162,3 +162,4 @@ table.xl td.hc button.hbtn:focus-visible{outline:2px solid var(--gold,#d4a12a);o
 .ro input::placeholder,.ro textarea::placeholder{color:transparent}
 .ro [data-edit]{text-decoration:none;cursor:default}
 .mach small.why{display:block;margin-top:3px;font-size:11.5px;line-height:1.3;opacity:.9;font-style:italic;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:600}

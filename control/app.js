@@ -129,7 +129,7 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
 function stateNow(m) { const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
-  return h != null ? C[h] : s ? s.type : "?"; }
+  return h != null ? C[h] : s ? s.type : "OP"; }   // nothing marked this shift: working (clean slate)
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
 /* ---------- controllers on this device ---------- */
@@ -415,10 +415,18 @@ const hLabel = h => `${pad(h % 24)}–${pad((h + 1) % 24)}`;
 const isoOf = ms => { const x = new Date(ms); return `${ymd(x)}T${pad(x.getHours())}:${pad(x.getMinutes())}`; };
 const cellsOf = (d, mc) => recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.cells || {};
 const downEvs = mc => evs().filter(e => e.machine === mc && (e.type === "BD" || e.type === "PM"));
+/* a shift the control room worked in: every hour that has passed and has no BD or PM counts as OP (clean slate: machines are working unless marked) */
+const usedCache = new Map();
+function shiftUsed(d, sh) { if (curShift().key === d + "|" + sh) return true;
+  const k = d + "|" + sh + "|" + recs.length; if (usedCache.has(k)) return usedCache.get(k);
+  const [a, b] = shiftWin(d, sh), H = HRS(sh);
+  const u = recs.some(r => !r.deleted && ((r.kind === "hr" && r.date === d && H.some(h => r.cells?.[h])) || (r.kind === "ev" && toMs(r.start) < b && evEnd(r) > a)));
+  usedCache.set(k, u); return u; }
 function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
-  return e.some(x => x.type === "BD") ? "BD" : e.length ? "PM" : "";
+  if (e.length) return e.some(x => x.type === "BD") ? "BD" : "PM";
+  return a <= Date.now() && shiftUsed(d, h < 18 ? "Day" : "Night") ? "OP" : "";
 }
 function shiftSum(mc, d, sh) {
   const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()), C = cellsOf(d, mc), V = HRS(sh).map(h => cellVal(d, mc, h, C)), filled = V.filter(Boolean).length;
@@ -442,8 +450,8 @@ function shiftTable(d, sh) {
       const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
         if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv ${v}">${v || "–"} <small>🔒</small></span></td>`;
-        const carry = !C[h] && v && v !== "OP";
-        return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" class="hbtn ty ${v}${carry ? " carry" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, BD or PM. Tap the same one again to clear it."}">${v || "–"}</button></td>`; }).join("");
+        const carry = !C[h] && v && v !== "OP", auto = !C[h] && v === "OP";
+        return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, BD or PM. Tap the same one again to clear it."}">${v || "–"}</button></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${cells}
         <td class="tm">${E.length ? E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>") : `<span data-newev="${esc(mc)}" title="Log a breakdown with exact times" style="color:#999">+ time</span>`}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
@@ -759,7 +767,7 @@ async function viewDoc(id) {
 
 /* ---------- events ---------- */
 function cellMenu(btn) {
-  document.getElementById("hpop")?.remove(); const v = btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
+  document.getElementById("hpop")?.remove(); const v = btn.classList.contains("auto") ? "" : btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
   pop.innerHTML = ["OP", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${o}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
     + (v ? `<small>Tap ${v} again to clear it</small>` : "");
   pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
