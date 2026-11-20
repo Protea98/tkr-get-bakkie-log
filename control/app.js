@@ -165,7 +165,8 @@ function gateView() {
     + `<form id="fAdm" class="card" style="max-width:460px" autocomplete="off"><label>TKR email <input name="e" type="email" autocapitalize="none" required></label>
       <label style="margin-top:10px;display:block">Password <input name="p" type="password" required></label>
       <label style="margin-top:10px;display:block">Choose a 4-digit admin PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
-      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Sign in</button><button type="button" class="ghost" id="cancelAdm">Back</button></div></form>`;
+      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Sign in</button><button type="button" class="ghost" id="cancelAdm">Back</button></div>
+      <p class="flag" id="admErr"></p><button type="button" class="ghost sm" id="admForgot" style="margin-top:6px">Forgot password? Email me a reset link</button></form>`;
   if (pinFor) { const u = users.find(x => x.id === pinFor);
     if (u && !u.pin) return pageHead("Control Room", `Hello ${esc(u.name)}`, "", "", "The admin reset your PIN. Choose a new 4-digit PIN and type it twice.")
       + `<form id="fNewPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" autofocus required placeholder="New PIN">
@@ -954,6 +955,9 @@ async function clickH(ev) {
   const cell = ev.target.closest("[data-edit]:not(button)"); if (cell) { const e = recs.find(r => r.id === cell.dataset.edit); if (e) openEv(evForm(e), `${e.machine} · correct the times`); return; }
   const b = ev.target.closest("button"); if (!b) return;
   if (b.hasAttribute("data-x")) { closeEv(); return; }
+  if (b.id === "admForgot") { const e = document.querySelector("#fAdm [name=e]")?.value.trim() || CTRL_ADMIN[0];
+    try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); await m.sendPasswordResetEmail(m.getAuth(admApp), e); popupMsg("Reset link sent", `Check ${e} for an email from the TKR app (look in junk too). Choose a new password, then sign in here.`); }
+    catch (x) { console.warn(x); toast("The reset link couldn't be sent. Check the email and signal."); } return; }
   if (b.dataset.rpin) { if (!me?.admin) return; const u = recs.find(r => r.id === b.dataset.rpin); if (!u || !confirm(`Reset ${u.name}'s PIN? Next time they tap their name they choose a new PIN.`)) return;
     await put({ ...u, pin: "", status: "approved" }, `Admin reset ${u.name}'s PIN`); syncSoon(); render(); toast(`${u.name} chooses a new PIN at the next sign-in. It reaches their PC when it has signal.`); return; }
   if (b.dataset.uok || b.dataset.uno) { if (!me?.admin) return; const u = recs.find(r => r.id === (b.dataset.uok || b.dataset.uno)); if (!u) return; const ok = !!b.dataset.uok;
@@ -1044,7 +1048,8 @@ async function submitH(ev) {
       if (!CTRL_ADMIN.includes(em)) { toast("Only the Control Room admin can sign in here."); return; }
       const a = await put({ id: "admin_" + em.replace(/\W+/g, ""), kind: "admin", ym: "setup", email: em, name: "Muneer (admin)", pin: await pinHash("admin|" + em, p) });
       await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); toast("Signed in as admin. Next time your PIN is enough."); }
-    catch (x) { console.warn(x); toast("Email or password is wrong."); } return; }
+    catch (x) { console.warn(x); const c = String(x?.code || ""), msg = c.includes("too-many-requests") ? "Too many tries – Firebase has paused sign-in for a few minutes. Wait, or tap Forgot password." : c.includes("network") ? "No signal reached the TKR app. Try again with signal." : c.includes("invalid-email") ? "That email isn't right. Use muneer@tkroperations.com." : "The email or password is wrong. Use muneer@tkroperations.com and your TKR app password, or tap Forgot password.";
+      if ($("admErr")) $("admErr").textContent = msg; toast(msg); } return; }
   if (f.id === "fAdmPin") { const a = adminRec(); if (a && a.pin === await pinHash("admin|" + a.email, f.elements.pin.value)) { await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
   if (f.id === "fMailTo") { const v = cleanMails(f.elements.to.value); const u = recs.find(r => r.id === me.id); if (u) await put({ ...u, mailTo: v }); me.mailTo = v; askMail = false; render(); toast(v ? "Saved. Breakdowns can be emailed to " + v + "." : "Saved."); return; }
