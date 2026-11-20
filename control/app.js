@@ -57,6 +57,7 @@ const fileGet = async id => { const d = await idb(); return (await req(d.transac
 const fileSet = async (id, data) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction("files", "readwrite"); t.objectStore("files").put({ id, data }); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
 
 /* Every record: { id, kind, ym, editedAt, by, deleted?, ... } — kinds: user, ev, chk, day, log, inv, add, fleet */
+let cvMemo = new Map(); const bump = () => cvMemo.clear();
 let recs = [], me = null, tab = "now", date = today(), month = today().slice(0, 7), pinFor = null, addingMe = false;
 const R = k => recs.filter(r => r.kind === k && !r.deleted);
 /* Locking: every filled box remembers the shift (session) that filled it. Once that controller logs out,
@@ -94,7 +95,7 @@ async function discardChanges() {
   for (const u of L) { const cur = recs.find(x => x.id === u.id); if (!cur && !u.prev) continue;
     out.push(u.prev ? { ...u.prev, editedAt: now, synced: 0 } : { ...cur, deleted: true, editedAt: now, synced: 0 }); }
   await tx("readwrite", t => { for (const r of out) t.objectStore("rec").put(r); });
-  for (const r of out) { const i = recs.findIndex(x => x.id === r.id); if (i >= 0) recs[i] = r; else recs.push(r); }
+  for (const r of out) { const i = recs.findIndex(x => x.id === r.id); if (i >= 0) recs[i] = r; else recs.push(r); } bump();
   const n = undo.filter(u => recs.find(x => x.id === u.id)?.kind !== "log").length; await clearUndo(); syncSoon(); return n;
 }
 async function put(r, log) {
@@ -103,7 +104,7 @@ async function put(r, log) {
   const L = log ? { id: "log_" + uid(), kind: "log", ym: (r.date || r.start || today()).slice(0, 7), date: (r.date || r.start || today()).slice(0, 10), at: Date.now(), by: me?.name || "", what: log, editedAt: Date.now(), synced: 0 } : null;
   if (L) journal(L.id, null);
   await tx("readwrite", t => { t.objectStore("rec").put(rec); if (L) t.objectStore("rec").put(L); });
-  const i = recs.findIndex(x => x.id === rec.id); if (i >= 0) recs[i] = rec; else recs.push(rec); if (L) recs.push(L);
+  const i = recs.findIndex(x => x.id === rec.id); if (i >= 0) recs[i] = rec; else recs.push(rec); if (L) recs.push(L); bump();
   syncSoon(); return rec;
 }
 const fleet = () => { const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0]; return f?.groups || DEFAULT_FLEET; };
@@ -134,7 +135,8 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
 function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
-  return h != null ? C[h] : s ? s.type : "OP"; }   // nothing marked this shift: working (clean slate)
+  if (h != null) return C[h]; if (s) return s.type;
+  const cur = HRS(sh).filter(x => hStart(d, x) <= now).at(-1), v = cur != null ? cellVal(d, m, cur) : ""; return v === "BD" || v === "PM" ? v : "OP"; }   // nothing marked this shift: working (clean slate)
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
 /* ---------- controllers on this device ---------- */
@@ -444,15 +446,27 @@ function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
   if (e.length) return e.some(x => x.type === "BD") ? "BD" : "PM";
-  return a <= Date.now() && shiftUsed(d, h < 18 ? "Day" : "Night") ? "OP" : "";
+  if (a > Date.now() || !shiftUsed(d, h < 18 ? "Day" : "Night")) return "";
+  return carryFrom(d, mc, h) || "OP";   // a breakdown or maintenance carries on until someone picks OP
 }
+/* the hour before: was the machine left on breakdown or maintenance? (a timed breakdown that was closed does not carry on) */
+const prevHour = (d, h) => h === 6 ? [addDays(d, -1), 29] : [d, h - 1];
+function carryFrom(d, mc, h, depth = 0) {
+  const k = `${d}|${mc}|${h}`; if (cvMemo.has(k)) return cvMemo.get(k); if (depth > 48) return "";
+  const [d2, h2] = prevHour(d, h), a = hStart(d2, h2), b = a + 36e5; let v = "";
+  if (!offAt(mc, a)) { const C = cellsOf(d2, mc);
+    if (C[h2]) v = C[h2] === "BD" || C[h2] === "PM" ? C[h2] : "";
+    else { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
+      if (E.length) { const g = E.filter(e => e.grid && evEnd(e) <= b); v = g.length === E.length ? (E.some(x => x.type === "BD") ? "BD" : "PM") : (E.some(e => evEnd(e) >= b) ? (E.some(x => x.type === "BD") ? "BD" : "PM") : ""); }
+      else v = carryFrom(d2, mc, h2, depth + 1); } }
+  cvMemo.set(k, v); return v; }
 function shiftSum(mc, d, sh) {
   const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()), C = cellsOf(d, mc), V = HRS(sh).map(h => cellVal(d, mc, h, C)), filled = V.filter(v => v && v !== "OFF").length;
-  let BD = 0, PM = 0;
-  HRS(sh).forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, b); if (y <= x || V[k] === "OFF") return; const e = hoursIn(mc, x, y);
-    if ((e.BD || 0) + (e.PM || 0) > 0) { BD += e.BD || 0; PM += e.PM || 0; } else if (V[k] === "BD") BD += (y - x) / 36e5; else if (V[k] === "PM") PM += (y - x) / 36e5; });
+  let BD = 0, PM = 0, span = 0;   // span: the hours that have passed in the boxes that are filled (the hour running now counts only up to now)
+  HRS(sh).forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, b); if (y <= x || V[k] === "OFF" || !V[k]) return; span += (y - x) / 36e5; const e = hoursIn(mc, x, y);
+    if ((e.BD || 0) + (e.PM || 0) > 0) { BD += Math.min(e.BD || 0, (y - x) / 36e5); PM += e.PM || 0; } else if (V[k] === "BD") BD += (y - x) / 36e5; else if (V[k] === "PM") PM += (y - x) / 36e5; });
   const down = BD + PM;
-  return { filled, BD, PM, down, avail: Math.max(0, filled - down), SB: 0, NU: 0 };
+  return { filled, BD, PM, down, avail: Math.max(0, span - down), SB: 0, NU: 0 };
 }
 function daySum(mc, d) {
   const x = shiftSum(mc, d, "Day"), y = shiftSum(mc, d, "Night"), filled = x.filled + y.filled, BD = x.BD + y.BD, PM = x.PM + y.PM, down = BD + PM;
@@ -522,18 +536,27 @@ async function setReason(mc, d, sh, reason) {
     if ((rec.notes?.[sh] || "") !== reason) await put({ ...rec, deleted: false, notes: { ...(rec.notes || {}), [sh]: reason } }, `${mc} ${sh.toLowerCase()} shift comment: ${reason || "cleared"}`); }
 }
 function shiftMessage(d, sh) {
-  const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me?.name || "";
-  const L = [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}* (${sh === "Day" ? "06:00–18:00" : "18:00–06:00"})`, `Controller: ${ctl}`, ""];
+  const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me?.name || "", now = Date.now(), upto = Math.min(b, now);
+  const pc = t => t.avail + t.down > 0 ? Math.round(t.avail / (t.avail + t.down) * 100) + "%" : "–", WORD = { BD: "Breakdown", PM: "Maintenance" };
+  const runsOf = mc => { const H = HRS(sh).filter(h => hStart(d, h) < upto), V = H.map(h => cellVal(d, mc, h)), R0 = [];
+    H.forEach((h, k) => { const v = V[k]; if (v !== "BD" && v !== "PM") return; const last = R0.at(-1); if (last && last.t === v && last.k2 === k - 1) { last.k2 = k; last.h2 = h; } else R0.push({ t: v, k1: k, k2: k, h1: h, h2: h }); });
+    return R0.map(r => { const x = hStart(d, r.h1), y = hStart(d, r.h2) + 36e5, E = downEvs(mc).filter(e => e.type === r.t && toMs(e.start) < y && evEnd(e) > x);
+      const st = E.map(e => toMs(e.start)).filter(t => t > x && t < x + 36e5).sort((p, q) => p - q)[0] || x;
+      const en = y > now ? null : (E.map(e => e.end ? toMs(e.end) : 0).filter(t => t > y - 36e5 && t < y).sort((p, q) => q - p)[0] || y);
+      return `${WORD[r.t]} ${tOf(st)}–${en ? tOf(en) : "now"}`; }); };
+  const all = { avail: 0, down: 0 }, body = [];
   for (const [g, M] of fleet()) {
-    const rows = M.map(mc => [mc, evsIn(mc, d, sh).filter(e => e.type === "BD" || e.type === "PM"), shiftSum(mc, d, sh)]), S = rows.reduce((t, [, , s]) => { if (s) { t.avail += s.avail; t.down += s.down; } return t; }, { avail: 0, down: 0 });
-    const off = M.filter(mc => offShift(mc, d, sh));
-    if (off.length === M.length) { L.push(`*${g}* – not on site`, ""); continue; }
-    L.push(`*${g}* – availability ${S.avail + S.down ? Math.round(S.avail / (S.avail + S.down) * 100) + "%" : "–"}`);
-    if (off.length) L.push(`Not on site: ${off.join(", ")}`);
-    const down = rows.filter(([mc, E]) => E.length && !off.includes(mc));
-    if (!down.length) L.push("All working"); else for (const [mc, E] of down) L.push(`${mc}: ` + E.map(e => `${TYPES[e.type]} ${toMs(e.start) < a ? tOf(a) : hhmm(e.start)}–${e.end && toMs(e.end) <= b ? hhmm(e.end) : e.end ? tOf(b) : "still going"} (${hm((Math.min(evEnd(e), b, Date.now()) - Math.max(toMs(e.start), a)) / 36e5)} h)${e.reason ? " – " + e.reason : ""}`).join("; "));
-    L.push("");
+    const on = M.filter(mc => !offShift(mc, d, sh)), off = M.filter(mc => offShift(mc, d, sh));
+    if (!on.length) { body.push(`*${g}* – not on site`, ""); continue; }
+    const S = { avail: 0, down: 0 }, lines = [];
+    for (const mc of on) { const x = shiftSum(mc, d, sh), R1 = runsOf(mc); S.avail += x.avail; S.down += x.down;
+      const why = [...new Set([...evsIn(mc, d, sh).map(e => e.reason), recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.notes?.[sh]].filter(Boolean).map(t => t.trim()))].join("; ");
+      lines.push(R1.length ? `${mc}: ${pc(x)} – ${R1.join(", ")} (${hm(x.down)} h down)${why ? " – " + why : ""}` : `${mc}: ${pc(x)} – working`); }
+    all.avail += S.avail; all.down += S.down;
+    body.push(`*${g}* – ${pc(S)}${on.length > 1 ? ` (${on.length} machines together)` : ""}`, ...lines); if (off.length) body.push(`Not on site: ${off.join(", ")}`); body.push("");
   }
+  const L = [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Hours counted: ${tOf(a)} to ${upto >= b ? tOf(b) : tOf(upto)} (${hm(Math.floor((upto - a) / 6e4) / 60)} h per machine)`, "",
+    `*All machines – availability ${pc(all)}*`, `Availability = hours working ÷ hours counted. A machine stays on breakdown until it is marked working again.`, "", ...body];
   const items = CHECK.flatMap(([, i]) => i), got = k => items.filter(it => (recs.find(r => r.id === chkKey(d, it)) || {})[k] === "✓").length;
   L.push(`*Documents received:* ${COLS.map(k => `${k} ${got(k)}/${items.length}`).join(" · ")}`);
   const missing = items.filter(it => COLS.some(k => (recs.find(r => r.id === chkKey(d, it)) || {})[k] === "✗")); if (missing.length) L.push(`Not received: ${missing.join(", ")}`);
@@ -1011,7 +1034,7 @@ async function changeH(ev) {
   if (t.id === "dPick") { date = t.value || today(); render(); return; }
   if (t.dataset.chkc) { const [d, it] = t.dataset.chkc.split("|"), id = chkKey(d, it), c = recs.find(r => r.id === id) || { id, kind: "chk", ym: d.slice(0, 7), date: d, item: it }; await put({ ...c, comment: t.value.trim() }, `${it}: comment`); toast("Saved"); return; }
   if (t.dataset.addc) { const [it, k] = t.dataset.addc.split("|"), id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it }; await put({ ...c, [k]: t.value.trim() }, `${it}: ${k}`); toast("Saved"); return; }
-  if (t.id === "rs" && t.files[0]) { try { const d = JSON.parse(await t.files[0].text()); let n = 0; for (const r of d.recs || []) { const have = recs.find(x => x.id === r.id); if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { await tx("readwrite", tt => tt.objectStore("rec").put({ ...r, synced: 0 })); n++; } } recs = await all(); render(); toast(`Backup loaded: ${n} changes added.`); } catch { toast("That file is not a Control Room backup."); } }
+  if (t.id === "rs" && t.files[0]) { try { const d = JSON.parse(await t.files[0].text()); let n = 0; for (const r of d.recs || []) { const have = recs.find(x => x.id === r.id); if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { await tx("readwrite", tt => tt.objectStore("rec").put({ ...r, synced: 0 })); n++; } } recs = await all(); bump(); render(); toast(`Backup loaded: ${n} changes added.`); } catch { toast("That file is not a Control Room backup."); } }
 }
 app.addEventListener("click", clickH); app.addEventListener("submit", submitH); app.addEventListener("change", changeH);
 app.addEventListener("input", ev => { if (ev.target.id !== "fFind") return; fFind = ev.target.value; clearTimeout(fFind.t); const pos = ev.target.selectionStart; render(); const x = $("fFind"); if (x) { x.focus(); x.setSelectionRange(pos, pos); } }); $("who").addEventListener("click", clickH);
@@ -1043,7 +1066,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1058,7 +1081,7 @@ function liveWatch(yms) {
     let n = 0; const docs = snap.docChanges ? snap.docChanges().filter(c => c.type !== "removed").map(c => c.doc) : snap.docs;
     for (const d of docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (r.id && (!have || (r.editedAt || 0) > (have.editedAt || 0))) { await tx("readwrite", t => t.objectStore("rec").put({ ...r, synced: r.editedAt })); n++; } }
-    if (!n) return; recs = await all();
+    if (!n) return; recs = await all(); bump();
     const go = () => { if (canRedraw()) render(); else { clearTimeout(liveT); liveT = setTimeout(go, 3000); } }; go();
   }, e => { console.warn("live updates stopped", e); liveOff = null; liveKey = ""; });
 }
@@ -1172,7 +1195,7 @@ async function exportXlsx(from, to) {
 
 /* ---------- start ---------- */
 (async () => {
-  try { recs = await all(); } catch (e) { app.innerHTML = '<div class="notice warn"><b class="t">This browser can\'t store the control room data</b>Open the app in a normal (not private) window.</div>'; return; }
+  try { recs = await all(); bump(); } catch (e) { app.innerHTML = '<div class="notice warn"><b class="t">This browser can\'t store the control room data</b>Open the app in a normal (not private) window.</div>'; return; }
   sync.last = await metaGet("syncLast") || 0;
   if (!(await metaGet("fix113"))) {               // once: drill rigs are TDR013, TDR014, TDR015 only; Muneer's example controller login removed
     const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
