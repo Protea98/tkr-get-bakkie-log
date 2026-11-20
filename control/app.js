@@ -153,22 +153,26 @@ function gateView() {
   const users = R("user").filter(u => u.status !== "declined").sort((a, b) => a.name.localeCompare(b.name));
   if (!adminStep && (addingMe || !users.length)) return pageHead("Control Room", "Ask to be a controller", "", "", "Type your name and choose a 4-digit PIN you will remember. The admin must approve you before you can sign in. The request sends when the PC has signal.")
     + `<form id="fAdd" class="card" style="max-width:460px" autocomplete="off"><label>Name and surname <input name="name" required autocapitalize="words"></label>
-      <label style="margin-top:10px;display:block">Choose a 4-digit PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
-      <label style="margin-top:10px;display:block">Type the PIN again <input name="pin2" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
+      <label style="margin-top:10px;display:block">Choose a 4-digit PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
+      <label style="margin-top:10px;display:block">Type the PIN again <input name="pin2" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
       <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Send to the admin</button>${users.length ? '<button type="button" class="ghost" id="cancelAdd">Back</button>' : ""}</div></form>`;
   if (adminStep === "pin") { const a = adminRec();
     return pageHead("Control Room", "Admin", "", "", "Type your admin PIN. No signal needed.")
-      + `<form id="fAdmPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="password" required>
+      + `<form id="fAdmPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required>
         <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p>
         <p class="muted" style="margin-bottom:0">Forgot it? <button type="button" class="sm ghost" id="admReset">Sign in with your TKR email again</button></p></form>`; }
   if (adminStep === "email") return pageHead("Control Room", "Admin sign-in", "", "", "Once only on this PC, with signal: sign in with your TKR admin email and password, then choose a 4-digit admin PIN. After that the PIN works with no signal.")
     + `<form id="fAdm" class="card" style="max-width:460px" autocomplete="off"><label>TKR email <input name="e" type="email" autocapitalize="none" required></label>
       <label style="margin-top:10px;display:block">Password <input name="p" type="password" required></label>
-      <label style="margin-top:10px;display:block">Choose a 4-digit admin PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
+      <label style="margin-top:10px;display:block">Choose a 4-digit admin PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
       <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Sign in</button><button type="button" class="ghost" id="cancelAdm">Back</button></div></form>`;
   if (pinFor) { const u = users.find(x => x.id === pinFor);
+    if (u && !u.pin) return pageHead("Control Room", `Hello ${esc(u.name)}`, "", "", "The admin reset your PIN. Choose a new 4-digit PIN and type it twice.")
+      + `<form id="fNewPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" autofocus required placeholder="New PIN">
+        <input name="pin2" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc;margin-top:10px" required placeholder="Again">
+        <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Save and start</button><button type="button" class="ghost" id="cancelPin">Not me</button></div><p class="flag" id="pinErr"></p></form>`;
     return pageHead("Control Room", `Hello ${esc(u?.name || "")}`, "", "", "Type your PIN.")
-      + `<form id="fPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="password" autofocus required>
+      + `<form id="fPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" value="" autofocus required>
         <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Start</button><button type="button" class="ghost" id="cancelPin">Not me</button></div><p class="flag" id="pinErr"></p></form>`; }
   return pageHead("Control Room", "Who is on shift?", "", `<button class="primary" id="addMe">+ Ask to be a controller</button>`, "Tap your name. New controller? Ask to be added – the admin approves it.")
     + `<div class="who-pick">${users.map(u => okUser(u) ? `<button data-who="${u.id}"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></button>` : `<button disabled style="opacity:.6"><b>${esc(u.name)}</b><small>waiting for the admin to approve</small></button>`).join("")}</div>`
@@ -396,7 +400,7 @@ function settingsView() {
   return pageHead("Settings", "Machines and controllers", "", "", "Changes here go to every control room device with the next sync. You can also add or remove a machine on the live board.")
     + `<section class="card"><h2>Machines</h2>${F.map(([g, L], gi) => `<div style="margin-bottom:12px"><b>${esc(g)}</b><div class="row" style="margin-top:6px">${L.map(m => `<span class="tag" style="font-size:13px;padding:4px 10px">${esc(m)} <button class="sm ghost" data-rmm="${gi}|${esc(m)}" style="min-height:28px;padding:0 6px">×</button></span>`).join("")}</div>
       <div class="row" style="margin-top:6px"><input data-newm="${gi}" placeholder="Add a machine to ${esc(g)}" style="max-width:260px"><button class="sm" data-addm="${gi}">+ Add</button></div></div>`).join("")}</section>
-    <section class="card"><h2>Controllers</h2><div class="res">${users.filter(u => u.status !== "declined").map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>${u.status === "pending" ? '<span style="color:var(--gold);font-weight:600">waiting for the admin to approve</span>' : "added " + fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div><div class="row" style="gap:6px">${u.status === "pending" && me.admin ? `<button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button>` : u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}</div></div>`).join("")}</div></section>`;
+    <section class="card"><h2>Controllers</h2><div class="res">${users.filter(u => u.status !== "declined").map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>${u.status === "pending" ? '<span style="color:var(--gold);font-weight:600">waiting for the admin to approve</span>' : "added " + fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div><div class="row" style="gap:6px">${u.status === "pending" && me.admin ? `<button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button>` : `${me.admin && u.id !== me.id ? `<button class="sm" data-rpin="${u.id}">Reset PIN</button>` : ""}${u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}`}</div></div>`).join("")}</div></section>`;
 }
 
 
@@ -950,6 +954,8 @@ async function clickH(ev) {
   const cell = ev.target.closest("[data-edit]:not(button)"); if (cell) { const e = recs.find(r => r.id === cell.dataset.edit); if (e) openEv(evForm(e), `${e.machine} · correct the times`); return; }
   const b = ev.target.closest("button"); if (!b) return;
   if (b.hasAttribute("data-x")) { closeEv(); return; }
+  if (b.dataset.rpin) { if (!me?.admin) return; const u = recs.find(r => r.id === b.dataset.rpin); if (!u || !confirm(`Reset ${u.name}'s PIN? Next time they tap their name they choose a new PIN.`)) return;
+    await put({ ...u, pin: "", status: "approved" }, `Admin reset ${u.name}'s PIN`); syncSoon(); render(); toast(`${u.name} chooses a new PIN at the next sign-in. It reaches their PC when it has signal.`); return; }
   if (b.dataset.uok || b.dataset.uno) { if (!me?.admin) return; const u = recs.find(r => r.id === (b.dataset.uok || b.dataset.uno)); if (!u) return; const ok = !!b.dataset.uok;
     if (!ok && !confirm(`Decline ${u.name}? They won't be able to sign in.`)) return;
     await put({ ...u, status: ok ? "approved" : "declined", decidedBy: me.name, decidedAt: Date.now() }, `Admin ${ok ? "approved" : "declined"} ${u.name} as a controller`); render(); toast(ok ? `${u.name} can sign in now.` : "Declined."); return; }
@@ -1023,8 +1029,11 @@ async function submitH(ev) {
     if (R("user").some(u => u.name.toLowerCase() === name.toLowerCase())) { toast("That name is already on this PC. Tap it to sign in."); addingMe = false; render(); return; }
     await put({ id: "user_" + uid(), kind: "user", ym: "setup", name, pin: await pinHash(name, p), addedAt: Date.now(), status: "pending" }, `${name} asked to be a controller`);
     addingMe = false; render(); syncSoon(); popupMsg("Sent to the admin", `${name}, the admin must approve you first. Once approved, tap your name and type your PIN.${navigator.onLine ? "" : " The request sends when this PC has signal."}`); return; }
+  if (f.id === "fNewPin") { const u = recs.find(r => r.id === pinFor), p = f.elements.pin.value.trim(), p2 = f.elements.pin2.value.trim();
+    if (!/^\d{4}$/.test(p)) { $("pinErr").textContent = "The PIN must be 4 numbers."; return; } if (p !== p2) { $("pinErr").textContent = "The two PINs are not the same."; return; }
+    if (!u || u.pin) return; await startSession(u); await put({ ...u, pin: await pinHash(u.name, p) }, `${u.name} chose a new PIN`); pinFor = null; askMail = true; render(); toast("New PIN saved."); return; }
   if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && !okUser(u)) { $("pinErr").textContent = "The admin hasn't approved you yet."; return; }
-    if (u && u.pin === await pinHash(u.name, f.elements.pin.value)) { await startSession(u); pinFor = null; askMail = true; render(); }
+    if (u && u.pin === await pinHash(u.name, f.elements.pin.value.trim())) { await startSession(u); pinFor = null; askMail = true; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
   if (f.id === "fAdm") { if (!navigator.onLine) { toast("The first admin sign-in needs signal."); return; } const p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; }
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); const auth = m.getAuth(admApp);
