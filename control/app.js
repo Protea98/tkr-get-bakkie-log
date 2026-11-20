@@ -582,15 +582,16 @@ async function setReason(mc, d, sh, reason) {
 function shiftMessage(d, sh) {   // simple: every machine, its status, available or not
   const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me?.name || "", now = Date.now();
   const cur = now >= a && now < b, T = cur ? now : Math.min(b, now) - 1, hr = HRS(sh).filter(h => hStart(d, h) <= T).at(-1);
-  const stateAt = mc => cur ? stateNow(mc) : offAt(mc, T) ? "OFF" : hr != null ? cellVal(d, mc, hr) || "OP" : "OP";
+  const stateAt = mc => cur ? stateNow(mc) : offAt(mc, T) ? "OFF" : hr != null ? cellVal(d, mc, hr) || "?" : "?";
   const why = mc => { const e = evs().filter(e => e.machine === mc && toMs(e.start) <= T && evEnd(e) > Math.max(a, T - 1) && e.reason).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
     return (e?.reason || recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.notes?.[sh] || "").trim(); };
   let avail = 0, total = 0; const body = [];
   for (const [g, M] of fleet()) { body.push(`*${g}*`);
     for (const mc of M) { const st = stateAt(mc), w = why(mc);
       if (st === "OFF") { body.push(`${mc} – Not on site`); continue; } total++;
-      if (st === "BD" || st === "PM") body.push(`${mc} – ${st === "BD" ? "Breakdown" : "Planned maintenance"}${w ? ": " + w : ""} – not available`);
-      else { avail++; body.push(st === "SB" ? `${mc} – Standby – available, not operating${w ? ": " + w : ""}` : `${mc} – Operating – available`); } }
+      if (st === "OP") { avail++; body.push(`${mc} – Operating – available`); }   // only OP and SB count as available – the same as the dashboard
+      else if (st === "SB") { avail++; body.push(`${mc} – Standby – available, not operating${w ? ": " + w : ""}`); }
+      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : st === "NU" ? "Not in use" : "Not updated this shift"}${w ? ": " + w : ""} – not available`); }
     body.push(""); }
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => stateAt(mc) === "OP").length; return ` (${n} operating)`; })()}`, "", ...body].join("\n").trim();
 }
