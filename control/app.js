@@ -111,6 +111,11 @@ const groupOf = m => (fleet().find(([, L]) => L.includes(m)) || ["Other"])[0];
 
 /* ---------- hours: events overlapping a time window ---------- */
 const evs = () => R("ev");
+/* machines not on site: left out of availability, the board, the message and the documents check for that time */
+const siteRec = () => recs.find(r => r.id === "site" && !r.deleted) || { id: "site", kind: "site", ym: "setup", off: {} };
+const offAt = (m, t) => (siteRec().off?.[m] || []).some(p => p.from <= t && (!p.to || t < p.to));
+const offNow = m => offAt(m, Date.now());
+const offShift = (m, d, sh) => { const [a, b] = shiftWin(d, sh); return offAt(m, a) && offAt(m, b - 1); };
 const evEnd = e => e.end ? toMs(e.end) : Date.now();
 function hoursIn(machine, from, to) {
   const out = { BD: 0, SB: 0, PM: 0, NU: 0 };
@@ -126,7 +131,7 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
   const c = curShift(), [d, sh] = c.key.split("|"), [a] = shiftWin(d, sh), now = Date.now();
   const e = evs().filter(e => e.machine === m && toMs(e.start) <= now && evEnd(e) > a && e.reason).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (e) return e.reason.trim(); return (recs.find(r => r.id === `hr_${d}_${m}`)?.notes?.[sh] || "").trim(); }
-function stateNow(m) { const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
+function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
   return h != null ? C[h] : s ? s.type : "OP"; }   // nothing marked this shift: working (clean slate)
@@ -222,7 +227,7 @@ function shiftEvents() {
   return out;
 }
 function nowView() {
-  const F = fleet(), ALL = F.flatMap(([, L]) => L), open = evs().filter(e => !e.end).sort((a, b) => toMs(a.start) - toMs(b.start));
+  const F = fleet(), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), nOff = F.flatMap(([, L]) => L).length - ALL.length, open = evs().filter(e => !e.end).sort((a, b) => toMs(a.start) - toMs(b.start));
   const { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh)), dayT = fleetSum(ALL, m => daySum(m, sd));
   const SE = shiftEvents(), logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at);
   const cnt = k => ALL.filter(m => stateNow(m) === k).length;
@@ -234,10 +239,11 @@ function nowView() {
       <div class="tile good"><div class="l">Working now</div><div class="n">${cnt("OP")}</div><div class="s">of ${ALL.length} machines</div></div>
       <div class="tile ${cnt("BD") ? "alert" : ""}"><div class="l">Breakdowns now</div><div class="n">${cnt("BD")}</div></div>
       <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
+      ${nOff ? `<div class="tile"><div class="l">Not on site</div><div class="n">${nOff}</div><div class="s">left out of availability</div></div>` : ""}
       ${cnt("NU") ? `<div class="tile"><div class="l">Not in use now</div><div class="n">${cnt("NU")}</div></div>` : ""}
       ${cnt("?") ? `<div class="tile alert"><div class="l">Not updated this shift</div><div class="n">${cnt("?")}</div><div class="s">pick OP, BD or PM in the sheet</div></div>` : ""}</div>`
-    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.filter(m => stateNow(m) === "OP").length}/${L.length} working · ${pcOf(gT)} this shift</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
-        <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button>` : ""}</div></section>`; }).join("")}</div>`
+    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.every(offNow) ? "not on site" : `${L.filter(m => stateNow(m) === "OP").length}/${L.filter(m => !offNow(m)).length} working · ${pcOf(gT)} this shift`}</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${st === "OFF" ? "Not on site" : s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Working" : st === "?" ? "Not updated this shift" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
+        <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button><button class="sm ghost" data-sitemg="${F.findIndex(x => x[0] === g)}">On site / not on site</button>` : ""}</div></section>`; }).join("")}</div>`
     + hourBoard()
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
@@ -252,9 +258,9 @@ function hourBoard() {
   const cell = (mc, h) => { const a = hStart(d, h), v = a <= now ? cellVal(d, mc, h) : "", cur = a <= now && now < a + 36e5;
     return `<div class="hb ${v || "fut"}${cur ? " now" : ""}" title="${lab(h)}:00–${lab(h + 1)}:00 ${v ? TYPES[v] || "Operational" : ""}"><i>${lab(h)}</i><b>${v || ""}</b></div>`; };
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
-      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operational <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance</span></div>
+      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operational <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
     ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
-      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Working" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${H.map(h => cell(mc, h)).join("")}</div></div>`; }).join("")}</div>`).join("")}</section>`;
+      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Working" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${H.map(h => cell(mc, h)).join("")}</div></div>`; }).join("")}</div>`).join("")}</section>`;
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
@@ -434,15 +440,16 @@ function shiftUsed(d, sh) { if (curShift().key === d + "|" + sh) return true;
   const u = recs.some(r => !r.deleted && ((r.kind === "hr" && r.date === d && H.some(h => r.cells?.[h])) || (r.kind === "ev" && toMs(r.start) < b && evEnd(r) > a)));
   usedCache.set(k, u); return u; }
 function cellVal(d, mc, h, C = cellsOf(d, mc)) {
+  if (offAt(mc, hStart(d, h))) return hStart(d, h) <= Date.now() ? "OFF" : "";
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
   if (e.length) return e.some(x => x.type === "BD") ? "BD" : "PM";
   return a <= Date.now() && shiftUsed(d, h < 18 ? "Day" : "Night") ? "OP" : "";
 }
 function shiftSum(mc, d, sh) {
-  const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()), C = cellsOf(d, mc), V = HRS(sh).map(h => cellVal(d, mc, h, C)), filled = V.filter(Boolean).length;
+  const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()), C = cellsOf(d, mc), V = HRS(sh).map(h => cellVal(d, mc, h, C)), filled = V.filter(v => v && v !== "OFF").length;
   let BD = 0, PM = 0;
-  HRS(sh).forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, b); if (y <= x) return; const e = hoursIn(mc, x, y);
+  HRS(sh).forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, b); if (y <= x || V[k] === "OFF") return; const e = hoursIn(mc, x, y);
     if ((e.BD || 0) + (e.PM || 0) > 0) { BD += e.BD || 0; PM += e.PM || 0; } else if (V[k] === "BD") BD += (y - x) / 36e5; else if (V[k] === "PM") PM += (y - x) / 36e5; });
   const down = BD + PM;
   return { filled, BD, PM, down, avail: Math.max(0, filled - down), SB: 0, NU: 0 };
@@ -519,8 +526,11 @@ function shiftMessage(d, sh) {
   const L = [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}* (${sh === "Day" ? "06:00–18:00" : "18:00–06:00"})`, `Controller: ${ctl}`, ""];
   for (const [g, M] of fleet()) {
     const rows = M.map(mc => [mc, evsIn(mc, d, sh).filter(e => e.type === "BD" || e.type === "PM"), shiftSum(mc, d, sh)]), S = rows.reduce((t, [, , s]) => { if (s) { t.avail += s.avail; t.down += s.down; } return t; }, { avail: 0, down: 0 });
+    const off = M.filter(mc => offShift(mc, d, sh));
+    if (off.length === M.length) { L.push(`*${g}* – not on site`, ""); continue; }
     L.push(`*${g}* – availability ${S.avail + S.down ? Math.round(S.avail / (S.avail + S.down) * 100) + "%" : "–"}`);
-    const down = rows.filter(([, E]) => E.length);
+    if (off.length) L.push(`Not on site: ${off.join(", ")}`);
+    const down = rows.filter(([mc, E]) => E.length && !off.includes(mc));
     if (!down.length) L.push("All working"); else for (const [mc, E] of down) L.push(`${mc}: ` + E.map(e => `${TYPES[e.type]} ${toMs(e.start) < a ? tOf(a) : hhmm(e.start)}–${e.end && toMs(e.end) <= b ? hhmm(e.end) : e.end ? tOf(b) : "still going"} (${hm((Math.min(evEnd(e), b, Date.now()) - Math.max(toMs(e.start), a)) / 36e5)} h)${e.reason ? " – " + e.reason : ""}`).join("; "));
     L.push("");
   }
@@ -668,6 +678,18 @@ async function addMachine(gi, raw) {
   G[gi][1].push(v); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Added machine ${v} to ${G[gi][0]}`); toast(v + " added."); return true;
 }
 async function removeMachine(m) { const G = fleet().map(([g, L]) => [g, L.filter(x => x !== m)]); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Removed machine ${m}`); }
+function siteForm(gi) {
+  const [g, L] = fleet()[gi], c = curShift(), [d, sh] = c.key.split("|"), st = toMs(d + (sh === "Day" ? "T06:00" : "T18:00"));
+  return `<form id="fSite" class="card" autocomplete="off" style="max-width:520px;margin:0 auto"><p class="muted" style="margin-top:0">A machine that is not on site is left out of the availability, the board, the shift message and the documents check, from the time you pick. Its hours stay as they were.</p>
+    <div class="res">${L.map(m => { const off = offNow(m); return `<div class="ri"><div class="rt"><b>${esc(m)}</b><small>${off ? '<span style="color:var(--gold);font-weight:600">Not on site</span>' : "On site"}</small></div><button type="button" class="sm ${off ? "primary" : ""}" data-site="${esc(m)}|${off ? "on" : "off"}">${off ? "Back on site" : "Not on site"}</button></div>`; }).join("")}</div>
+    <label style="margin-top:12px">From <input type="datetime-local" name="from" value="${isoOf(st)}" max="${nowLocal()}"></label>
+    <p class="muted" style="margin:6px 0 0">Starts at the beginning of this shift. Pick an earlier date if the machine left site before today.</p></form>`;
+}
+async function setSite(m, off, fromMs) {
+  const r = structuredClone(siteRec()), P = r.off[m] = r.off[m] || [];
+  if (off) { if (offAt(m, fromMs)) return; P.push({ from: fromMs, to: null }); }
+  else { const o = P.find(p => !p.to); if (o) o.to = Math.max(o.from, fromMs); }
+  await put(r, `${m}: ${off ? "not on site" : "back on site"} from ${fmt(ymd(new Date(fromMs)))} ${tOf(fromMs)}`); }
 function machForm(gi, mode) {
   const [g, L] = fleet()[gi];
   return `<form id="fMach" data-gi="${gi}" data-mode="${mode}" class="card" autocomplete="off" style="max-width:440px;margin:0 auto">${mode === "add"
@@ -777,7 +799,7 @@ const hasDoc = (L, t, m) => L.some(x => x.type === t || (t === "Fleet report" &&
 function docGaps(m0, onlyM = "") {   // every finished shift of the month, every machine that worked in it: which needed documents are not uploaded
   const need = needList(), now = Date.now(), end = m0 === today().slice(0, 7) ? today() : monthEnd(m0), M = fleet().flatMap(([, L]) => L).filter(m => !onlyM || m === onlyM), out = [];
   for (let d = m0 + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { const fin = shiftWin(d, sh)[1] <= now;
-    const rows = !fin ? [] : M.map(m => { const L = docsOf(m, d, sh); return { m, have: L, miss: need.filter(t => !hasDoc(L, t, m)) }; });
+    const rows = !fin ? [] : M.filter(m => !offShift(m, d, sh)).map(m => { const L = docsOf(m, d, sh); return { m, have: L, miss: need.filter(t => !hasDoc(L, t, m)) }; });
     out.push({ d, sh, fut: !fin, rows, st: !fin ? "fut" : !rows.length ? "none" : rows.every(r => !r.miss.length) ? "ok" : rows.some(r => r.have.length) ? "part" : "miss" }); }
   return out; }
 function missingDocsView() {
@@ -896,6 +918,9 @@ async function clickH(ev) {
   if (b.dataset.dzip) { b.disabled = true; try { await downloadAll(b.dataset.dzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
   if (b.dataset.ddel) { const r = recs.find(x => x.id === b.dataset.ddel); if (r && confirm(`Delete ${r.name}?`)) { await put({ ...r, deleted: true }, `Deleted document ${r.type} ${r.machine}`); if (r.machine && document.getElementById("evPanel") && tab !== "files") openEv(docsPanel(r.machine, r.date + "|" + r.shift), `${r.machine} · documents`); else closeEv(); render(); } return; }
   if (b.dataset.addmg) { openEv(machForm(+b.dataset.addmg, "add"), "Add a machine"); return; }
+  if (b.dataset.sitemg) { openEv(siteForm(+b.dataset.sitemg), "On site / not on site"); return; }
+  if (b.dataset.site) { const [m, k] = b.dataset.site.split("|"), f = document.querySelector("#fSite [name=from]"), ms = toMs(f?.value) || Date.now();
+    if (ms > Date.now()) { toast("Pick a time that has passed."); return; } await setSite(m, k === "off", ms); const gi = fleet().findIndex(([, L]) => L.includes(m)); openEv(siteForm(gi), "On site / not on site"); render(); toast(`${m} ${k === "off" ? "marked not on site" : "back on site"}.`); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; closeSheet(app); render(); scrollTo(0, 0); return; }
   if (b.dataset.dnav) { date = addDays(date, +b.dataset.dnav); render(); return; }

@@ -194,3 +194,4 @@ table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:
 }
 .ro .fbar input,.ro .fbar select{pointer-events:auto;border-color:var(--line)!important;background:var(--panel)!important}.ro .fbar input::placeholder{color:var(--muted)}
 @media (max-width:760px){#app>.ftabs{flex-wrap:wrap;overflow:visible}#app>.ftabs button{padding:8px 12px;font-size:14.5px}}
+.hb.OFF{background:#2a2a2a;border-color:#444;color:#8a8a8a}.mach.OFF{border-left-color:#666;opacity:.6}.hbm small.OFF{color:#9a9a9a}
