@@ -13,27 +13,44 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="stylesheet" href="../style.css">
 <link rel="stylesheet" href="fc.css">
+<style>body.pub .fc-dl{display:none!important}#signBtn{white-space:nowrap}@media (max-width:560px){.band .in{flex-wrap:wrap}#who{order:5;flex:1 1 100%;margin-left:0!important}body.pub #who{display:none}}</style>
 </head>
 <body>
 <div class="band"><div class="in">
   <a href="../" class="logolink" aria-label="TKR home"><img class="logo" src="../icons/logo-96.png" alt="TKR Operations"></a>
-  <div><h1>GET Forecast</h1><div class="sub">TKR Operations · Drill Stores · Tharisa · app v170</div></div>
+  <div><h1>GET Forecast</h1><div class="sub">TKR Operations · Drill Stores · Tharisa · app v171</div></div>
   <span id="who" class="sub" style="margin-left:auto"></span>
   <button id="signBtn" class="install" hidden>Sign out</button>
 </div></div>
 <div class="wrap">
   <div id="net" class="netbar" hidden></div>
   <a class="stlink" href="../stores/"><span><b>Stores</b> · Drill Stores and Rompad Stores: issue and receive, GET with prices, PPE, consumption report</span><span aria-hidden="true">›</span></a>
-  <div id="gate" class="card" hidden style="max-width:440px;margin:24px auto">
-    <form id="signForm" style="display:flex;flex-direction:column;gap:12px" autocomplete="on">
-      <h2>Admin and manager sign in</h2>
-      <p class="muted" style="margin:0">The GET Forecast is for admins and managers. Sign in with your app email and password.</p>
+  <div id="gate" class="card" hidden style="max-width:460px;margin:24px auto">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <h2 style="margin:0">Member sign in</h2>
+      <label>Your name <select id="mName"><option value="">Loading…</option></select></label>
+      <label>PIN <input id="mPin" type="password" inputmode="numeric" autocomplete="off" maxlength="6"></label>
+      <p class="flag" id="mErr" style="margin:0"></p>
+      <button class="primary" id="mGo" type="button">Sign in</button>
+      <p class="muted" style="margin:0">You stay signed in on this phone or PC until you sign out.</p>
+    </div>
+    <details style="margin-top:16px"><summary style="cursor:pointer;font-weight:700">Register as a member</summary>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px">
+        <label>Name and surname <input id="rName" autocomplete="name"></label>
+        <label>Choose a PIN (4 to 6 numbers) <input id="rPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+        <label>Type the PIN again <input id="rPin2" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+        <p class="flag" id="rMsg" style="margin:0"></p>
+        <button id="rGo" type="button">Register</button>
+      </div></details>
+    <details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">Admin and manager sign in</summary>
+    <form id="signForm" style="display:flex;flex-direction:column;gap:12px;margin-top:10px" autocomplete="on">
       <label>Username or email <input id="sEmail" type="text" autocapitalize="none" autocomplete="username" required></label>
       <label>Password <input id="sPass" type="password" autocomplete="current-password" required></label>
       <p class="flag" id="sErr" style="margin:0"></p>
       <button class="primary">Sign in</button>
       <button type="button" class="ghost" id="forgotBtn">Forgot your password?</button>
-    </form>
+    </form></details>
+    <button type="button" class="ghost" id="gateBack" style="margin-top:14px;width:100%">Back to the dashboard</button>
   </div>
   <div id="app" hidden></div>
 </div>

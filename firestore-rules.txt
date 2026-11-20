@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 17 Nov 2026 (Training Matrix access given by Muneer and Amogelang)
+// TKR Operations app – rules updated 20 Nov 2026 (GET Forecast open to view; members sign in with name and PIN)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -92,10 +92,29 @@ service cloud.firestore {
     }
     match /ctrl/{id} { allow read, write: if signedIn(); }   // the control room PCs sign in by themselves (no email); controllers use their name and PIN in the page
 
-    match /fcMetres/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
-    match /fcIssues/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
-    match /fcCounts/{id}   { allow read: if isManager(); allow write: if isAdmin(); }
-    match /fcSettings/{id} { allow read: if isManager(); allow write: if isAdmin(); }
+    // GET Forecast: anyone who opens it can see the dashboard; admins change it
+    match /fcMetres/{id}   { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /fcIssues/{id}   { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /fcCounts/{id}   { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /fcSettings/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    // GET Forecast members: register with a name and PIN, an admin approves, then they sign in and stay signed in
+    match /fcMembers/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.status == 'pending';
+      allow update, delete: if isAdmin();
+    }
+    match /fcMemberPins/{id} {
+      allow read: if false;
+      allow create: if signedIn() && !exists(/databases/$(database)/documents/fcMemberPins/$(id));
+      allow update, delete: if isAdmin();
+    }
+    match /fcMemberSess/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn() && request.auth.uid == uid
+        && get(/databases/$(database)/documents/fcMembers/$(request.resource.data.member)).data.status == 'approved'
+        && request.resource.data.pin == get(/databases/$(database)/documents/fcMemberPins/$(request.resource.data.member)).data.pin;
+    }
 
     // ---------- Stores (Drill Stores, Rompad Stores, PPE) ----------
     function stStaff() {
@@ -110,14 +129,14 @@ service cloud.firestore {
       allow update, delete: if sectionBoss();
     }
     match /stMoves/{id} {
-      allow read: if stReader();
+      allow read: if stReader() || (signedIn() && resource.data.store == 'drill');   // Drill Stores GET shows on the GET Forecast
       allow create: if (stStaff() || sectionBoss()) && request.resource.data.byUid == request.auth.uid
         && request.resource.data.kind in ['issue', 'receive'] && request.resource.data.store in ['drill', 'rompad'];
       allow update: if sectionBoss();
       allow delete: if sectionBoss() || (stStaff() && resource.data.byUid == request.auth.uid);
     }
     match /stCounts/{id} {
-      allow read: if stReader();
+      allow read: if stReader() || (signedIn() && resource.data.store == 'drill');
       allow create: if (stStaff() || sectionBoss()) && request.resource.data.byUid == request.auth.uid;
       allow update, delete: if sectionBoss();
     }
@@ -136,7 +155,7 @@ service cloud.firestore {
       allow write: if stStaff() || sectionBoss();
     }
     match /stConfig/{docId} {
-      allow read: if stReader();
+      allow read: if stReader() || (signedIn() && docId == 'items');
       allow write: if sectionBoss();
     }
 

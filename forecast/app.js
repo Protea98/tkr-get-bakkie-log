@@ -2,7 +2,7 @@
    Works like the Daily GET Consumption Tracker: same prices, target lives and forecast method.
    Data is shared online in Firebase (admins write, managers read). */
 import {
-  initializeApp, getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
+  initializeApp, getAuth, signInWithEmailAndPassword, signInAnonymously, signOut, onAuthStateChanged, sendPasswordResetEmail,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where,
 } from "../lib/firebase.js";
 import { withOct2026 } from "../lib/oct2026.js";
@@ -65,35 +65,77 @@ const allCounts = () => counts.concat(stCounts.filter(x => x.getKey).map(x => ({
 let reportDate = ymd(new Date()), tab = "dash", subs = [], impStatus = "", metStatus = "";
 const isAdmin = () => ADMINS.includes(email);
 const isManager = () => isAdmin() || (email && managers.includes(email));
+let member = null, fcMembers = [], dataOn = false;
+const isPublic = () => !isManager() && !member;   // anyone can see the dashboard; members and managers can also download
 const app = $("app");
 
 const drill = makeDrill({ db, fs: { collection, doc, setDoc, deleteDoc, getDoc, getDocs, query, where }, $, esc, fmt, num, r1, M1, ymd, parse, addDays, toast, fail, loadLib, RIGS,
   isAdmin: () => isAdmin(), getMetres: () => metres, getEmail: () => email, render: () => render(), evidencePdf: d => evidencePdf(d) });
 
-/* ---------- sign in ---------- */
-onAuthStateChanged(auth, u => {
-  user = u; email = (u?.email || "").toLowerCase();
-  subs.forEach(f => f()); subs = [];
-  if (!u || u.isAnonymous || email.endsWith("@staff.tkroperations.app")) { showGate(); return; }
-  subs.push(onSnapshot(doc(db, "config", "roles"), s => { managers = ((s.exists() && s.data().managers) || []).map(x => String(x).toLowerCase()); gateOrApp(); }, () => gateOrApp()));
+/* ---------- sign in ----------
+   Anyone can open the dashboard. Members register with a name and PIN, an admin approves them,
+   and they stay signed in on that phone or PC until they sign out. Admins and managers sign in with email. */
+onAuthStateChanged(auth, async u => {
+  user = u; email = (u?.email || "").toLowerCase(); member = null;
+  subs.forEach(f => f()); subs = []; dataOn = false;
+  if (!u) { try { await signInAnonymously(auth); } catch { showGate("No signal. The GET Forecast needs signal to open."); } return; }
+  if (u.isAnonymous || email.endsWith("@staff.tkroperations.app")) {
+    if (u.isAnonymous) { try { const ss = await getDoc(doc(db, "fcMemberSess", u.uid));
+      if (ss.exists()) { const m = await getDoc(doc(db, "fcMembers", ss.data().member)); if (m.exists() && m.data().status === "approved") member = { id: m.id, name: m.data().name }; else await deleteDoc(doc(db, "fcMemberSess", u.uid)).catch(() => {}); } } catch (e) { console.warn(e); } }
+    managers = []; startApp(); return; }
+  subs.push(onSnapshot(doc(db, "config", "roles"), s => { managers = ((s.exists() && s.data().managers) || []).map(x => String(x).toLowerCase()); startApp(); }, () => startApp()));
 });
-function showGate(msg = "", html = false) { if ($("mWrap")) $("mWrap").hidden = true; $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; $("who").textContent = ""; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("signForm").querySelectorAll(":scope > label, :scope > button, :scope > p.muted").forEach(el => el.hidden = html); }
-function gateOrApp() {
-  if (!isManager()) { showGate(`<span style="color:var(--fg);font-weight:500;display:block">Sorry ${esc(showName(email))}, you don't have access to the GET Forecast with this account. Please ask admin.</span>
-    <span style="display:flex;flex-direction:column;gap:10px;margin-top:14px"><button type="button" class="primary" id="naSwitch">Sign in with a different account</button><button type="button" id="naHome">Back to the home page</button></span>`, true);
-    $("naSwitch").onclick = async () => { await signOut(auth); showGate(""); $("sEmail").value = ""; $("sPass").value = ""; $("sEmail").focus(); };
-    $("naHome").onclick = () => { location.href = "../"; }; return; }
-  $("gate").hidden = true; app.hidden = false; $("signBtn").hidden = false; $("who").textContent = showName(email) + (isAdmin() ? " · admin" : " · manager");
-  if (subs.length === 1) {
+function showGate(msg = "", html = false) { if ($("mWrap")) $("mWrap").hidden = true; $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("mErr").textContent = ""; loadMemberNames(); }
+function gateOrApp() { startApp(); }
+function startApp() {
+  $("gate").hidden = true; app.hidden = false; document.body.classList.toggle("pub", isPublic());
+  $("signBtn").hidden = false; $("signBtn").textContent = isPublic() && !(user && !user.isAnonymous) ? "Sign in" : "Sign out";
+  $("who").textContent = isAdmin() ? showName(email) + " · admin" : isManager() ? showName(email) + " · manager" : member ? member.name + " · member" : "Viewing";
+  if (!dataOn) { dataOn = true;
     const live = (name, set) => subs.push(onSnapshot(collection(db, name), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => netNote("Couldn't load. Check the signal.")));
     live("fcMetres", v => { rawMetres = v; metres = withOct2026(v); if (isAdmin()) setTimeout(async () => { await seedOctober(); await seedLate(); await seedSite5200(); await seedOct26(); await seedEvidenceMetres(); await seedOct31(); await seedRegister(); await seedNov(); await autoEvidence(); }, 1500); }); live("fcIssues", v => issues = v); live("fcCounts", v => counts = v);
     const liveQ = (name, set) => subs.push(onSnapshot(query(collection(db, name), where("store", "==", "drill")), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, e => console.warn(e)));
     liveQ("stMoves", v => stMoves = v); liveQ("stCounts", v => stCounts = v);
     subs.push(onSnapshot(doc(db, "stConfig", "items"), s => { stPrice = {}; (s.exists() ? s.data().list || [] : []).forEach(i => { if (i.getKey && num(i.price) > 0) stPrice[i.getKey] = num(i.price); }); settings = mergeSettings(rawSettings); render(); }, () => {}));
     subs.push(onSnapshot(doc(db, "fcSettings", "main"), s => { rawSettings = s.exists() ? s.data() : {}; settings = mergeSettings(rawSettings); render(); }, () => {}));
+    if (isAdmin()) { let seen = null; subs.push(onSnapshot(collection(db, "fcMembers"), s => { fcMembers = s.docs.map(d => ({ id: d.id, ...d.data() }));
+      const p = fcMembers.filter(m => m.status === "pending").length; if (seen !== null && p > seen) toast(`${p} member${p === 1 ? "" : "s"} waiting for you to approve.`); seen = p; render(); }, () => {})); }
   }
   render();
 }
+/* members */
+const pinHash = async (id, pin) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tkr-fc|" + id + "|" + pin)))].map(b => b.toString(16).padStart(2, "0")).join("");
+async function loadMemberNames() { const sel = $("mName");
+  try { const L = (await getDocs(query(collection(db, "fcMembers"), where("status", "==", "approved")))).docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name));
+    sel.innerHTML = L.length ? '<option value="">Choose your name</option>' + L.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("") : '<option value="">No members yet – register below</option>'; }
+  catch { sel.innerHTML = '<option value="">No signal</option>'; } }
+async function ensureAnon() { if (auth.currentUser?.isAnonymous) return auth.currentUser; if (auth.currentUser) await signOut(auth); return (await signInAnonymously(auth)).user; }
+$("mGo").onclick = async () => { const id = $("mName").value, pin = $("mPin").value.trim(), e = $("mErr");
+  if (!id) { e.textContent = "Choose your name."; return; } if (!/^\d{4,6}$/.test(pin)) { e.textContent = "Type your PIN (4 to 6 numbers)."; return; }
+  e.textContent = "Signing in…"; $("mGo").disabled = true;
+  try { const u = await ensureAnon(); await setDoc(doc(db, "fcMemberSess", u.uid), { member: id, pin: await pinHash(id, pin), name: $("mName").selectedOptions[0].textContent, at: Date.now() });
+    member = { id, name: $("mName").selectedOptions[0].textContent }; $("mPin").value = ""; e.textContent = ""; toast("Signed in as " + member.name); startApp(); }
+  catch (x) { e.textContent = String(x?.code || "").includes("permission") ? "That PIN is wrong, or admin has not approved you yet." : "No signal. Try again with signal."; }
+  $("mGo").disabled = false; };
+$("rGo").onclick = async () => { const name = $("rName").value.replace(/\s+/g, " ").trim(), p1 = $("rPin").value.trim(), p2 = $("rPin2").value.trim(), m = $("rMsg");
+  if (name.length < 3) { m.textContent = "Type your name and surname."; return; } if (!/^\d{4,6}$/.test(p1)) { m.textContent = "The PIN must be 4 to 6 numbers."; return; } if (p1 !== p2) { m.textContent = "The two PINs are not the same."; return; }
+  m.textContent = "Sending…"; $("rGo").disabled = true;
+  try { const u = await ensureAnon(), id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) + "-" + Date.now().toString(36);
+    await setDoc(doc(db, "fcMemberPins", id), { pin: await pinHash(id, p1) });
+    await setDoc(doc(db, "fcMembers", id), { name, status: "pending", createdAt: Date.now(), uid: u.uid });
+    m.textContent = "Sent. Admin will approve you, then choose your name above and sign in with your PIN."; $("rName").value = $("rPin").value = $("rPin2").value = ""; }
+  catch (x) { m.textContent = String(x?.code || "").includes("network") || !navigator.onLine ? "No signal. Try again with signal." : "It didn't send. Try again."; }
+  $("rGo").disabled = false; };
+$("gateBack").onclick = () => startApp();
+async function decideMember(id, status) {
+  try { await setDoc(doc(db, "fcMembers", id), { status, decidedBy: email, decidedAt: Date.now() }, { merge: true });
+    if (status !== "approved") { const ss = await getDocs(query(collection(db, "fcMemberSess"), where("member", "==", id))); for (const d of ss.docs) await deleteDoc(d.ref); }
+    toast(status === "approved" ? "Approved. They can sign in now." : status === "removed" ? "Removed. They are signed out." : "Declined."); } catch (e) { fail(e); } }
+function membersCard() { if (!isAdmin()) return ""; const P = fcMembers.filter(m => m.status === "pending"), A = fcMembers.filter(m => m.status === "approved").sort((a, b) => a.name.localeCompare(b.name));
+  if (!P.length && !A.length) return "";
+  return `<section class="card" style="${P.length ? "border:2px solid var(--gold,#d4a12a)" : ""}"><h2>Members${P.length ? ` · <span style="color:var(--gold,#d4a12a)">${P.length} waiting</span>` : ""}</h2>
+    ${P.map(m => `<div class="row" style="align-items:center;gap:8px;margin:6px 0"><b style="flex:1 1 200px">${esc(m.name)}</b><span class="muted">registered ${fmt(ymd(new Date(m.createdAt)))}</span><button class="primary" data-mem="${esc(m.id)}|approved">Approve</button><button data-mem="${esc(m.id)}|declined">Decline</button></div>`).join("")}
+    ${A.length ? `<details style="margin-top:8px"><summary style="cursor:pointer">Approved members (${A.length})</summary>${A.map(m => `<div class="row" style="align-items:center;gap:8px;margin:6px 0"><span style="flex:1 1 200px">${esc(m.name)}</span><button data-mem="${esc(m.id)}|removed">Remove</button></div>`).join("")}</details>` : ""}</section>`; }
 let rawSettings = {};
 function mergeSettings(x) { const s = structuredClone(DEFAULTS); for (const k of ["price", "life", "spare"]) Object.assign(s[k], x[k] || {}); Object.assign(s.price, stPrice); if (x.nextBits !== undefined) s.nextBits = x.nextBits; return s; }
 $("signForm").onsubmit = async e => {
@@ -101,7 +143,11 @@ $("signForm").onsubmit = async e => {
   try { await signInWithEmailAndPassword(auth, toLogin($("sEmail").value), $("sPass").value); $("sPass").value = ""; }
   catch (err) { $("sErr").textContent = String(err?.code || "").includes("network") ? "No signal. Signing in needs signal." : "Email or password is wrong."; }
 };
-$("signBtn").onclick = () => signOut(auth);
+$("signBtn").onclick = async () => {
+  if (user && !user.isAnonymous && !isManager()) { await signOut(auth); return; }
+  if (isPublic()) { showGate(""); return; }
+  if (member && !isManager()) { if (!confirm("Sign out of the GET Forecast on this device?")) return; try { await deleteDoc(doc(db, "fcMemberSess", auth.currentUser.uid)); } catch {} member = null; toast("Signed out"); startApp(); return; }
+  await signOut(auth); };
 $("forgotBtn").onclick = async () => {
   const em = $("sEmail").value.trim(); if (!em) { $("sErr").textContent = "Type your email first, then tap Forgot your password."; return; }
   try { await sendPasswordResetEmail(auth, em); $("sErr").textContent = `A link to set a new password was sent to ${em}. Check the inbox and spam folder.`; }
@@ -190,7 +236,7 @@ function render() {
   const c = calc(reportDate);
   const head = `<div class="tabs" role="tablist">${tabs.filter(([k]) => isAdmin() || ["dash"].includes(k)).map(([k, t]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${t}</button>`).join("")}</div>`;
   let body = "";
-  if (tab === "dash") body = dash(c);
+  if (tab === "dash") body = membersCard() + dash(c);
   if (tab === "metres") body = "";
   if (tab === "docs") body = drill.docsView();
   if (tab === "bd") body = drill.bdView();
@@ -217,9 +263,9 @@ function dash(c) {
   <div class="strip">
     <div><h2>${esc(dayName(c.rd))} ${fmt(c.rd)}</h2><div class="muted">This week ${short(c.weekStart)} – ${short(c.weekEnd)} · actuals up to ${fmt(c.upToCal)}</div>${lastUpdate()}</div>
     <div class="row"><label>Report date <input type="date" id="rd" value="${c.rd}"></label>
-      <button id="msgBtn">WhatsApp message</button><button class="primary" id="xlBtn">Export GET tracker (Excel)</button></div>
+      <span class="fc-dl"><button id="msgBtn">WhatsApp message</button><button class="primary" id="xlBtn">Export GET tracker (Excel)</button></span></div>
   </div>
-  <div class="row" style="align-items:flex-end;margin:-4px 0 16px;gap:10px"><b style="flex:1 1 100%">Download from one date to another</b>
+  <div class="row fc-dl" style="align-items:flex-end;margin:-4px 0 16px;gap:10px"><b style="flex:1 1 100%">Download from one date to another</b>
     <label>From <input type="date" id="cFrom" value="${consFrom || c.rd.slice(0, 7) + "-01"}" max="${today()}"></label><label>To <input type="date" id="cTo" value="${consTo || (c.rd > today() ? today() : c.rd)}" max="${today()}"></label>
     <button class="primary" id="consGo">GET consumption report (Excel)</button><button id="mmGo">Machines and metres (Excel)</button></div>
   ${empty ? `<div class="notice"><b class="t">No data yet</b>${isAdmin() ? "Tap Import and choose your GET tracker file to bring in October so far, or add the metres." : "Ask admin to import the GET tracker or add the metres."}</div>` : ""}
@@ -398,6 +444,7 @@ app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (metresChartClick(b)) { render(); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; render(); return; }
+  if (b.dataset.mem) { const [id, st] = b.dataset.mem.split("|"); if (st !== "approved" && !confirm(st === "removed" ? "Remove this member? They will be signed out." : "Decline this registration?")) return; b.disabled = true; await decideMember(id, st); return; }
   if (await drill.onClick(e)) return;
   if (b.dataset.del) { const [c, id] = b.dataset.del.split("|"); if (confirm("Delete this line?")) deleteDoc(doc(db, c, id)).catch(fail); return; }
   if (b.id === "msgBtn") { const t = message(calc(reportDate)); try { await navigator.clipboard.writeText(t); toast("Message copied. Paste it into WhatsApp."); } catch { prompt("Copy the message:", t); } return; }
