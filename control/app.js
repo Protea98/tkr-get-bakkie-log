@@ -599,10 +599,6 @@ function daySheet(d) {
     <div class="xlinfo"><label>Date <input value="${fmt(d)}" readonly></label><label>Day controller <input name="dayCtl" value="${esc(day.dayCtl || "")}" placeholder="${esc((me?.name || ""))}"></label><label>Night controller <input name="nightCtl" value="${esc(day.nightCtl || "")}" placeholder="${esc((me?.name || ""))}"></label>
       <label>Last update <input value="${last ? new Date(last.at).toTimeString().slice(0, 5) : ""}" readonly></label><label>Next update <input value="${last ? new Date(last.at + 36e5).toTimeString().slice(0, 5) : ""}" readonly></label>
       <label>Status <input value="${d !== today() ? "" : !last ? "Not started" : Date.now() - last.at > 36e5 ? "Update due" : "Up to date"}" readonly></label></div>
-    <div class="xlband">Data and documents</div>
-    <div class="xlwrap"><table class="xl"><thead><tr><th>Section</th><th>Item</th>${COLS.map(c => `<th>${c}</th>`).join("")}<th>Time updated</th><th>Updated by</th><th>Comments</th></tr></thead><tbody>
-      ${CHECK.map(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr data-item="${esc(it)}">${i ? "" : `<td rowspan="${items.length}" class="grpc">${esc(sec)}</td>`}<td class="lt">${esc(it)}</td>${COLS.map(k => lockedV(c, k) ? `<td class="lk" data-lockf="${esc(c.id)}|${k}"><span class="lkv">${c[k]}</span></td>` : `<td><select data-c="${k}" class="tk">${opt(c[k])}</select></td>`).join("")}<td>${c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : ""}</td><td>${esc(c.by || "")}</td><td>${lockedV(c, "comment") ? `<input class="lk" readonly data-lockf="${esc(c.id)}|comment" value="${esc(c.comment)}">` : `<input data-c="comment" value="${esc(c.comment || "")}">`}</td></tr>`; }).join("")).join("")}
-      <tr class="gt"><td colspan="2">Captured</td>${COLS.map(k => `<td>${CHECK.flatMap(([, i]) => i).filter(it => get(it)[k] === "✓").length} of ${CHECK.flatMap(([, i]) => i).length}</td>`).join("")}<td colspan="3"></td></tr></tbody></table></div>
     ${shiftTable(d, "Day")}${shiftTable(d, "Night")}
     <div class="xlband">24-hour availability summary per machine</div>
     <div class="xlwrap"><table class="xl"><thead><tr><th>Group</th><th>Machine</th><th>Available hrs</th><th>Breakdown hrs</th><th>Planned maint. hrs</th><th>Down hrs</th><th>Total hrs</th><th>Availability %</th></tr></thead><tbody>
@@ -610,7 +606,11 @@ function daySheet(d) {
     <div class="xlband">Hourly update log <small>(fills in by itself every time something is saved)</small></div>
     <div class="xlwrap"><table class="xl"><thead><tr><th>Hour</th><th>Updated</th><th>Time done</th><th>Controller</th><th>Notes</th></tr></thead><tbody>
       ${hourLog.map(([h, L]) => `<tr><td>${pad(h)}:00–${pad((h + 1) % 24)}:00</td><td class="${L.length ? "okc" : ""}">${L.length ? "✓" : ""}</td><td>${L[0] ? new Date(L[0].at).toTimeString().slice(0, 5) : ""}</td><td>${esc([...new Set(L.map(l => l.by))].join(", "))}</td><td class="nt">${esc(L.map(l => l.what).slice(0, 3).join(" · "))}${L.length > 3 ? ` · +${L.length - 3} more` : ""}</td></tr>`).join("")}
-      <tr class="gt"><td>Hours updated</td><td colspan="4">${hourLog.filter(([, L]) => L.length).length} of 24</td></tr></tbody></table></div></form>`;
+      <tr class="gt"><td>Hours updated</td><td colspan="4">${hourLog.filter(([, L]) => L.length).length} of 24</td></tr></tbody></table></div>
+    <div class="xlband">Data and documents</div>
+    <div class="xlwrap"><table class="xl"><thead><tr><th>Section</th><th>Item</th>${COLS.map(c => `<th>${c}</th>`).join("")}<th>Time updated</th><th>Updated by</th><th>Comments</th></tr></thead><tbody>
+      ${CHECK.map(([sec, items]) => items.map((it, i) => { const c = get(it); return `<tr data-item="${esc(it)}">${i ? "" : `<td rowspan="${items.length}" class="grpc">${esc(sec)}</td>`}<td class="lt">${esc(it)}</td>${COLS.map(k => lockedV(c, k) ? `<td class="lk" data-lockf="${esc(c.id)}|${k}"><span class="lkv">${c[k]}</span></td>` : `<td><select data-c="${k}" class="tk">${opt(c[k])}</select></td>`).join("")}<td>${c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : ""}</td><td>${esc(c.by || "")}</td><td>${lockedV(c, "comment") ? `<input class="lk" readonly data-lockf="${esc(c.id)}|comment" value="${esc(c.comment)}">` : `<input data-c="comment" value="${esc(c.comment || "")}">`}</td></tr>`; }).join("")).join("")}
+      <tr class="gt"><td colspan="2">Captured</td>${COLS.map(k => `<td>${CHECK.flatMap(([, i]) => i).filter(it => get(it)[k] === "✓").length} of ${CHECK.flatMap(([, i]) => i).length}</td>`).join("")}<td colspan="3"></td></tr></tbody></table></div></form>`;
 }
 async function saveShift(sh, upload = true) {
   const f = $("fDay"); if (!f) return; const d = f.dataset.date; setTimeout(clearUndo, 0);
