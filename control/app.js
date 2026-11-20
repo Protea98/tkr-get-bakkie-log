@@ -439,7 +439,7 @@ const usedCache = new Map();
 function shiftUsed(d, sh) { if (curShift().key === d + "|" + sh) return true;
   const k = d + "|" + sh + "|" + recs.length; if (usedCache.has(k)) return usedCache.get(k);
   const [a, b] = shiftWin(d, sh), H = HRS(sh);
-  const u = recs.some(r => !r.deleted && ((r.kind === "hr" && r.date === d && H.some(h => r.cells?.[h])) || (r.kind === "ev" && toMs(r.start) < b && evEnd(r) > a)));
+  const u = recs.some(r => !r.deleted && ((r.kind === "hr" && !r.seed && r.date === d && H.some(h => r.cells?.[h])) || (r.kind === "ev" && toMs(r.start) < b && evEnd(r) > a)));
   usedCache.set(k, u); return u; }
 function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (offAt(mc, hStart(d, h))) return hStart(d, h) <= Date.now() ? "OFF" : "";
@@ -555,7 +555,7 @@ function shiftMessage(d, sh) {
     all.avail += S.avail; all.down += S.down;
     body.push(`*${g}* – ${pc(S)}${on.length > 1 ? ` (${on.length} machines together)` : ""}`, ...lines); if (off.length) body.push(`Not on site: ${off.join(", ")}`); body.push("");
   }
-  const L = [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Hours counted: ${tOf(a)} to ${upto >= b ? tOf(b) : tOf(upto)} (${hm(Math.floor((upto - a) / 6e4) / 60)} h per machine)`, "",
+  const L = [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Hours counted: ${tOf(a)} to ${upto >= b ? tOf(b) : "now"} (${hm((upto - a) / 36e5)} h per machine)`, "",
     `*All machines – availability ${pc(all)}*`, `Availability = hours working ÷ hours counted. A machine stays on breakdown until it is marked working again.`, "", ...body];
   const items = CHECK.flatMap(([, i]) => i), got = k => items.filter(it => (recs.find(r => r.id === chkKey(d, it)) || {})[k] === "✓").length;
   L.push(`*Documents received:* ${COLS.map(k => `${k} ${got(k)}/${items.length}`).join(" · ")}`);
@@ -1066,11 +1066,22 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); if (me) await backfillRigs(); sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
 }
+/* once: the drill rigs (not on site) are on breakdown for every hour from 1 November 2026, as Muneer asked on 20/11/2026 */
+async function backfillRigs() {
+  const KEY = "seed_rigsbd_2026-11"; if (recs.some(r => r.id === KEY)) return;
+  const RIGS = ["TDR013", "TDR014", "TDR015"], now = Date.now(), keep = undo.slice(); let n = 0;
+  for (let d = "2026-11-01"; d <= today(); d = addDays(d, 1)) for (const mc of RIGS) {
+    const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), cells = { ...(old?.cells || {}) }; let ch = false;
+    for (let h = 6; h <= 29; h++) { if (hStart(d, h) > now) break; if (cells[h] !== "BD" && cells[h] !== "PM") { cells[h] = "BD"; ch = true; } }
+    if (!ch) continue; n++;
+    await put(old ? { ...old, cells } : { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells, seed: 1 }); }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: now }, `Drill rigs TDR013, TDR014 and TDR015 marked as breakdown for every hour from 01/11/2026 (not on site)`);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }   // not part of "Discard changes"
 /* live: changes made on any other PC or phone show here within seconds, dashboards included */
 let liveKey = "", liveOff = null, liveT = 0;
 const canRedraw = () => me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.getElementById("hpop") && !document.querySelector(".sheet:not([hidden])");
