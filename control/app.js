@@ -464,7 +464,10 @@ function shiftSum(mc, d, sh) {
   const [a, b0] = shiftWin(d, sh), b = Math.min(b0, Date.now()), C = cellsOf(d, mc), V = HRS(sh).map(h => cellVal(d, mc, h, C)), filled = V.filter(v => v && v !== "OFF").length;
   let BD = 0, PM = 0, span = 0;   // span: the hours that have passed in the boxes that are filled (the hour running now counts only up to now)
   HRS(sh).forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, b); if (y <= x || V[k] === "OFF" || !V[k]) return; span += (y - x) / 36e5; const e = hoursIn(mc, x, y);
-    if ((e.BD || 0) + (e.PM || 0) > 0) { BD += Math.min(e.BD || 0, (y - x) / 36e5); PM += e.PM || 0; } else if (V[k] === "BD") BD += (y - x) / 36e5; else if (V[k] === "PM") PM += (y - x) / 36e5; });
+    if ((e.BD || 0) + (e.PM || 0) > 0) { BD += Math.min(e.BD || 0, (y - x) / 36e5); PM += e.PM || 0;
+      const inT = k ? V[k - 1] : carryFrom(d, mc, hr);   // still on breakdown from the hour before: the minutes before the logged time count as down too
+      if (inT === "BD" || inT === "PM") { const f = downEvs(mc).filter(q => toMs(q.start) < y && evEnd(q) > x).map(q => toMs(q.start)).sort((p2, q2) => p2 - q2)[0];
+        if (f > x) { if (inT === "BD") BD += (Math.min(f, y) - x) / 36e5; else PM += (Math.min(f, y) - x) / 36e5; } } } else if (V[k] === "BD") BD += (y - x) / 36e5; else if (V[k] === "PM") PM += (y - x) / 36e5; });
   const down = BD + PM;
   return { filled, BD, PM, down, avail: Math.max(0, span - down), SB: 0, NU: 0 };
 }
@@ -542,7 +545,8 @@ function shiftMessage(d, sh) {
     H.forEach((h, k) => { const v = V[k]; if (v !== "BD" && v !== "PM") return; const last = R0.at(-1); if (last && last.t === v && last.k2 === k - 1) { last.k2 = k; last.h2 = h; } else R0.push({ t: v, k1: k, k2: k, h1: h, h2: h }); });
     return R0.map(r => { const x = hStart(d, r.h1), y = hStart(d, r.h2) + 36e5, E = downEvs(mc).filter(e => e.type === r.t && toMs(e.start) < y && evEnd(e) > x);
       const st = E.map(e => toMs(e.start)).filter(t => t > x && t < x + 36e5).sort((p, q) => p - q)[0] || x;
-      const en = y > now ? null : (E.map(e => e.end ? toMs(e.end) : 0).filter(t => t > y - 36e5 && t < y).sort((p, q) => q - p)[0] || y);
+      let en = y > now ? null : (E.map(e => e.end ? toMs(e.end) : 0).filter(t => t > y - 36e5 && t < y).sort((p, q) => q - p)[0] || y);
+      if (en) { if (E.some(e => !e.end)) en = null; else { const mx = Math.max(...E.map(e => toMs(e.end))); if (mx > en) en = mx > now ? null : mx; } }   // a logged time that runs past the boxes
       return `${WORD[r.t]} ${tOf(st)}–${en ? tOf(en) : "now"}`; }); };
   const all = { avail: 0, down: 0 }, body = [];
   for (const [g, M] of fleet()) {
@@ -892,7 +896,7 @@ async function viewDoc(id) {
 
 /* ---------- events ---------- */
 function cellMenu(btn) {
-  document.getElementById("hpop")?.remove(); const v = btn.classList.contains("auto") ? "" : btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
+  document.getElementById("hpop")?.remove(); const v = btn.classList.contains("auto") || btn.classList.contains("carry") ? "" : btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
   pop.innerHTML = ["OP", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${o}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
     + (v ? `<small>Tap ${v} again to clear it</small>` : "");
   pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
@@ -1066,7 +1070,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); if (me) await backfillRigs(); sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1082,6 +1086,23 @@ async function backfillRigs() {
     await put(old ? { ...old, cells } : { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells, seed: 1 }); }
   await put({ id: KEY, kind: "seed", ym: "setup", at: now }, `Drill rigs TDR013, TDR014 and TDR015 marked as breakdown for every hour from 01/11/2026 (not on site)`);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }   // not part of "Discard changes"
+/* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
+async function busUpdate() {
+  const KEY = "seed_bus_2026-11-20_1142"; if (recs.some(r => r.id === KEY)) return;
+  const AT = "2026-11-20T11:42", atMs = toMs(AT), keep = undo.slice(), d = "2026-11-20", sh = "Day";
+  if (Date.now() < atMs) return;
+  const S = [["TKR020", "BD", "Brake lining"], ["TKR021", "OP"], ["TKR023", "BD", "Isuzu engine overhaul"], ["TKR024", "BD", "Drag link needs to be repaired"], ["TKR025", "OP"], ["TKR026", "OP"]];
+  for (const [mc, st, why] of S) {
+    const open = downEvs(mc).filter(e => !e.end && toMs(e.start) <= atMs);
+    if (st === "OP") { for (const e of open) await put({ ...e, end: AT, endBy: me.name });
+      const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id && !r.deleted) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
+      await put({ ...rec, deleted: false, cells: { ...rec.cells, 11: "OP" } }); continue; }
+    const bd = open.find(e => e.type === "BD");
+    if (bd) await put({ ...bd, reason: why });
+    else if (cellVal(d, mc, 11) === "BD") { const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id && !r.deleted); if (rec) await put({ ...rec, notes: { ...(rec.notes || {}), [sh]: why } }); }
+    else await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: "BD", start: AT, end: "", reason: why }); }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, "Bus status at 11:42: TKR020 breakdown (brake lining), TKR021 working, TKR023 breakdown (Isuzu engine overhaul), TKR024 breakdown (drag link needs to be repaired), TKR025 and TKR026 working");
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* live: changes made on any other PC or phone show here within seconds, dashboards included */
 let liveKey = "", liveOff = null, liveT = 0;
 const canRedraw = () => me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.getElementById("hpop") && !document.querySelector(".sheet:not([hidden])");
