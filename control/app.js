@@ -533,11 +533,21 @@ function shiftTable(d, sh) {
     <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
+/* Clear: once the box's own mark and the grid time in it are gone, a breakdown, maintenance or standby carried on from the hour before would still show – the box goes back to OP */
+async function clearRest(d, mc, h) {
+  const a = hStart(d, h), b = a + 36e5;
+  for (const e of downEvs(mc).filter(e => e.grid && toMs(e.start) < b && evEnd(e) > a)) { const s0 = toMs(e.start), e0 = evEnd(e);
+    if (s0 >= a && e0 <= b) await put({ ...e, deleted: true }); else if (s0 >= a) await put({ ...e, start: isoOf(b) }); else if (e0 <= b) await put({ ...e, end: isoOf(a) });
+    else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
+  bump(); const v = cellVal(d, mc, h);
+  if (v === "BD" || v === "PM" || v === "SB") { const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id); if (rec && !downEvs(mc).some(e => !e.grid && toMs(e.start) < b && evEnd(e) > a)) await put({ ...rec, cells: { ...rec.cells, [h]: "OP" } }); }
+}
 async function setCell(d, mc, h, val) {
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else delete cells[h];
   await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
   if (a > now) return;
+  if (!val) await clearRest(d, mc, h);
   if (!val && current) {   // cleared in the hour that is running: take away the breakdown or maintenance picked by mistake
     for (const e of downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a && !lockedV(e, "start"))) {
       if (toMs(e.start) >= a) await put({ ...e, deleted: true }, `${mc}: ${TYPES[e.type].toLowerCase()} from ${hhmm(e.start)} taken away`); else await put({ ...e, end: isoOf(a), endBy: me.name }); }
@@ -940,7 +950,7 @@ function cellMenu(btn) {
 document.addEventListener("click", async ev => {
   const pk = ev.target.closest("[data-hpick]"), pop = document.getElementById("hpop");
   if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick; pop.remove();
-    if (val === cur) return; await setCell($("fDay").dataset.date, mc, +h, val); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render(); return; }
+    if (val === cur && pk.dataset.hpick !== "") return; await setCell($("fDay").dataset.date, mc, +h, val); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render(); return; }
   if (pop && !ev.target.closest("#hpop") && !ev.target.closest("[data-hcell]")) pop.remove();
 }, true);
 async function clickH(ev) {
