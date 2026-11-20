@@ -1033,7 +1033,10 @@ async function submitH(ev) {
     if (!/^\d{4}$/.test(p)) { $("pinErr").textContent = "The PIN must be 4 numbers."; return; } if (p !== p2) { $("pinErr").textContent = "The two PINs are not the same."; return; }
     if (!u || u.pin) return; await startSession(u); await put({ ...u, pin: await pinHash(u.name, p) }, `${u.name} chose a new PIN`); pinFor = null; askMail = true; render(); toast("New PIN saved."); return; }
   if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && !okUser(u)) { $("pinErr").textContent = "The admin hasn't approved you yet."; return; }
-    if (u && u.pin === await pinHash(u.name, f.elements.pin.value.trim())) { await startSession(u); pinFor = null; askMail = true; render(); }
+    const pv = f.elements.pin.value.replace(/\D/g, "").slice(-4), same = x => R("user").filter(y => y.name.trim().toLowerCase() === x.name.trim().toLowerCase() && okUser(y));
+    let hit = null; if (u) for (const y of same(u)) if (y.pin && y.pin === await pinHash(y.name, pv)) { hit = y; break; }   // the same name added on two PCs: either PIN works
+    if (u && !hit && navigator.onLine) { $("pinErr").textContent = "Checking with the TKR app…"; try { await syncNow(false); } catch {} for (const y of same(u)) if (y.pin && y.pin === await pinHash(y.name, pv)) { hit = y; break; } }   // this PC may have an old copy
+    if (hit) { await startSession(hit); pinFor = null; askMail = true; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
   if (f.id === "fAdm") { if (!navigator.onLine) { toast("The first admin sign-in needs signal."); return; } const p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; }
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); const auth = m.getAuth(admApp);
