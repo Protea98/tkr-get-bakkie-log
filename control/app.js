@@ -1189,6 +1189,22 @@ async function exportXlsx(from, to) {
     row(ws, r, [`${g} total`, "", ...gt.per.map(v => Math.round(v * 100) / 100), gt.avail, gt.BD, gt.PM, gt.down, pct(gt.avail, gt.down)], { bold: true, fill: "FFFFF2CC" , pct: [nc - 1] }); ws.getCell(r, nc).numFmt = "0%"; r++;
     gt.per.forEach((v, i) => fleetT.per[i] += v); for (const k of ["avail", "BD", "PM", "SB", "down"]) fleetT[k] += gt[k]; }
   row(ws, r, ["Fleet total", "", ...fleetT.per.map(v => Math.round(v * 100) / 100), fleetT.avail, fleetT.BD, fleetT.PM, fleetT.down, pct(fleetT.avail, fleetT.down)], { bold: true, fill: "FFD9D9D9" , pct: [nc - 1] }); ws.getCell(r, nc).numFmt = "0%";
+  // hour meters: opening and closing hours per machine per shift, and the machine hours they give
+  { ws = wb.addWorksheet("Machine hours", { views: [{ state: "frozen", xSplit: 2, ySplit: 7, showGridLines: false }] }); ws.columns = [14, 11, ...days.map(() => 6.4), 13, 13].map(w => ({ width: w }));
+    const nm = 2 + days.length + 2, mh = (mc, x) => ["Day", "Night"].reduce((t, sh) => { const v = meterHrs(meterOf(x, mc, sh)); return v == null ? t : (t ?? 0) + v; }, null);
+    top(ws, nm, `Machine hours – ${period}`, "TKR OPERATIONS  ·  THARISA MINE", "From the opening and closing hours (hour meter) per shift, day and night together");
+    head(ws, 7, ["Group", "Machine", ...days.map(x => days.some(y => y.slice(0, 7) !== m) ? x.slice(8) + "/" + x.slice(5, 7) : +x.slice(8)), "Machine (h:mm)", "Available (h:mm)"]); r = 8;
+    const ft = days.map(() => 0); let fT = 0, fA = 0;
+    for (const [g, L] of fleet()) { const gt = days.map(() => 0); let gT = 0, gA = 0;
+      for (const mc of L) { const V = days.map(x => mh(mc, x)), T = V.reduce((t, v) => t + (v || 0), 0), A = days.reduce((t, x) => t + (daySum(mc, x)?.avail || 0), 0);
+        V.forEach((v, i) => { gt[i] += v || 0; }); gT += T; gA += A;
+        row(ws, r++, [g, mc, ...V.map(v => v == null ? "" : v), T || "", A || ""], { boldCol: [1] }); }
+      row(ws, r++, [`${g} total`, "", ...gt.map(v => v || ""), gT || "", gA || ""], { bold: true, fill: "FFFFF2CC" }); gt.forEach((v, i) => ft[i] += v); fT += gT; fA += gA; }
+    row(ws, r++, ["Fleet total", "", ...ft.map(v => v || ""), fT || "", fA || ""], { bold: true, fill: "FFD9D9D9" });
+    r++; band(ws, r++, nm, "Hour meter readings per shift");
+    head(ws, r++, ["Date", "Shift", "Group", "Machine", "Opening hrs", "Closing hrs", "Machine (h:mm)", "Captured by"]);
+    for (const x of days) for (const sh of ["Day", "Night"]) for (const [g, L] of fleet()) for (const mc of L) { const M = meterOf(x, mc, sh); if ((M.open === undefined || M.open === "") && (M.close === undefined || M.close === "")) continue;
+      row(ws, r++, [fmt(x), sh, g, mc, M.open === "" || M.open === undefined ? "" : +M.open, M.close === "" || M.close === undefined ? "" : +M.close, meterHrs(M) ?? "", recs.find(q => q.id === `hr_${x}_${mc}` && !q.deleted)?.by || ""], { boldCol: [3], fmt: { 4: "0.0", 5: "0.0" } }); } }
   // 4. delay summary per machine (Control Room), and the drill rigs as in the Metres Delay summary
   { const D = dsData(from, to), B = D.B; ws = wb.addWorksheet("Delay summary", { views: [{ showGridLines: false }] }); const nw = Math.max(9, 2 + B.rigs.length * 2);
     ws.columns = [34, 14, 13, 13, 13, 13, 13, 13, 13, 13, 13].slice(0, Math.max(nw, 9)).map(w => ({ width: w }));
@@ -1223,13 +1239,13 @@ async function exportXlsx(from, to) {
     for (const [sec, items] of CHECK) items.forEach((it, i) => { const c = rec(chkKey(d, it)); row(ws, r++, [i ? "" : sec, it, ...COLS.map(k => c[k] || ""), c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : "", c.by || "", c.comment || ""], { boldCol: [0], left: [7] }); });
     for (const sh of ["Day", "Night"]) {
       r++; band(ws, r++, 24, `Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"})   OP = Operating  ·  SB = Available, standing (not operating)  ·  BD = Breakdown  ·  PM = Planned maintenance`);
-      head(ws, r++, ["Group", "Machine", ...HRS(sh).map(hLabel), "Down at", "Back up", "Reason / comments", "Opening hrs", "Closing hrs", "Machine hrs (h:mm)", "Avail (h:mm)", "BD (h:mm)", "PM (h:mm)", "Down (h:mm)"]);
+      head(ws, r++, ["Group", "Machine", "Opening hrs", "Closing hrs", "Machine hrs (h:mm)", ...HRS(sh).map(hLabel), "Down at", "Back up", "Reason / comments", "Avail (h:mm)", "BD (h:mm)", "PM (h:mm)", "Down (h:mm)"]);
       const [a, b] = shiftWin(d, sh);
       for (const [g, L] of fleet()) L.forEach((mc, i) => { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh), C = cellsOf(d, mc);
-        row(ws, r++, [i ? "" : g, mc, ...HRS(sh).map(h => cellVal(d, mc, h, C)), E.map(e => toMs(e.start) < a ? tOf(a) : hhmm(e.start)).join(", "), E.map(e => e.end && toMs(e.end) <= b ? hhmm(e.end) : "").filter(Boolean).join(", "),
+        const M3 = meterOf(d, mc, sh);
+        row(ws, r++, [i ? "" : g, mc, M3.open === undefined || M3.open === "" ? "" : +M3.open, M3.close === undefined || M3.close === "" ? "" : +M3.close, meterHrs(M3) ?? "", ...HRS(sh).map(h => cellVal(d, mc, h, C)), E.map(e => toMs(e.start) < a ? tOf(a) : hhmm(e.start)).join(", "), E.map(e => e.end && toMs(e.end) <= b ? hhmm(e.end) : "").filter(Boolean).join(", "),
           [...new Set([...E.map(e => e.reason), recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted)?.notes?.[sh]].filter(Boolean))].join("; "),
-          ...(() => { const m = meterOf(d, mc, sh), mh = meterHrs(m); return [m.open === undefined || m.open === "" ? "" : +m.open, m.close === undefined || m.close === "" ? "" : +m.close, mh ?? ""]; })(),
-          s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [16], fmt: { 17: "0.0", 18: "0.0" } }); });
+          s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [19], fmt: { 2: "0.0", 3: "0.0" } }); });
     }
     r++; band(ws, r++, 21, "24-hour availability summary per machine"); head(ws, r++, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Total (h:mm)", "Availability %"]);
     for (const [g, L] of fleet()) L.forEach((mc, i) => { const s = daySum(mc, d); row(ws, r, [i ? "" : g, mc, ...(s ? [s.avail, s.BD, s.PM, s.down, s.avail + s.down, s.pct ?? ""] : ["", "", "", "", "", ""])], { boldCol: [0, 1] , pct: [8 - 1] }); ws.getCell(r, 8).numFmt = "0%"; r++; });
