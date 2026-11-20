@@ -135,7 +135,7 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
 function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
-  if (h != null) return C[h]; if (s) return s.type;
+  if (h != null) return C[h] === "-" ? "?" : C[h]; if (s) return s.type;
   const cur = HRS(sh).filter(x => hStart(d, x) <= now).at(-1), v = cur != null ? cellVal(d, m, cur) : ""; return v === "BD" || v === "PM" || v === "SB" ? v : "OP"; }   // nothing marked this shift: working (clean slate)
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
@@ -456,6 +456,7 @@ function shiftUsed(d, sh) { if (curShift().key === d + "|" + sh) return true;
   usedCache.set(k, u); return u; }
 function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (offAt(mc, hStart(d, h))) return hStart(d, h) <= Date.now() ? "OFF" : "";
+  if (C[h] === "-") return "";   // cleared: blank, as if never filled
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
   if (e.length) return e.some(x => x.type === "BD") ? "BD" : "PM";
@@ -468,7 +469,7 @@ function carryFrom(d, mc, h, depth = 0) {
   const k = `${d}|${mc}|${h}`; if (cvMemo.has(k)) return cvMemo.get(k); if (depth > 48) return "";
   const [d2, h2] = prevHour(d, h), a = hStart(d2, h2), b = a + 36e5; let v = "";
   if (!offAt(mc, a)) { const C = cellsOf(d2, mc);
-    if (C[h2]) v = C[h2] === "BD" || C[h2] === "PM" || C[h2] === "SB" ? C[h2] : "";
+    if (C[h2]) v = C[h2] === "BD" || C[h2] === "PM" || C[h2] === "SB" ? C[h2] : "";   // "-" (cleared) and OP stop it
     else { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
       if (E.length) { const g = E.filter(e => e.grid && evEnd(e) <= b); v = g.length === E.length ? (E.some(x => x.type === "BD") ? "BD" : "PM") : (E.some(e => evEnd(e) >= b) ? (E.some(x => x.type === "BD") ? "BD" : "PM") : ""); }
       else v = carryFrom(d2, mc, h2, depth + 1); } }
@@ -533,18 +534,16 @@ function shiftTable(d, sh) {
     <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
-/* Clear: once the box's own mark and the grid time in it are gone, a breakdown, maintenance or standby carried on from the hour before would still show – the box goes back to OP */
+/* Clear: the box goes blank (stored as "-"), the grid time in it is taken away and nothing carries into it */
 async function clearRest(d, mc, h) {
   const a = hStart(d, h), b = a + 36e5;
   for (const e of downEvs(mc).filter(e => e.grid && toMs(e.start) < b && evEnd(e) > a)) { const s0 = toMs(e.start), e0 = evEnd(e);
     if (s0 >= a && e0 <= b) await put({ ...e, deleted: true }); else if (s0 >= a) await put({ ...e, start: isoOf(b) }); else if (e0 <= b) await put({ ...e, end: isoOf(a) });
     else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
-  bump(); const v = cellVal(d, mc, h);
-  if (v === "BD" || v === "PM" || v === "SB") { const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id); if (rec && !downEvs(mc).some(e => !e.grid && toMs(e.start) < b && evEnd(e) > a)) await put({ ...rec, cells: { ...rec.cells, [h]: "OP" } }); }
-}
+  bump(); }
 async function setCell(d, mc, h, val) {
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
-  const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else delete cells[h];
+  const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else if (a > now) delete cells[h]; else cells[h] = "-";   // a box ahead of time cleared: as if never touched
   await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
   if (a > now) return;
   if (!val) await clearRest(d, mc, h);
