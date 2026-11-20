@@ -192,3 +192,4 @@ table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:
   .hb b{font-size:16px}
   .hbkey{margin-left:0}
 }
+.ro .fbar input,.ro .fbar select{pointer-events:auto;border-color:var(--line)!important;background:var(--panel)!important}.ro .fbar input::placeholder{color:var(--muted)}

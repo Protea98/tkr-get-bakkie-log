@@ -167,18 +167,18 @@ function gateView() {
 }
 
 /* ---------- views ---------- */
-const TABS = [["now", "Live board and workbook", "deploy"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
+const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
 const pendingReqs = () => R("req").filter(q => q.status === "pending").length;
 const tabs = () => { const n = pendingReqs(); return [TABS[0], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(1)]; };
 function render() {
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
   if (!me && viewer) { $("who").innerHTML = `Viewing only · <button class="sm" data-unview="1" style="min-height:36px;padding:2px 12px">Controller sign-in</button>`;
-    const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; tab = "now";
-    app.innerHTML = `<div class="ro">${nowView()}</div>`; afterRender(app);
+    const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; if (tab !== "files") tab = "now";
+    app.innerHTML = tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`; afterRender(app);
     const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; } return; }
   if (!me) { app.innerHTML = `<div class="card viewcard"><b>Just want to see the machines?</b><span class="muted">Anyone can view the live board and the hours. Only controllers can change them.</span><button class="primary" data-view="1">View the dashboard</button></div>` + gateView(); return; }
   let body = "";
-  if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView();
+  if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView(); if (tab === "files") body = filesView();
   if (askMail && me && !me.admin) body = mailToView();
   else if (tab === "req") body = reqView();
   if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
@@ -698,7 +698,7 @@ function mailForm(e) {
 }
 
 /* ---------- documents per machine per shift (job cards, checklists…), kept on this PC and sent when there is signal ---------- */
-const DOC_TYPES = ["Checklist", "Job card", "Tally sheet", "Trip summary", "Fleet report", "Breakdown report", "Other"];
+const DOC_TYPES = ["Fleet report", "Job card", "Checklist", "Tally sheet", "Trip summary", "Breakdown report", "Other"];
 const NEEDS = { "Drill rigs": ["Checklist", "Tally sheet"], "Rockbreakers": ["Checklist"], "Buses": ["Checklist", "Trip summary"], "Lowbed": ["Checklist", "Trip summary"], "Water bowser": ["Checklist", "Trip summary"], "Bakkies": ["Checklist"] };
 const docsOf = (m, d, sh) => R("doc").concat(R("mdoc")).filter(x => x.machine === m && (!d || (x.date === d && x.shift === sh)));   // mdoc: drill rig documents from the Metres section
 function shiftsSoFar(m0) { const L = [], c = curShift(), end = m0 === today().slice(0, 7) ? today() : monthEnd(m0);
@@ -725,13 +725,13 @@ function docsPanel(m, sel = "") {
 }
 function docForm(m = "", d = "", sh = "", t = "") {
   const c = curShift(), M = fleet().flatMap(([, L]) => L); d = d || c.key.split("|")[0]; sh = sh || c.key.split("|")[1];
-  return `<form id="fDoc" class="card" autocomplete="off" style="max-width:600px;margin:0 auto"><p class="muted" style="margin-top:0">Photos or PDFs. They are saved on this PC straight away and go to the TKR app by themselves when there is signal.</p>
+  return `<form id="fDoc" class="card" autocomplete="off" style="max-width:600px;margin:0 auto"><p class="muted" style="margin-top:0">Any file: photos, PDF, Excel, Word, PowerPoint and others, up to 15 MB each. They are saved on this PC straight away and go to the TKR app by themselves when there is signal.</p>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
     <label>Machine <select name="m"><option value="">General (no one machine)</option>${M.map(x => `<option ${x === m ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
     <label>Document <select name="t">${DOC_TYPES.map(x => `<option ${x === (t || "Checklist") ? "selected" : ""}>${x}</option>`).join("")}</select></label>
     <label>Date <input type="date" name="d" value="${d}" max="${today()}"></label>
     <label>Shift <select name="sh"><option ${sh === "Day" ? "selected" : ""}>Day</option><option ${sh === "Night" ? "selected" : ""}>Night</option></select></label></div>
-    <label class="pick req" style="margin-top:12px;display:flex;flex-direction:column;gap:6px">Choose photos or PDFs <input type="file" name="f" accept="image/*,application/pdf" multiple required></label>
+    <label class="pick req" style="margin-top:12px;display:flex;flex-direction:column;gap:6px">Choose files <input type="file" name="f" multiple required></label>
     <button class="primary" style="width:100%;min-height:52px;margin-top:14px">Save documents</button></form>`;
 }
 const dataUrlOf = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
@@ -744,19 +744,59 @@ async function shrinkImg(file) {
 async function saveDocs(f) {
   const files = [...f.elements.f.files], m = f.elements.m.value, t = f.elements.t.value, d = f.elements.d.value, sh = f.elements.sh.value; if (!files.length) return;
   const btn = f.querySelector("button.primary"); btn.disabled = true; btn.textContent = "Saving…"; let n = 0;
-  for (const file of files) { try { const pdf = /pdf/.test(file.type) || /\.pdf$/i.test(file.name);
-      if (pdf && file.size > 15 * 1024 * 1024) { toast(file.name + " is bigger than 15 MB."); continue; }
-      const data = pdf ? await dataUrlOf(file) : await shrinkImg(file), fid = uid(), parts = Math.max(1, Math.ceil(data.length / 700000));
+  for (const file of files) { try { const photo = /^image\/(jpeg|png|webp|bmp)$/.test(file.type);
+      if (!photo && file.size > 15 * 1024 * 1024) { toast(file.name + " is bigger than 15 MB."); continue; }
+      let data = photo ? await shrinkImg(file).catch(() => "") : ""; const mime = data ? "image/jpeg" : (file.type || mimeOf(file.name));
+      if (!data) data = await dataUrlOf(new Blob([file], { type: mime }));
+      const fid = uid(), parts = Math.max(1, Math.ceil(data.length / 700000));
       for (let i = 0; i < parts; i++) await fileSet(`${fid}_${i}`, data.slice(i * 700000, (i + 1) * 700000));
-      await put({ id: "doc_" + fid, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: m, group: m ? groupOf(m) : "", type: t, name: file.name, mime: pdf ? "application/pdf" : "image/jpeg", fid, parts, size: data.length }, `Document: ${t} for ${m || "general"} (${fmt(d).slice(0, 5)} ${sh})`); n++; }
+      await put({ id: "doc_" + fid, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: m, group: m ? groupOf(m) : "", type: t, name: data.startsWith("data:image/jpeg") && photo && !/\.jpe?g$/i.test(file.name) ? file.name.replace(/\.[^.]+$/, "") + ".jpg" : file.name, mime, fid, parts, size: Math.round(data.length * 0.75) }, `Document: ${t} for ${m || "general"} (${fmt(d).slice(0, 5)} ${sh})`); n++; }
     catch (e) { console.warn(e); toast(file.name + " couldn't be read."); } }
-  if (m) openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); else closeEv(); render(); toast(`${n} document${n === 1 ? "" : "s"} saved${navigator.onLine ? "" : " on this PC. They send when there is signal"}.`);
+  if (m && tab !== "files") openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); else closeEv(); render(); toast(`${n} document${n === 1 ? "" : "s"} saved${navigator.onLine ? "" : " on this PC. They send when there is signal"}.`);
 }
 async function docData(r) { const parts = [];
   for (let i = 0; i < (r.parts || 1); i++) { let p = await fileGet(`${r.fid}_${i}`);
     if (!p && navigator.onLine) { try { await fire(); const x = await fb.getDoc(fb.doc(fb.db, "ctrl", `file_${r.fid}_${i}`)); p = x.exists() ? x.data().data : ""; if (p) await fileSet(`${r.fid}_${i}`, p); } catch (e) { console.warn(e); } }
     if (!p) return null; parts.push(p); } return parts.join(""); }
 const docName = r => `${r.machine || "General"}_${r.date}_${r.shift}_${r.type.replace(/\s+/g, "_")}_${r.name}`.replace(/[\\/:*?"<>|]+/g, "-");
+const MIMES = { pdf: "application/pdf", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xls: "application/vnd.ms-excel", xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12", csv: "text/csv",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", doc: "application/msword", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation", ppt: "application/vnd.ms-powerpoint",
+  txt: "text/plain", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", heic: "image/heic", zip: "application/zip", mp4: "video/mp4" };
+const mimeOf = n => MIMES[(n.split(".").pop() || "").toLowerCase()] || "application/octet-stream";
+const canOpen = r => /^image\/(jpeg|png|webp|gif)$|pdf/.test(r.mime || "") || /\.(pdf|jpe?g|png)$/i.test(r.name || "");
+const sizeTxt = b => !b ? "" : b < 1048576 ? Math.max(1, Math.round(b / 1024)) + " KB" : (b / 1048576).toFixed(1).replace(".", ",") + " MB";
+/* the Documents tab: every uploaded file, per machine, to look up and download */
+let fMach = "", fType = "", fFind = "";
+function fileList() { const q = fFind.toLowerCase();
+  return R("doc").filter(x => x.date?.startsWith(month) && (!fMach || (fMach === "-" ? !x.machine : x.machine === fMach)) && (!fType || x.type === fType) && (!q || `${x.name} ${x.machine} ${x.type} ${x.by}`.toLowerCase().includes(q)))
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.shift || "").localeCompare(a.shift || "") || (b.editedAt || 0) - (a.editedAt || 0)); }
+function filesView() {
+  const M = fleet(), L = fileList(), mon = R("doc").filter(x => x.date?.startsWith(month)), cnt = t => mon.filter(x => x.type === t).length;
+  const mb = `<div class="mbar"><button data-mnav="-1">‹</button><b>${monthName(month)}</b><button data-mnav="1" ${month >= today().slice(0, 7) ? "disabled" : ""}>›</button></div>`;
+  const tile = (l, n, s) => `<div class="tile"><div class="l">${l}</div><div class="n">${n}</div><div class="s">${s}</div></div>`;
+  const per = M.flatMap(([, ms]) => ms).map(m => [m, mon.filter(x => x.machine === m).length]);
+  return pageHead("Control room", "Documents", "Fleet reports, job cards, checklists and any other file, kept for each machine", me ? `<button class="primary" data-upload="${esc(fMach && fMach !== "-" ? fMach : "")}">+ Upload files</button>` : "",
+      me ? "Upload any file for a machine. Everyone who opens the Control Room can find it here and download it." : "Find a file and tap Download. Only controllers can upload.")
+    + `<div class="mhead">${mb}</div>`
+    + `<div class="tiles">${tile("Files this month", mon.length, monthName(month))}${tile("Fleet reports", cnt("Fleet report"), "this month")}${tile("Job cards", cnt("Job card"), "this month")}${tile("Checklists", cnt("Checklist"), "this month")}</div>`
+    + `<section class="card fbar"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end">
+      <label>Machine <select id="fMach"><option value="">All machines</option>${M.map(([g, ms]) => `<optgroup label="${esc(g)}">${ms.map(m => `<option value="${esc(m)}" ${fMach === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</optgroup>`).join("")}<option value="-" ${fMach === "-" ? "selected" : ""}>General (no one machine)</option></select></label>
+      <label>Document <select id="fType"><option value="">All documents</option>${DOC_TYPES.map(t => `<option ${fType === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label>Search <input id="fFind" type="search" value="${esc(fFind)}" placeholder="File name or who uploaded"></label>
+      <button data-fzip="1" ${L.length ? "" : "disabled"}>Download these (${L.length})</button></div>
+      <div class="mchips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px">${per.map(([m, n]) => `<button class="sm${fMach === m ? " primary" : ""}" data-fm="${esc(m)}">${esc(m)} <b>${n}</b></button>`).join("")}</div></section>`
+    + `<div class="res">${L.map(x => `<div class="ri"><div class="rt"><b>${esc(x.machine || "General")} · ${esc(x.type)}</b><small>${esc(x.name)}${x.size ? " · " + sizeTxt(x.size) : ""}</small><small>${dow(x.date)} ${fmt(x.date)} · ${esc(x.shift || "")} shift · by ${esc(x.by || "")}</small></div>
+        <div class="row" style="gap:6px;flex:none">${canOpen(x) ? `<button class="sm" data-dview="${x.id}">Open</button>` : ""}<button class="sm primary" data-ddl="${x.id}">Download</button>${me ? `<button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button>` : ""}</div></div>`).join("")
+      || `<p class="muted" style="text-align:center;padding:24px 0">No files for ${fMach ? esc(fMach === "-" ? "general" : fMach) : "any machine"}${fType ? " · " + esc(fType.toLowerCase()) : ""} in ${monthName(month)}.</p>`}</div>`;
+}
+async function downloadList(L, root) {
+  if (L.length === 1) return downloadDoc(L[0].id);
+  await new Promise((res, rej) => { if (window.JSZip) return res(); const s = document.createElement("script"); s.src = "../lib/jszip.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  const zip = new window.JSZip(); let n = 0, skip = 0;
+  for (const r of L) { const d = await docData(r); if (!d) { skip++; continue; } zip.file(`${root}/${r.machine || "General"}/${docName(r)}`, d.split(",")[1], { base64: true }); n++; }
+  if (!n) { toast("These files aren't on this device yet. Try again with signal."); return; }
+  const { deliver } = await import("../lib/deliver.js"); deliver(await zip.generateAsync({ type: "blob" }), `${root.replace(/\s+/g, "_")}.zip`);
+  toast(`${n} file${n === 1 ? "" : "s"} downloaded${skip ? ` · ${skip} not on this device yet` : ""}.`); }
 async function downloadDoc(id) { const r = recs.find(x => x.id === id); if (!r) return; const d = await docData(r); if (!d) { toast(navigator.onLine ? "This document hasn't reached the TKR app yet." : "This document is on another PC. Try again with signal."); return; }
   const { deliver } = await import("../lib/deliver.js"); deliver(await (await fetch(d)).blob(), docName(r)); }
 async function downloadAll(m) {
@@ -768,7 +808,7 @@ async function downloadAll(m) {
   const { deliver } = await import("../lib/deliver.js"); deliver(await zip.generateAsync({ type: "blob" }), `${root.replace(/\s+/g, "_")}.zip`);
   toast(`${n} document${n === 1 ? "" : "s"} downloaded${skip ? ` · ${skip} not on this PC yet` : ""}.`); }
 async function viewDoc(id) {
-  const r = recs.find(x => x.id === id); if (!r) return; let parts = [];
+  const r = recs.find(x => x.id === id); if (!r) return; if (!canOpen(r)) return downloadDoc(id); let parts = [];
   for (let i = 0; i < (r.parts || 1); i++) { let p = await fileGet(`${r.fid}_${i}`);
     if (!p) { if (!navigator.onLine) { toast("This document is on another PC. Open it when there is signal."); return; }
       try { await fire(); const x = await fb.getDoc(fb.doc(fb.db, "ctrl", `file_${r.fid}_${i}`)); p = x.exists() ? x.data().data : ""; if (p) await fileSet(`${r.fid}_${i}`, p); } catch (e) { console.warn(e); } }
@@ -793,7 +833,7 @@ document.addEventListener("click", async ev => {
 async function clickH(ev) {
   const vb = ev.target.closest("[data-view],[data-unview]");
   if (vb) { viewer = !!vb.dataset.view; if (!viewer) { pinFor = null; adminStep = ""; } render(); if (viewer) syncNow(false).then(() => { if (viewer && !me) render(); }); return; }
-  if (!me) { if (viewer) { if (sheetClick(ev, app)) return; const b = ev.target.closest("[data-sh],[data-wbm]"); if (!b) return; } }   // viewing only: nothing can be changed
+  if (!me) { if (viewer) { if (sheetClick(ev, app)) return; const b = ev.target.closest("[data-sh],[data-wbm],[data-tab],[data-ddl],[data-dview],[data-dzip],[data-fzip],[data-mnav]"); if (!b) return; } }   // viewing only: nothing can be changed
   const hb = ev.target.closest("[data-hcell]"); if (hb) { if (!me) return; cellMenu(hb); return; }
   if (sheetClick(ev, app)) return;
   const ne = ev.target.closest("[data-newev]"); if (ne) { openEv(evForm({}, ne.dataset.newev), "Log breakdown"); return; }
@@ -818,8 +858,10 @@ async function clickH(ev) {
   if (b.dataset.dshift) { const [m, d, sh] = b.dataset.dshift.split("|"); openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); return; }
   if (b.dataset.dview) { await viewDoc(b.dataset.dview); return; }
   if (b.dataset.ddl) { await downloadDoc(b.dataset.ddl); return; }
+  if (b.dataset.fm) { fMach = fMach === b.dataset.fm ? "" : b.dataset.fm; render(); return; }
+  if (b.dataset.fzip) { b.disabled = true; try { await downloadList(fileList(), `Control Room documents ${monthName(month)}${fMach ? " " + (fMach === "-" ? "General" : fMach) : ""}${fType ? " " + fType : ""}`); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
   if (b.dataset.dzip) { b.disabled = true; try { await downloadAll(b.dataset.dzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
-  if (b.dataset.ddel) { const r = recs.find(x => x.id === b.dataset.ddel); if (r && confirm(`Delete ${r.name}?`)) { await put({ ...r, deleted: true }, `Deleted document ${r.type} ${r.machine}`); if (r.machine && document.getElementById("evPanel")) openEv(docsPanel(r.machine, r.date + "|" + r.shift), `${r.machine} · documents`); else closeEv(); render(); } return; }
+  if (b.dataset.ddel) { const r = recs.find(x => x.id === b.dataset.ddel); if (r && confirm(`Delete ${r.name}?`)) { await put({ ...r, deleted: true }, `Deleted document ${r.type} ${r.machine}`); if (r.machine && document.getElementById("evPanel") && tab !== "files") openEv(docsPanel(r.machine, r.date + "|" + r.shift), `${r.machine} · documents`); else closeEv(); render(); } return; }
   if (b.dataset.addmg) { openEv(machForm(+b.dataset.addmg, "add"), "Add a machine"); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; closeSheet(app); render(); scrollTo(0, 0); return; }
@@ -898,6 +940,8 @@ async function submitH(ev) {
   if (f.id === "fSync") { if (!navigator.onLine) { toast("Signing in needs signal."); return; } try { await fire(); await fb.signInWithEmailAndPassword(fb.auth, toLogin(f.elements.e.value), f.elements.p.value); toast("Signed in. The control room now sends to the TKR app by itself."); } catch { toast("Email or password is wrong."); } return; }
 }
 async function changeH(ev) {
+  if (ev.target.id === "fMach") { fMach = ev.target.value; render(); return; }
+  if (ev.target.id === "fType") { fType = ev.target.value; render(); return; }
   if (!me) return;
   const t = ev.target;
   if (t.dataset.cell !== undefined) { const [mc, h] = t.dataset.cell.split("|"); await setCell($("fDay").dataset.date, mc, +h, t.value); render(); app.querySelector(`select[data-cell="${CSS.escape(t.dataset.cell)}"]`)?.focus({ preventScroll: true }); return; }
@@ -911,7 +955,8 @@ async function changeH(ev) {
   if (t.dataset.addc) { const [it, k] = t.dataset.addc.split("|"), id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it }; await put({ ...c, [k]: t.value.trim() }, `${it}: ${k}`); toast("Saved"); return; }
   if (t.id === "rs" && t.files[0]) { try { const d = JSON.parse(await t.files[0].text()); let n = 0; for (const r of d.recs || []) { const have = recs.find(x => x.id === r.id); if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { await tx("readwrite", tt => tt.objectStore("rec").put({ ...r, synced: 0 })); n++; } } recs = await all(); render(); toast(`Backup loaded: ${n} changes added.`); } catch { toast("That file is not a Control Room backup."); } }
 }
-app.addEventListener("click", clickH); app.addEventListener("submit", submitH); app.addEventListener("change", changeH); $("who").addEventListener("click", clickH);
+app.addEventListener("click", clickH); app.addEventListener("submit", submitH); app.addEventListener("change", changeH);
+app.addEventListener("input", ev => { if (ev.target.id !== "fFind") return; fFind = ev.target.value; clearTimeout(fFind.t); const pos = ev.target.selectionStart; render(); const x = $("fFind"); if (x) { x.focus(); x.setSelectionRange(pos, pos); } }); $("who").addEventListener("click", clickH);
 
 /* ---------- sync with the TKR app when there is signal ---------- */
 const FB_CFG = { apiKey: "AIzaSyALzOBLObrONGVD1bS0Tz02aNKhQ40TRoI", authDomain: "tkr-operations-app.firebaseapp.com", projectId: "tkr-operations-app",
