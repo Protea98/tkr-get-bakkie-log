@@ -770,6 +770,34 @@ let fMach = "", fType = "", fFind = "";
 function fileList() { const q = fFind.toLowerCase();
   return R("doc").filter(x => x.date?.startsWith(month) && (!fMach || (fMach === "-" ? !x.machine : x.machine === fMach)) && (!fType || x.type === fType) && (!q || `${x.name} ${x.machine} ${x.type} ${x.by}`.toLowerCase().includes(q)))
     .sort((a, b) => b.date.localeCompare(a.date) || (b.shift || "").localeCompare(a.shift || "") || (b.editedAt || 0) - (a.editedAt || 0)); }
+let fSub = "files", fPick = "";
+const NEED_ALL = ["Checklist", "Job card", "Fleet report", "Tally sheet", "Trip summary"];
+const needList = () => { const r = R("dneed").sort((a, b) => b.editedAt - a.editedAt)[0]; return r?.list || ["Checklist", "Job card", "Fleet report"]; };
+const hasDoc = (L, t, m) => L.some(x => x.type === t || (t === "Fleet report" && /^TDR/.test(m) && x.type === "Tally sheet"));   // drill rigs: the tally sheet is the fleet report
+function docGaps(m0, onlyM = "") {   // every finished shift of the month, every machine that worked in it: which needed documents are not uploaded
+  const need = needList(), now = Date.now(), end = m0 === today().slice(0, 7) ? today() : monthEnd(m0), M = fleet().flatMap(([, L]) => L).filter(m => !onlyM || m === onlyM), out = [];
+  for (let d = m0 + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { const fin = shiftWin(d, sh)[1] <= now;
+    const rows = !fin ? [] : M.filter(m => { const x = shiftSum(m, d, sh); return !(x.down > 0 && x.avail <= 0); }).map(m => { const L = docsOf(m, d, sh); return { m, have: L, miss: need.filter(t => !hasDoc(L, t, m)) }; });
+    out.push({ d, sh, fut: !fin, rows, st: !fin ? "fut" : !rows.length ? "none" : rows.every(r => !r.miss.length) ? "ok" : rows.some(r => r.have.length) ? "part" : "miss" }); }
+  return out; }
+function missingDocsView() {
+  const need = needList(), G = docGaps(month, fMach && fMach !== "-" ? fMach : ""), R2 = G.flatMap(g => g.rows.map(r => ({ ...r, d: g.d, sh: g.sh }))), gaps = R2.filter(r => r.miss.length);
+  const tile = (l, n, sub, cls = "") => `<div class="tile ${cls}"><div class="l">${l}</div><div class="n">${n}</div><div class="s">${sub}</div></div>`;
+  const cntT = t => gaps.filter(r => r.miss.includes(t)).length, pick = G.find(g => `${g.d}|${g.sh}` === fPick) || null;
+  const byM = new Map(); for (const r of gaps) byM.set(r.m, (byM.get(r.m) || 0) + r.miss.length);
+  const M = fleet();
+  return `<section class="card fbar"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end">
+      <label>Machine <select id="fMach"><option value="">All machines</option>${M.map(([g, ms]) => `<optgroup label="${esc(g)}">${ms.map(m => `<option value="${esc(m)}" ${fMach === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</optgroup>`).join("")}</select></label>
+      <div><span class="muted" style="font-size:12px;letter-spacing:1px;text-transform:uppercase">Needed for every machine, every shift${me ? " · tap to change" : ""}</span><div class="row" style="gap:6px;margin-top:6px">${NEED_ALL.map(t => `<button class="sm${need.includes(t) ? " primary" : ""}" data-need="${t}" ${me ? "" : "disabled"}>${need.includes(t) ? "✓ " : ""}${t}</button>`).join("")}</div></div></div></section>`
+    + `<div class="tiles">${tile("Machine shifts complete", `${R2.length - gaps.length} of ${R2.length}`, "finished shifts, machines not down all shift", gaps.length ? "alert" : "good")}${need.map(t => tile("No " + t.toLowerCase(), String(cntT(t)), "machine shifts", cntT(t) ? "alert" : "good")).join("")}</div>`
+    + `<div class="legend2"><span><i style="background:var(--ok)"></i>Everything uploaded</span><span><i style="background:var(--gold)"></i>Some documents, not all</span><span><i style="background:var(--bad)"></i>Nothing uploaded</span></div>`
+    + `<div class="mgrid">${G.map(g => `<button class="mcell ${g.st === "none" ? "" : g.st}" data-fpick="${g.d}|${g.sh}" ${g.fut ? "disabled" : ""} style="${pick === g ? "outline:3px solid var(--gold);outline-offset:1px" : ""}"><b>${g.d.slice(8)}</b>${g.sh}${g.rows.length && g.st !== "ok" ? `<small style="display:block;color:var(--bad)">${g.rows.filter(r => r.miss.length).length} short</small>` : ""}</button>`).join("")}</div>`
+    + (pick ? `<section class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${dow(pick.d)} ${fmt(pick.d)} · ${pick.sh} shift</h3><button class="sm ghost" data-fpick="">Close</button></div>
+        <div class="res" style="margin-top:10px">${pick.rows.map(r => `<div class="ri"><div class="rt"><b>${esc(r.m)}</b><small>${r.miss.length ? `<span style="color:var(--bad);font-weight:600">missing: ${r.miss.join(", ").toLowerCase()}</span>` : '<span style="color:var(--ok);font-weight:600">complete</span>'}${r.have.length ? ` · uploaded: ${[...new Set(r.have.map(x => x.type))].join(", ").toLowerCase()}` : ""}</small></div>
+          ${me && r.miss.length ? `<button class="sm primary" data-upload="${esc(r.m)}|${pick.d}|${pick.sh}|${r.miss[0]}">+ ${esc(r.miss[0])}</button>` : ""}</div>`).join("") || '<p class="muted">Every machine was down for this whole shift.</p>'}</div></section>` : "")
+    + `<div class="grid2c"><section class="card"><h2>Missing per machine</h2><div class="res">${[...byM].sort((a, b) => b[1] - a[1]).map(([m, n]) => `<div class="ri"><div class="rt"><b>${esc(m)}</b><small>${n} document${n === 1 ? "" : "s"} missing</small></div><button class="sm" data-fm="${esc(m)}">Show</button></div>`).join("") || '<p class="muted">Nothing missing this month.</p>'}</div></section>
+      <section class="card"><details ${fMach ? "open" : ""}><summary style="cursor:pointer"><h2 style="display:inline">Every missing shift (${gaps.length})</h2> <span class="muted">tap to open</span></summary><div class="res miss-list" style="margin-top:10px">${gaps.slice().reverse().slice(0, 120).map(r => `<div class="ri"><div class="rt"><b>${dow(r.d)} ${fmt(r.d)} · ${r.sh} · ${esc(r.m)}</b><small>missing: ${r.miss.join(", ").toLowerCase()}</small></div>${me ? `<button class="sm" data-upload="${esc(r.m)}|${r.d}|${r.sh}|${r.miss[0]}">Upload</button>` : ""}</div>`).join("") || '<p class="muted">Every machine has its documents for every shift it worked.</p>'}${gaps.length > 120 ? `<p class="muted">Showing the latest 120. Pick a machine to see all of its gaps.</p>` : ""}</div></details></section></div>`;
+}
 function filesView() {
   const M = fleet(), L = fileList(), mon = R("doc").filter(x => x.date?.startsWith(month)), cnt = t => mon.filter(x => x.type === t).length;
   const mb = `<div class="mbar"><button data-mnav="-1">‹</button><b>${monthName(month)}</b><button data-mnav="1" ${month >= today().slice(0, 7) ? "disabled" : ""}>›</button></div>`;
@@ -778,7 +806,8 @@ function filesView() {
   return pageHead("Control room", "Documents", "Fleet reports, job cards, checklists and any other file, kept for each machine", me ? `<button class="primary" data-upload="${esc(fMach && fMach !== "-" ? fMach : "")}">+ Upload files</button>` : "",
       me ? "Upload any file for a machine. Everyone who opens the Control Room can find it here and download it." : "Find a file and tap Download. Only controllers can upload.")
     + `<div class="mhead">${mb}</div>`
-    + `<div class="tiles">${tile("Files this month", mon.length, monthName(month))}${tile("Fleet reports", cnt("Fleet report"), "this month")}${tile("Job cards", cnt("Job card"), "this month")}${tile("Checklists", cnt("Checklist"), "this month")}</div>`
+    + `<div class="row" style="gap:6px;margin:0 0 12px"><button class="${fSub === "files" ? "primary" : ""}" data-fsub="files">Files</button><button class="${fSub === "miss" ? "primary" : ""}" data-fsub="miss">What's missing${(() => { const n = docGaps(month).flatMap(g => g.rows).filter(r => r.miss.length).length; return n ? ` (${n})` : ""; })()}</button></div>`
+    + (fSub === "miss" ? missingDocsView() : `<div class="tiles">${tile("Files this month", mon.length, monthName(month))}${tile("Fleet reports", cnt("Fleet report"), "this month")}${tile("Job cards", cnt("Job card"), "this month")}${tile("Checklists", cnt("Checklist"), "this month")}</div>`
     + `<section class="card fbar"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end">
       <label>Machine <select id="fMach"><option value="">All machines</option>${M.map(([g, ms]) => `<optgroup label="${esc(g)}">${ms.map(m => `<option value="${esc(m)}" ${fMach === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</optgroup>`).join("")}<option value="-" ${fMach === "-" ? "selected" : ""}>General (no one machine)</option></select></label>
       <label>Document <select id="fType"><option value="">All documents</option>${DOC_TYPES.map(t => `<option ${fType === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
@@ -787,7 +816,7 @@ function filesView() {
       <div class="mchips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px">${per.map(([m, n]) => `<button class="sm${fMach === m ? " primary" : ""}" data-fm="${esc(m)}">${esc(m)} <b>${n}</b></button>`).join("")}</div></section>`
     + `<div class="res">${L.map(x => `<div class="ri"><div class="rt"><b>${esc(x.machine || "General")} · ${esc(x.type)}</b><small>${esc(x.name)}${x.size ? " · " + sizeTxt(x.size) : ""}</small><small>${dow(x.date)} ${fmt(x.date)} · ${esc(x.shift || "")} shift · by ${esc(x.by || "")}</small></div>
         <div class="row" style="gap:6px;flex:none">${canOpen(x) ? `<button class="sm" data-dview="${x.id}">Open</button>` : ""}<button class="sm primary" data-ddl="${x.id}">Download</button>${me ? `<button class="sm ghost" data-ddel="${x.id}" aria-label="Delete">×</button>` : ""}</div></div>`).join("")
-      || `<p class="muted" style="text-align:center;padding:24px 0">No files for ${fMach ? esc(fMach === "-" ? "general" : fMach) : "any machine"}${fType ? " · " + esc(fType.toLowerCase()) : ""} in ${monthName(month)}.</p>`}</div>`;
+      || `<p class="muted" style="text-align:center;padding:24px 0">No files for ${fMach ? esc(fMach === "-" ? "general" : fMach) : "any machine"}${fType ? " · " + esc(fType.toLowerCase()) : ""} in ${monthName(month)}.</p>`}</div>`);
 }
 async function downloadList(L, root) {
   if (L.length === 1) return downloadDoc(L[0].id);
@@ -833,7 +862,7 @@ document.addEventListener("click", async ev => {
 async function clickH(ev) {
   const vb = ev.target.closest("[data-view],[data-unview]");
   if (vb) { viewer = !!vb.dataset.view; if (!viewer) { pinFor = null; adminStep = ""; } render(); if (viewer) syncNow(false).then(() => { if (viewer && !me) render(); }); return; }
-  if (!me) { if (viewer) { if (sheetClick(ev, app)) return; const b = ev.target.closest("[data-sh],[data-wbm],[data-tab],[data-ddl],[data-dview],[data-dzip],[data-fzip],[data-mnav]"); if (!b) return; } }   // viewing only: nothing can be changed
+  if (!me) { if (viewer) { if (sheetClick(ev, app)) return; const b = ev.target.closest("[data-sh],[data-wbm],[data-tab],[data-ddl],[data-dview],[data-dzip],[data-fzip],[data-mnav],[data-fsub],[data-fpick],[data-fm]"); if (!b) return; } }   // viewing only: nothing can be changed
   const hb = ev.target.closest("[data-hcell]"); if (hb) { if (!me) return; cellMenu(hb); return; }
   if (sheetClick(ev, app)) return;
   const ne = ev.target.closest("[data-newev]"); if (ne) { openEv(evForm({}, ne.dataset.newev), "Log breakdown"); return; }
@@ -858,6 +887,10 @@ async function clickH(ev) {
   if (b.dataset.dshift) { const [m, d, sh] = b.dataset.dshift.split("|"); openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); return; }
   if (b.dataset.dview) { await viewDoc(b.dataset.dview); return; }
   if (b.dataset.ddl) { await downloadDoc(b.dataset.ddl); return; }
+  if (b.dataset.fsub) { fSub = b.dataset.fsub; fPick = ""; render(); return; }
+  if (b.dataset.fpick !== undefined) { fPick = fPick === b.dataset.fpick ? "" : b.dataset.fpick; render(); return; }
+  if (b.dataset.need) { if (!me) return; const L = needList(), t = b.dataset.need, nx = L.includes(t) ? L.filter(x => x !== t) : [...L, t]; if (!nx.length) { toast("Keep at least one document."); return; }
+    await put({ id: "dneed", kind: "dneed", ym: "setup", list: NEED_ALL.filter(x => nx.includes(x)) }, `Documents needed per shift: ${nx.join(", ")}`); render(); return; }
   if (b.dataset.fm) { fMach = fMach === b.dataset.fm ? "" : b.dataset.fm; render(); return; }
   if (b.dataset.fzip) { b.disabled = true; try { await downloadList(fileList(), `Control Room documents ${monthName(month)}${fMach ? " " + (fMach === "-" ? "General" : fMach) : ""}${fType ? " " + fType : ""}`); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
   if (b.dataset.dzip) { b.disabled = true; try { await downloadAll(b.dataset.dzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
