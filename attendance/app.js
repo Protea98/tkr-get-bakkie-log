@@ -188,6 +188,7 @@ function viewDash(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=
   const per=A.map(e=>({e,t:tally([e],upto)}));const topExc=per.filter(x=>x.t.exc>0).sort((a,b)=>b.t.exc-a.t.exc).slice(0,8),topOt=per.filter(x=>x.t.ot>0).sort((a,b)=>b.t.ot-a.t.ot).slice(0,6);
   const codes=Object.entries(tC.codes).filter(([k])=>!["CLOCKED IN","HOURS WORKED"].includes(k)&&kindOf(k)!=="present"&&kindOf(k)!=="off").sort((a,b)=>b[1]-a[1]).slice(0,8);
   let h=chipsBar();
+  h+='<div class="bar" style="justify-content:flex-end;flex-wrap:wrap;gap:8px;margin:0 0 6px"><button class="btn gold" data-dashx="pdf">Download PDF report</button><button class="btn gold" data-dashx="xlsx">Download Excel</button><button class="btn gold" data-dashx="ppt">Download PowerPoint report</button></div>';
   h+='<h2 style="margin:6px 0 4px">'+nice(S.date)+' '+yr(S.date)+'</h2><p class="note" style="margin:0 0 10px">Cycle '+short(c.start)+' – '+short(c.end)+' · '+upto.length+' of '+c.dates.length+' days so far'+(S.sheet!=="All"?' · '+esc(S.sheet):'')+'</p>';
   h+='<div class="summary">'+stat("People on the register",A.length)+stat("Present today",tD.present)+stat("Absent today",tD.absent,tD.absent?"warn":"")+stat("On leave today",tD.leave)+stat("Off today",tD.off)+stat("Not marked yet today",tD.blank,tD.blank?"warn":"")+'</div>';
   h+='<div class="summary">'+stat("Cycle attendance",fmtPct(pct(tC.present,tC.exc)),"pct")+stat("Exception days this cycle",tC.exc)+stat("Overtime this cycle",(Math.round(tC.ot*10)/10)+" h")+stat("New this cycle",H.filter(x=>x.type==="Added").length)+stat("Removed this cycle",H.filter(x=>x.type==="Removed").length)+'</div>';
@@ -199,7 +200,28 @@ function viewDash(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=
   if(topOt.length)h+='<div class="list"><h3>Most overtime this cycle</h3><table class="tbl"><tbody>'+topOt.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b></td><td>'+esc(x.e.sheet)+'</td><td>'+(Math.round(x.t.ot*10)/10)+' h</td></tr>').join("")+'</tbody></table></div>';
   main.innerHTML=h;
   main.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{S.view=b.dataset.go;render();scrollTo(0,0)});
+  main.querySelectorAll("[data-dashx]").forEach(b=>b.onclick=()=>dashReport(b.dataset.dashx,b));
 }
+/* the dashboard as a report: the date and sheet chosen on screen, without overtime */
+function dashSpec(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=activeEmps().filter(e=>S.sheet==="All"||e.sheet===S.sheet);
+  const tD=tally(A,[S.date]),tC=tally(A,upto),H=allHistory().filter(h=>h.date>=c.start&&h.date<=c.end&&(S.sheet==="All"||h.sheet===S.sheet));
+  const per=A.map(e=>({e,t:tally([e],upto)})),exc=per.filter(x=>x.t.exc>0).sort((a,b)=>b.t.exc-a.t.exc||a.e.name.localeCompare(b.e.name));
+  const codes=Object.entries(tC.codes).filter(([k])=>!["CLOCKED IN","HOURS WORKED"].includes(k)&&kindOf(k)!=="present"&&kindOf(k)!=="off").sort((a,b)=>b[1]-a[1]);
+  const tiles=[["People on the register",A.length],["Present today",tD.present],["Absent today",tD.absent],["On leave today",tD.leave],["Off today",tD.off],["Not marked today",tD.blank],
+    ["Cycle attendance",fmtPct(pct(tC.present,tC.exc))],["Exception days (cycle)",tC.exc],["New this cycle",H.filter(x=>x.type==="Added").length],["Removed this cycle",H.filter(x=>x.type==="Removed").length]];
+  const sheets=SHEETS.map(sh=>{const es=A.filter(e=>e.sheet===sh);if(!es.length)return null;const t=tally(es,[S.date]),tc=tally(es,upto);return [sh,es.length,t.present,t.absent,t.leave,t.off,t.blank,fmtPct(pct(tc.present,tc.exc))]}).filter(Boolean);
+  const sections=[];
+  if(S.sheet==="All")sections.push({title:"Per sheet",head:["Sheet","People","Present today","Absent","Leave","Off","Not marked","Cycle attendance"],rows:sheets.map(r=>r.map(String))});
+  sections.push({title:"Exception days this cycle ("+exc.length+" employee"+(exc.length===1?"":"s")+")",head:["Employee","Number","Sheet","Exception days","Attendance"],rows:exc.length?exc.map(x=>[x.e.name,x.e.number||"",x.e.sheet,String(x.t.exc),fmtPct(pct(x.t.present,x.t.exc))]):[["No exception days this cycle","","","",""]]});
+  if(codes.length)sections.push({title:"Absence and leave this cycle",head:["Mark","Days","Counts as"],rows:codes.map(([k,n])=>[showMark(k),String(n),BAD_CODES.includes(k)?"Exception (counts against attendance)":kindOf(k)==="leave"?"Leave (not counted)":"Not counted"])});
+  const sub=nice(S.date)+" "+yr(S.date)+"   ·   cycle "+short(c.start)+" – "+short(c.end)+" ("+upto.length+" of "+c.dates.length+" days)"+(S.sheet!=="All"?"   ·   "+S.sheet:"");
+  return {title:"ATTENDANCE DASHBOARD",sub,file:"TKR_Attendance_Dashboard_"+S.date+(S.sheet!=="All"?"_"+S.sheet.replace(/\W+/g,"_"):""),tiles,sections}}
+function dashReport(fmt,btn){const sp=dashSpec();
+  if(fmt==="pdf")return pdfSpec(sp,btn,btn.textContent);if(fmt==="ppt")return pptSpec(sp,btn,btn.textContent);
+  const wb=XLSX.utils.book_new(),add=(name,aoa,cols)=>{const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=cols.map(w=>({wch:w}));XLSX.utils.book_append_sheet(wb,ws,name)};
+  add("Summary",[["Attendance dashboard – "+sp.sub.replace(/\s+·\s+/g," · ")],["Item","Value","Notes"]].concat(sp.tiles.map(([k,v])=>[k,v,""])),[30,16,20]);
+  for(const sec of sp.sections)add(sec.title.replace(/\s*\(.*\)$/,"").slice(0,31),[[sec.title+" – "+nice(S.date)+" "+yr(S.date)],sec.head.length<3?sec.head.concat([""]):sec.head].concat(sec.rows.map(r=>r.map(v=>/^\d+$/.test(v)?+v:v))),sec.head.map((_,i)=>i===0?30:14));
+  saveFile(sp.file+".xlsx",wb)}
 
 function cycleBanner(){const gap=rotaGap();if(!gap)return"";const c=cycleOf(S.date);
   return '<div class="list" style="margin-bottom:14px"><h3>Shift rotas</h3><p class="note" style="margin:0 0 8px">'+gap+' day'+(gap===1?"":"s")+' in '+short(c.start)+' – '+short(c.end)+' have no shift rota yet. Carry the shift pattern forward to fill them.</p><button class="btn gold" id="startCycle">Carry shift pattern forward</button></div>'}
@@ -340,9 +362,9 @@ async function pdfSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making t
     const logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
     const head=()=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
       P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – "+sp.title,32,11);P.setTextColor(...GOLD);P.setFontSize(11);P.text(sp.sub,32,18.5)};
-    head();const tw=(W-24-(sp.tiles.length-1)*2.5)/sp.tiles.length;
-    sp.tiles.forEach(([k,v],i)=>{const x=12+i*(tw+2.5);P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,31,tw,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(7.5);P.text(String(k).toUpperCase(),x+3,37);P.setTextColor(...BLACK);P.setFontSize(16);P.text(String(v),x+3,47)});
-    let y=60;for(const sec of sp.sections){P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);if(y>185){P.addPage();head();y=34}P.text(sec.title,12,y);
+    head();const per=Math.min(sp.tiles.length,6),tw=(W-24-(per-1)*2.5)/per;   // up to 6 tiles a row, more go on a second row
+    sp.tiles.forEach(([k,v],i)=>{const x=12+(i%per)*(tw+2.5),ty=31+Math.floor(i/per)*23;P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,ty,tw,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(7.5);P.text(String(k).toUpperCase(),x+3,ty+6,{maxWidth:tw-5});P.setTextColor(...BLACK);P.setFontSize(16);P.text(String(v),x+3,ty+16)});
+    let y=60+(Math.ceil(sp.tiles.length/per)-1)*23;for(const sec of sp.sections){P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);if(y>185){P.addPage();head();y=34}P.text(sec.title,12,y);
       P.autoTable({startY:y+2,head:[sec.head],body:sec.rows.map(r=>r.map(c=>typeof c==="object"?{content:c.content,styles:{fontStyle:"bold",fillColor:[255,242,204]}}:c)),margin:{left:12,right:12,top:30},theme:"grid",
         styles:{fontSize:8.8,cellPadding:1.6,textColor:BLACK,lineColor:[217,211,197]},headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},alternateRowStyles:{fillColor:[255,248,230]},didDrawPage:()=>head()});y=P.lastAutoTable.finalY+9}
     const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,204)}
