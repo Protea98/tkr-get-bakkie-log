@@ -201,3 +201,4 @@ table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:
 .hb.MIX b{font-size:12px;text-shadow:0 1px 2px #000}
 .hb.SB{background:#4d4116;border-color:#a8892c;color:#ffeeb0}.hbm small.SB{color:#e6c766}.hpop button.ty{white-space:nowrap}
 .hpop{flex-direction:column;align-items:stretch;max-width:280px}.hpop button{text-align:left;padding:6px 12px}.hpop button.SB{background:#fff2cc;color:#7f6000}
+table.xl td.mt input{width:92px;min-width:80px;text-align:right}

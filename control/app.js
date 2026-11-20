@@ -488,6 +488,18 @@ function daySum(mc, d) {
   if (!filled && !down) return null; const avail = x.avail + y.avail;
   return { total: avail + down, avail, BD, PM, SB: 0, NU: 0, down, pct: avail + down > 0 ? avail / (avail + down) : null };
 }
+/* hour meter: opening and closing hours per machine per shift */
+const meterOf = (d, mc, sh) => recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.meter?.[sh] || {};
+const prevShift = (d, sh) => sh === "Day" ? [addDays(d, -1), "Night"] : [d, "Day"];
+function lastClose(d, mc, sh) { let [d2, s2] = prevShift(d, sh); for (let i = 0; i < 60; i++) { const m = meterOf(d2, mc, s2); if (m.close != null && m.close !== "") return +m.close; if (m.open != null && m.open !== "") return null; [d2, s2] = prevShift(d2, s2); } return null; }
+const meterHrs = m => m.open !== undefined && m.open !== "" && m.close !== undefined && m.close !== "" && +m.close >= +m.open ? +m.close - +m.open : null;
+const mtxt = v => v == null || v === "" ? "" : String(Math.round(+v * 10) / 10).replace(".", ",");
+async function setMeter(mc, d, sh, k, raw) {
+  const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id && !r.deleted) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
+  const v = String(raw).trim().replace(/\s/g, "").replace(",", "."); if (v !== "" && !/^\d+(\.\d+)?$/.test(v)) { toast("Type the hour meter reading as a number, e.g. 12345,6"); return false; }
+  const m = { ...(rec.meter?.[sh] || {}), [k]: v === "" ? "" : +v };
+  if (m.open !== undefined && m.open !== "" && m.close !== undefined && m.close !== "" && +m.close < +m.open) { toast("The closing hours can't be lower than the opening hours."); return false; }
+  await put({ ...rec, deleted: false, meter: { ...(rec.meter || {}), [sh]: m } }, `${mc} ${sh.toLowerCase()} shift ${k === "open" ? "opening" : "closing"} hours: ${v ? mtxt(v) : "cleared"}`); return true; }
 function shiftTable(d, sh) {
   const [a, b] = shiftWin(d, sh), now = Date.now(), fut = a > now, H = HRS(sh);
   const tot = () => ({ avail: 0, BD: 0, PM: 0, down: 0 }), shT = tot(); let body = "";
@@ -502,14 +514,15 @@ function shiftTable(d, sh) {
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${cells}
         <td class="tm">${E.length ? E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>") : `<span data-newev="${esc(mc)}" title="Log a breakdown with exact times" style="color:#999">+ time</span>`}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
-        <td>${(() => { const lr = E.find(e => lockedV(e, "reason")); return lr ? `<input readonly class="rsn lk" data-edit="${lr.id}" value="${esc(reason)}">` : `<input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" placeholder="${E.length ? "" : "comment"}">`; })()}</td><td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
+        <td>${(() => { const lr = E.find(e => lockedV(e, "reason")); return lr ? `<input readonly class="rsn lk" data-edit="${lr.id}" value="${esc(reason)}">` : `<input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" placeholder="${E.length ? "" : "comment"}">`; })()}</td>${(() => { const m = meterOf(d, mc, sh), lc = lastClose(d, mc, sh), mh = meterHrs(m);
+          return `<td class="mt"><input data-meter="${esc(mc)}|open" inputmode="decimal" value="${mtxt(m.open)}" placeholder="${lc != null ? mtxt(lc) : "opening"}" title="Hour meter at the start of the shift${lc != null ? ". Last closing: " + mtxt(lc) : ""}"></td><td class="mt"><input data-meter="${esc(mc)}|close" inputmode="decimal" value="${mtxt(m.close)}" placeholder="closing" title="Hour meter at the end of the shift"></td><td>${mh != null ? hm(mh) : ""}</td>`; })()}<td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
       for (const k of ["avail", "BD", "PM", "down"]) gt[k] += s[k]; });
-    body += `<tr class="gt"><td colspan="2">${esc(g)} total</td>${opCount.map(n => `<td>${n}/${L.length}</td>`).join("")}<td></td><td></td><td></td><td>${n2(gt.avail)}</td><td>${n2(gt.BD)}</td><td>${n2(gt.PM)}</td><td>${n2(gt.down)}</td></tr>`;
+    body += `<tr class="gt"><td colspan="2">${esc(g)} total</td>${opCount.map(n => `<td>${n}/${L.length}</td>`).join("")}<td></td><td></td><td></td><td></td><td></td><td>${(() => { const t = L.reduce((x, mc) => x + (meterHrs(meterOf(d, mc, sh)) || 0), 0); return t ? hm(t) : ""; })()}</td><td>${n2(gt.avail)}</td><td>${n2(gt.BD)}</td><td>${n2(gt.PM)}</td><td>${n2(gt.down)}</td></tr>`;
     for (const k of ["avail", "BD", "PM", "down"]) shT[k] += gt[k]; }
-  body += `<tr class="ft"><td colspan="${H.length + 5}">${sh} shift total</td><td>${n2(shT.avail)}</td><td>${n2(shT.BD)}</td><td>${n2(shT.PM)}</td><td>${n2(shT.down)}</td></tr>`;
+  body += `<tr class="ft"><td colspan="${H.length + 8}">${sh} shift total</td><td>${n2(shT.avail)}</td><td>${n2(shT.BD)}</td><td>${n2(shT.PM)}</td><td>${n2(shT.down)}</td></tr>`;
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
   return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operating · SB = Available, standing (not operating) · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
-    <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Opening hrs</th><th>Closing hrs</th><th>Machine hrs</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
     <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
@@ -1030,6 +1043,7 @@ async function changeH(ev) {
   if (!me) return;
   const t = ev.target;
   if (t.dataset.cell !== undefined) { const [mc, h] = t.dataset.cell.split("|"); await setCell($("fDay").dataset.date, mc, +h, t.value); render(); app.querySelector(`select[data-cell="${CSS.escape(t.dataset.cell)}"]`)?.focus({ preventScroll: true }); return; }
+  if (t.dataset.meter) { const f = $("fDay"), tr = t.closest("table.av"), [mc, k] = t.dataset.meter.split("|"); if (await setMeter(mc, f.dataset.date, tr.dataset.shift, k, t.value)) { toast("Saved"); render(); } else render(); return; }
   if (t.dataset.reason !== undefined) { const f = $("fDay"), tr = t.closest("table.av"); await setReason(t.dataset.reason, f.dataset.date, tr.dataset.shift, t.value.trim()); toast("Saved"); return; }
   if (t.closest && t.closest("#fDay") && t.closest("tr[data-item]")) { const f = $("fDay"), d = f.dataset.date, tr = t.closest("tr[data-item]"), it = tr.dataset.item, id = chkKey(d, it);
     const c = recs.find(r => r.id === id) || { id, kind: "chk", ym: d.slice(0, 7), date: d, item: it }; await put({ ...c, [t.dataset.c]: t.value.trim() }, `${it} (${t.dataset.c}): ${t.value.trim() || "cleared"}`);
@@ -1208,12 +1222,14 @@ async function exportXlsx(from, to) {
     r = 10; band(ws, r++, 21, "Data and documents"); head(ws, r++, ["Section", "Item", ...COLS, "Time updated", "Updated by", "Comments"]);
     for (const [sec, items] of CHECK) items.forEach((it, i) => { const c = rec(chkKey(d, it)); row(ws, r++, [i ? "" : sec, it, ...COLS.map(k => c[k] || ""), c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : "", c.by || "", c.comment || ""], { boldCol: [0], left: [7] }); });
     for (const sh of ["Day", "Night"]) {
-      r++; band(ws, r++, 21, `Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"})   OP = Operating  ·  SB = Available, standing (not operating)  ·  BD = Breakdown  ·  PM = Planned maintenance`);
-      head(ws, r++, ["Group", "Machine", ...HRS(sh).map(hLabel), "Down at", "Back up", "Reason / comments", "Avail (h:mm)", "BD (h:mm)", "PM (h:mm)", "Down (h:mm)"]);
+      r++; band(ws, r++, 24, `Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"})   OP = Operating  ·  SB = Available, standing (not operating)  ·  BD = Breakdown  ·  PM = Planned maintenance`);
+      head(ws, r++, ["Group", "Machine", ...HRS(sh).map(hLabel), "Down at", "Back up", "Reason / comments", "Opening hrs", "Closing hrs", "Machine hrs (h:mm)", "Avail (h:mm)", "BD (h:mm)", "PM (h:mm)", "Down (h:mm)"]);
       const [a, b] = shiftWin(d, sh);
       for (const [g, L] of fleet()) L.forEach((mc, i) => { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh), C = cellsOf(d, mc);
         row(ws, r++, [i ? "" : g, mc, ...HRS(sh).map(h => cellVal(d, mc, h, C)), E.map(e => toMs(e.start) < a ? tOf(a) : hhmm(e.start)).join(", "), E.map(e => e.end && toMs(e.end) <= b ? hhmm(e.end) : "").filter(Boolean).join(", "),
-          [...new Set([...E.map(e => e.reason), recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted)?.notes?.[sh]].filter(Boolean))].join("; "), s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [16] }); });
+          [...new Set([...E.map(e => e.reason), recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted)?.notes?.[sh]].filter(Boolean))].join("; "),
+          ...(() => { const m = meterOf(d, mc, sh), mh = meterHrs(m); return [m.open === undefined || m.open === "" ? "" : +m.open, m.close === undefined || m.close === "" ? "" : +m.close, mh ?? ""]; })(),
+          s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [16], fmt: { 17: "0.0", 18: "0.0" } }); });
     }
     r++; band(ws, r++, 21, "24-hour availability summary per machine"); head(ws, r++, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Total (h:mm)", "Availability %"]);
     for (const [g, L] of fleet()) L.forEach((mc, i) => { const s = daySum(mc, d); row(ws, r, [i ? "" : g, mc, ...(s ? [s.avail, s.BD, s.PM, s.down, s.avail + s.down, s.pct ?? ""] : ["", "", "", "", "", ""])], { boldCol: [0, 1] , pct: [8 - 1] }); ws.getCell(r, 8).numFmt = "0%"; r++; });
