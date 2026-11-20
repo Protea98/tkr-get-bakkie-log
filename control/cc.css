@@ -193,3 +193,4 @@ table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:
   .hbkey{margin-left:0}
 }
 .ro .fbar input,.ro .fbar select{pointer-events:auto;border-color:var(--line)!important;background:var(--panel)!important}.ro .fbar input::placeholder{color:var(--muted)}
+@media (max-width:760px){#app>.ftabs{flex-wrap:wrap;overflow:visible}#app>.ftabs button{padding:8px 12px;font-size:14.5px}}

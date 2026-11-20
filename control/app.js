@@ -169,7 +169,7 @@ function gateView() {
 /* ---------- views ---------- */
 const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
 const pendingReqs = () => R("req").filter(q => q.status === "pending").length;
-const tabs = () => { const n = pendingReqs(); return [TABS[0], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(1)]; };
+const tabs = () => { const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
 function render() {
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
   if (!me && viewer) { $("who").innerHTML = `Viewing only · <button class="sm" data-unview="1" style="min-height:36px;padding:2px 12px">Controller sign-in</button>`;
@@ -227,7 +227,7 @@ function nowView() {
   const SE = shiftEvents(), logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at);
   const cnt = k => ALL.filter(m => stateNow(m) === k).length;
   const seLine = x => x.e ? evLine(x.e) : `<div class="evrow"><span class="tag ${x.sheet.type}">${x.sheet.type}</span><div><b>${esc(x.sheet.machine)}</b> · ${TYPES[x.sheet.type]}<br><span class="t">${x.sheet.hrs.map(hLabel).join(", ")} · ${x.sheet.hrs.length} h, picked in the sheet</span></div></div>`;
-  return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
+  return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button> <button data-tab="files">Documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
     + statusBar()
     + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${hm(shT.avail)} available · ${hm(shT.down)} down so far (hours:minutes)</div></div>
       <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${hm(dayT.avail)} available · ${hm(dayT.down)} down</div></div>
