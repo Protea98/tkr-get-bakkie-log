@@ -147,13 +147,15 @@ async function pinHash(name, pin) {
 }
 const adminRec = () => R("admin").sort((a, b) => b.editedAt - a.editedAt)[0];
 let adminStep = "";
+const okUser = u => !u.status || u.status === "approved";   // controllers added before 20/11/2026 stay approved
+const pendingUsers = () => R("user").filter(u => u.status === "pending");
 function gateView() {
-  const users = R("user").sort((a, b) => a.name.localeCompare(b.name));
-  if (!adminStep && (addingMe || !users.length)) return pageHead("Control Room", "Add yourself", "", "", "No wifi needed. Type your name and choose a 4-digit PIN you will remember.")
+  const users = R("user").filter(u => u.status !== "declined").sort((a, b) => a.name.localeCompare(b.name));
+  if (!adminStep && (addingMe || !users.length)) return pageHead("Control Room", "Ask to be a controller", "", "", "Type your name and choose a 4-digit PIN you will remember. The admin must approve you before you can sign in. The request sends when the PC has signal.")
     + `<form id="fAdd" class="card" style="max-width:460px" autocomplete="off"><label>Name and surname <input name="name" required autocapitalize="words"></label>
       <label style="margin-top:10px;display:block">Choose a 4-digit PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
       <label style="margin-top:10px;display:block">Type the PIN again <input name="pin2" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="password" required></label>
-      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Add me</button>${users.length ? '<button type="button" class="ghost" id="cancelAdd">Back</button>' : ""}</div></form>`;
+      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Send to the admin</button>${users.length ? '<button type="button" class="ghost" id="cancelAdd">Back</button>' : ""}</div></form>`;
   if (adminStep === "pin") { const a = adminRec();
     return pageHead("Control Room", "Admin", "", "", "Type your admin PIN. No signal needed.")
       + `<form id="fAdmPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="password" required>
@@ -168,14 +170,14 @@ function gateView() {
     return pageHead("Control Room", `Hello ${esc(u?.name || "")}`, "", "", "Type your PIN.")
       + `<form id="fPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="password" autofocus required>
         <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Start</button><button type="button" class="ghost" id="cancelPin">Not me</button></div><p class="flag" id="pinErr"></p></form>`; }
-  return pageHead("Control Room", "Who is on shift?", "", `<button class="primary" id="addMe">+ Add yourself</button>`, "Tap your name. New controller? Tap Add yourself.")
-    + `<div class="who-pick">${users.map(u => `<button data-who="${u.id}"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></button>`).join("")}</div>`
+  return pageHead("Control Room", "Who is on shift?", "", `<button class="primary" id="addMe">+ Ask to be a controller</button>`, "Tap your name. New controller? Ask to be added – the admin approves it.")
+    + `<div class="who-pick">${users.map(u => okUser(u) ? `<button data-who="${u.id}"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></button>` : `<button disabled style="opacity:.6"><b>${esc(u.name)}</b><small>waiting for the admin to approve</small></button>`).join("")}</div>`
     + `<p style="margin-top:22px"><button class="ghost sm" id="adminIn">Admin</button></p>`;
 }
 
 /* ---------- views ---------- */
 const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
-const pendingReqs = () => R("req").filter(q => q.status === "pending").length;
+const pendingReqs = () => R("req").filter(q => q.status === "pending").length + R("user").filter(u => u.status === "pending").length;
 const tabs = () => { const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
 function render() {
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
@@ -394,7 +396,7 @@ function settingsView() {
   return pageHead("Settings", "Machines and controllers", "", "", "Changes here go to every control room device with the next sync. You can also add or remove a machine on the live board.")
     + `<section class="card"><h2>Machines</h2>${F.map(([g, L], gi) => `<div style="margin-bottom:12px"><b>${esc(g)}</b><div class="row" style="margin-top:6px">${L.map(m => `<span class="tag" style="font-size:13px;padding:4px 10px">${esc(m)} <button class="sm ghost" data-rmm="${gi}|${esc(m)}" style="min-height:28px;padding:0 6px">×</button></span>`).join("")}</div>
       <div class="row" style="margin-top:6px"><input data-newm="${gi}" placeholder="Add a machine to ${esc(g)}" style="max-width:260px"><button class="sm" data-addm="${gi}">+ Add</button></div></div>`).join("")}</section>
-    <section class="card"><h2>Controllers on this PC</h2><div class="res">${users.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>added ${fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div>${u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}</div>`).join("")}</div></section>`;
+    <section class="card"><h2>Controllers</h2><div class="res">${users.filter(u => u.status !== "declined").map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>${u.status === "pending" ? '<span style="color:var(--gold);font-weight:600">waiting for the admin to approve</span>' : "added " + fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div><div class="row" style="gap:6px">${u.status === "pending" && me.admin ? `<button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button>` : u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}</div></div>`).join("")}</div></section>`;
 }
 
 
@@ -703,10 +705,11 @@ async function decide(id, ok) {
   render(); toast(ok ? "Approved. The change is made." : "Declined.");
 }
 function reqView() {
+  const PU = pendingUsers(), puCard = !PU.length ? "" : `<section class="card" style="border:2px solid var(--gold)"><h2>New controllers waiting (${PU.length})</h2><div class="res">${PU.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>asked ${fmt(ymd(new Date(u.addedAt)))} ${tOf(u.addedAt)}</small></div>${me.admin ? `<div class="row" style="gap:6px"><button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button></div>` : '<span class="muted">waiting for the admin</span>'}</div>`).join("")}</div></section>`;
   const Q = R("req").sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.askedAt - a.askedAt), P = Q.filter(q => q.status === "pending");
   const when = t => `${fmt(ymd(new Date(t))).slice(0, 5)} ${new Date(t).toTimeString().slice(0, 5)}`;
   return pageHead("Control room", "Change requests", `${P.length} waiting`, "", me.admin ? "Changes asked for entries from an earlier shift. Approve makes the change; decline leaves it as it is." : "Grey boxes were filled in on an earlier shift and are locked. Tap a grey box to ask the admin to change it.")
-    + `<div class="res">${Q.map(q => `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${esc(q.what)}</b><small>${esc(q.fromTxt)} → <b>${esc(q.toTxt)}</b></small><small>Why: ${esc(q.why)}</small><small class="muted">asked by ${esc(q.askedBy)} ${when(q.askedAt)}${q.decidedBy ? ` · ${q.status} by ${esc(q.decidedBy)} ${when(q.decidedAt)}` : ""}</small></div>
+    + puCard + `<div class="res">${Q.map(q => `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${esc(q.what)}</b><small>${esc(q.fromTxt)} → <b>${esc(q.toTxt)}</b></small><small>Why: ${esc(q.why)}</small><small class="muted">asked by ${esc(q.askedBy)} ${when(q.askedAt)}${q.decidedBy ? ` · ${q.status} by ${esc(q.decidedBy)} ${when(q.decidedAt)}` : ""}</small></div>
       ${q.status === "pending" ? (me.admin ? `<div class="row" style="gap:6px"><button class="sm primary" data-appr="${q.id}">Approve</button><button class="sm danger" data-decl="${q.id}">Decline</button></div>` : '<span class="tag SB">WAITING</span>') : `<span class="tag ${q.status === "approved" ? "OP" : "BD"}">${q.status.toUpperCase()}</span>`}</div>`).join("") || '<p class="muted">No change requests.</p>'}</div>`;
 }
 
@@ -802,6 +805,17 @@ async function shrinkImg(file) {
       const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(img, 0, 0, cv.width, cv.height); out = cv.toDataURL("image/jpeg", q); if (out.length <= 900000) break; q -= 0.1; max = Math.round(max * 0.85); }
     return out; } finally { URL.revokeObjectURL(url); }
 }
+/* same document for the same machine, day, shift and type uploaded again: show what is different and let them choose */
+function askDup(old, file, sizeNew) {
+  return new Promise(res => { document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "alertdialog");
+    const diff = [old.name !== file.name ? `File name: <b>${esc(old.name)}</b> → <b>${esc(file.name)}</b>` : `Same file name: <b>${esc(file.name)}</b>`,
+      `Size: ${sizeTxt(old.size)} → ${sizeTxt(sizeNew)}${Math.abs((old.size || 0) - sizeNew) < 1024 ? " (about the same – it may be the same document)" : ""}`,
+      `First one uploaded by ${esc(old.by || "")} on ${fmt(ymd(new Date(old.editedAt || Date.now())))} ${tOf(old.editedAt || Date.now())}`];
+    d.innerHTML = `<div style="max-width:460px;text-align:left"><div class="big" style="font-size:20px">Already uploaded</div><p style="margin:6px 0 10px"><b>${esc(old.machine || "General")} · ${esc(old.type)}</b> for ${fmt(old.date)} ${esc(old.shift)} shift is already there. What changed:</p>
+      <ul style="margin:0 0 14px;padding-left:18px;line-height:1.6">${diff.map(x => `<li>${x}</li>`).join("")}</ul>
+      <div style="display:grid;gap:8px"><button class="primary" data-a="replace">Replace the old one with the new one</button><button data-a="both">Keep both</button><button class="ghost" data-a="skip">Don't upload this file</button></div></div>`;
+    d.onclick = e => { const b = e.target.closest("button[data-a]"); if (!b) return; d.remove(); res(b.dataset.a); };
+    document.body.appendChild(d); }); }
 async function saveDocs(f) {
   const files = [...f.elements.f.files], m = f.elements.m.value, t = f.elements.t.value, d = f.elements.d.value, sh = f.elements.sh.value; if (!files.length) return;
   const btn = f.querySelector("button.primary"); btn.disabled = true; btn.textContent = "Saving…"; let n = 0;
@@ -809,9 +823,12 @@ async function saveDocs(f) {
       if (!photo && file.size > 15 * 1024 * 1024) { toast(file.name + " is bigger than 15 MB."); continue; }
       let data = photo ? await shrinkImg(file).catch(() => "") : ""; const mime = data ? "image/jpeg" : (file.type || mimeOf(file.name));
       if (!data) data = await dataUrlOf(new Blob([file], { type: mime }));
+      const sizeNew = Math.round(data.length * 0.75), old = R("doc").filter(x => x.machine === m && x.date === d && x.shift === sh && x.type === t).sort((a, b) => (b.editedAt || 0) - (a.editedAt || 0))[0];
+      let replace = null;
+      if (old) { const a = await askDup(old, file, sizeNew); if (a === "skip") continue; if (a === "replace") replace = old; }
       const fid = uid(), parts = Math.max(1, Math.ceil(data.length / 700000));
       for (let i = 0; i < parts; i++) await fileSet(`${fid}_${i}`, data.slice(i * 700000, (i + 1) * 700000));
-      await put({ id: "doc_" + fid, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: m, group: m ? groupOf(m) : "", type: t, name: data.startsWith("data:image/jpeg") && photo && !/\.jpe?g$/i.test(file.name) ? file.name.replace(/\.[^.]+$/, "") + ".jpg" : file.name, mime, fid, parts, size: Math.round(data.length * 0.75) }, `Document: ${t} for ${m || "general"} (${fmt(d).slice(0, 5)} ${sh})`); n++; }
+      await put({ id: "doc_" + fid, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: m, group: m ? groupOf(m) : "", type: t, name: data.startsWith("data:image/jpeg") && photo && !/\.jpe?g$/i.test(file.name) ? file.name.replace(/\.[^.]+$/, "") + ".jpg" : file.name, mime, fid, parts, size: sizeNew, ...(replace ? { replaces: replace.name } : {}) }, `${replace ? "Replaced document" : "Document"}: ${t} for ${m || "general"} (${fmt(d).slice(0, 5)} ${sh})`); n++; if (replace) await put({ ...replace, deleted: true }); }
     catch (e) { console.warn(e); toast(file.name + " couldn't be read."); } }
   if (m && tab !== "files") openEv(docsPanel(m, d + "|" + sh), `${m} · documents`); else closeEv(); render(); toast(`${n} document${n === 1 ? "" : "s"} saved${navigator.onLine ? "" : " on this PC. They send when there is signal"}.`);
 }
@@ -933,6 +950,9 @@ async function clickH(ev) {
   const cell = ev.target.closest("[data-edit]:not(button)"); if (cell) { const e = recs.find(r => r.id === cell.dataset.edit); if (e) openEv(evForm(e), `${e.machine} · correct the times`); return; }
   const b = ev.target.closest("button"); if (!b) return;
   if (b.hasAttribute("data-x")) { closeEv(); return; }
+  if (b.dataset.uok || b.dataset.uno) { if (!me?.admin) return; const u = recs.find(r => r.id === (b.dataset.uok || b.dataset.uno)); if (!u) return; const ok = !!b.dataset.uok;
+    if (!ok && !confirm(`Decline ${u.name}? They won't be able to sign in.`)) return;
+    await put({ ...u, status: ok ? "approved" : "declined", decidedBy: me.name, decidedAt: Date.now() }, `Admin ${ok ? "approved" : "declined"} ${u.name} as a controller`); render(); toast(ok ? `${u.name} can sign in now.` : "Declined."); return; }
   if (b.id === "addMe") { addingMe = true; render(); return; }
   if (b.id === "cancelAdd") { addingMe = false; render(); return; }
   if (b.id === "cancelPin") { pinFor = null; render(); return; }
@@ -1001,9 +1021,10 @@ async function submitH(ev) {
   if (f.id === "fAdd") { const name = f.elements.name.value.trim().replace(/\s+/g, " "), p = f.elements.pin.value, p2 = f.elements.pin2.value;
     if (name.length < 3) { toast("Type your name and surname."); return; } if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; } if (p !== p2) { toast("The two PINs are not the same."); return; }
     if (R("user").some(u => u.name.toLowerCase() === name.toLowerCase())) { toast("That name is already on this PC. Tap it to sign in."); addingMe = false; render(); return; }
-    const u = await put({ id: "user_" + uid(), kind: "user", ym: "setup", name, pin: await pinHash(name, p), addedAt: Date.now() });
-    await startSession(u); addingMe = false; askMail = true; tab = "now"; render(); toast(`Welcome ${name}. You are on shift.`); return; }
-  if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && u.pin === await pinHash(u.name, f.elements.pin.value)) { await startSession(u); pinFor = null; askMail = true; render(); }
+    await put({ id: "user_" + uid(), kind: "user", ym: "setup", name, pin: await pinHash(name, p), addedAt: Date.now(), status: "pending" }, `${name} asked to be a controller`);
+    addingMe = false; render(); syncSoon(); popupMsg("Sent to the admin", `${name}, the admin must approve you first. Once approved, tap your name and type your PIN.${navigator.onLine ? "" : " The request sends when this PC has signal."}`); return; }
+  if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && !okUser(u)) { $("pinErr").textContent = "The admin hasn't approved you yet."; return; }
+    if (u && u.pin === await pinHash(u.name, f.elements.pin.value)) { await startSession(u); pinFor = null; askMail = true; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
   if (f.id === "fAdm") { if (!navigator.onLine) { toast("The first admin sign-in needs signal."); return; } const p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; }
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); const auth = m.getAuth(admApp);
