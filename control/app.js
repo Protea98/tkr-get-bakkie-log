@@ -644,7 +644,7 @@ async function setCell(d, mc, h, val) {
     const before = E.find(e => e.end && toMs(e.end) === a), after = E.find(e => toMs(e.start) === b);
     if (before && !lockedV(before, "end")) await put({ ...before, end: isoOf(b) }); else if (after && !lockedV(after, "start")) await put({ ...after, start: isoOf(a) });
     else await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: isoOf(a), end: isoOf(b), reason: "", grid: 1 });
-    toast(`${mc}: tap Down at or Back up to type the exact time.`); return;
+    return;
   }
   if (val === "OP" || val === "SB") {
     if (current && open) { await put({ ...open, end: nowLocal(), endBy: me.name }, `${mc} back up ${hhmm(nowLocal())}`); toast(`${mc}: back up logged at ${hhmm(nowLocal())}.`); return; }
@@ -721,7 +721,7 @@ async function statusPicture() {
   const F = fleet(), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
   const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
   const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
-  const W = 1080, P = 36, NC = 4, CW = (W - P * 2 - 12 * (NC - 1)) / NC, CH = 92;
+  const W = 1080, P = 28, NW = 132, SW = 240, HX = P + NW + SW, HRL = HRS(ssh), HG = 4, HW = (W - P - HX - HG * (HRL.length - 1)) / HRL.length, RH = 40;
   const whyOf = m => { const r0 = reasonNow(m); if (r0) return r0; let [d2, s2] = [sd, ssh]; for (let i = 0; i < 4; i++) { const n = (byId(`hr_${d2}_${m}`)?.notes?.[s2] || "").trim(); if (n) return n; [d2, s2] = prevShift(d2, s2); } return ""; };
   const sinceOf = (m, t0) => { const e = statusNow(m); let since = e ? toMs(e.start) : null;   // walk back through the hour boxes while it stayed down
     for (let t = now, i = 0; i < 24 * 60; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh, v = cellsOf(dd, m)[h];
@@ -729,39 +729,50 @@ async function statusPicture() {
     return since; };
   const groups = F.filter(([, L]) => L.length).map(([g, L]) => ({ g, L, T: fleetSum(L.filter(m => !offNow(m)), m => shiftSum(m, sd, ssh)) }));
   const downL = ALL.filter(m => ["BD", "PM"].includes(st(m))).map(m => { const e = statusNow(m); return { m, t: st(m), e, why: whyOf(m), since: sinceOf(m, st(m)) }; }).sort((a, b) => (a.since ?? now) - (b.since ?? now));
-  let H = 150 + 150 + 30; for (const g of groups) H += 56 + Math.ceil(g.L.length / NC) * (CH + 10) + 14; H += downL.length ? 60 + downL.length * 40 + 20 : 0; H += 90;
+  let H = 96 + 92 + 20; for (const g of groups) H += 40 + g.L.length * RH + 6; H += 26; H += downL.length ? 50 + downL.length * 32 + 10 : 0; H += 80;
   const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
   const font = (w, sz) => { x.font = `${w} ${sz}px "Inter","Segoe UI",Arial,sans-serif`; };
   const rr = (X, Y, w, h, r, f) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = f; x.fill(); };
   const fit = (t, w) => { if (x.measureText(t).width <= w) return t; while (t.length > 1 && x.measureText(t + "…").width > w) t = t.slice(0, -1); return t + "…"; };
   x.fillStyle = "#121413"; x.fillRect(0, 0, W, H);
-  x.fillStyle = "#0b0b0b"; x.fillRect(0, 0, W, 130); x.fillStyle = "#d4a12a"; x.fillRect(0, 130, W, 4);
-  try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 42, 65, 42, 0, 7); x.clip(); x.drawImage(img, P, 23, 84, 84); x.restore(); } catch {}
-  font(800, 38); x.fillStyle = "#fff"; x.fillText("Control Room – machine status", P + 104, 60);
-  font(600, 22); x.fillStyle = "#d4a12a"; x.fillText(`TKR OPERATIONS · THARISA · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 104, 98);
+  x.fillStyle = "#0b0b0b"; x.fillRect(0, 0, W, 86); x.fillStyle = "#d4a12a"; x.fillRect(0, 86, W, 3);
+  try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 30, 43, 30, 0, 7); x.clip(); x.drawImage(img, P, 13, 60, 60); x.restore(); } catch {}
+  font(800, 28); x.fillStyle = "#fff"; x.fillText("Control Room – machine status", P + 76, 40);
+  font(600, 17); x.fillStyle = "#d4a12a"; x.fillText(`TKR OPERATIONS · THARISA · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 76, 68);
   const tiles = [["AVAILABLE", pcOf(shT), "this shift", "#5fd08a"], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", "#5fd08a"], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? "#ff7b6b" : "#fff"], ["MAINTENANCE", String(cnt("PM")), "now", "#fff"]];
-  const TW = (W - P * 2 - 3 * 14) / 4; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 14), Y = 158; rr(X, Y, TW, 120, 14, "#1d201f"); if (l === "BREAKDOWN" && cnt("BD")) { x.strokeStyle = "#ff7b6b"; x.lineWidth = 2; x.beginPath(); x.roundRect(X, Y, TW, 120, 14); x.stroke(); }
-    font(700, 16); x.fillStyle = "#9aa39e"; x.fillText(l, X + 16, Y + 30); font(800, 44); x.fillStyle = col; x.fillText(n, X + 16, Y + 80); font(500, 16); x.fillStyle = "#9aa39e"; x.fillText(sub, X + 16, Y + 106); });
-  let y = 310;
+  const TW = (W - P * 2 - 3 * 12) / 4; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 12), Y = 102; rr(X, Y, TW, 76, 12, "#1d201f"); if (l === "BREAKDOWN" && cnt("BD")) { x.strokeStyle = "#ff7b6b"; x.lineWidth = 2; x.beginPath(); x.roundRect(X, Y, TW, 76, 12); x.stroke(); }
+    font(700, 14); x.fillStyle = "#9aa39e"; x.fillText(l, X + 14, Y + 24); font(800, 34); x.fillStyle = col; x.fillText(n, X + 14, Y + 63); font(500, 14); x.fillStyle = "#9aa39e"; const sw = x.measureText(sub).width; x.fillText(sub, X + TW - 14 - sw, Y + 63); });
+  const HC = { OP: "#1f6b40", SB: "#8a6d1e", BD: "#9b2c22", PM: "#2a5a9e" };
+  const block = (m, h, X, Y, w, hh) => {   // one hour box, split by the real times like the hour board
+    const a0 = hStart(sd, h), y0 = a0 + 36e5; if (a0 > now) { x.strokeStyle = "#2b2f2d"; x.lineWidth = 1; x.beginPath(); x.roundRect(X + .5, Y + .5, w - 1, hh - 1, 5); x.stroke(); return; }
+    const v = offAt(m, a0) ? "OFF" : cellVal(sd, m, h), lim = Math.min(y0, now); if (!v || v === "OFF") { rr(X, Y, w, hh, 5, v === "OFF" ? "#3a3a3a" : "#262a28"); return; }
+    const SG = evSegs(m, a0, lim).filter(g => !(g.a <= a0 && g.b >= lim - 3e4)), base = v === "SB" ? HC.SB : HC.OP;
+    x.save(); x.beginPath(); x.roundRect(X, Y, w, hh, 5); x.clip(); x.fillStyle = "#262a28"; x.fillRect(X, Y, w, hh);
+    if (!SG.length) { x.fillStyle = HC[v] || "#555"; x.fillRect(X, Y, w * (lim - a0) / 36e5, hh); }
+    else { const ended = SG.at(-1).b < now - 3e4; x.fillStyle = base; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
+      for (const g of SG) { x.fillStyle = HC[g.t] || "#555"; x.fillRect(X + w * (g.a - a0) / 36e5, Y, w * (g.b - g.a) / 36e5, hh); } }
+    x.restore(); };
+  let y = 200;
   for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length;
-    font(800, 22); x.fillStyle = "#e9e5d8"; x.fillText(g.g.toUpperCase(), P, y + 28); font(600, 19); x.fillStyle = wk < on.length ? "#ff9a8c" : "#7fd6a0"; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, W - P - x.measureText(tt).width, y + 28);
-    y += 44;
-    g.L.forEach((m, i) => { const X = P + (i % NC) * (CW + 12), Y = y + Math.floor(i / NC) * (CH + 10), t = offNow(m) ? "OFF" : st(m), e = statusNow(m), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = ["BD", "PM"].includes(t) ? sinceOf(m, t) : null;
-      rr(X, Y, CW, CH, 12, t === "BD" ? "#3a2421" : t === "PM" ? "#1f2a3a" : "#1d201f"); rr(X, Y, 8, CH, 4, COL[t] || "#555");
-      font(800, 24); x.fillStyle = "#fff"; x.fillText(m, X + 20, Y + 33);
-      font(600, 17); x.fillStyle = COL[t] === "#2f8a55" ? "#7fd6a0" : t === "BD" ? "#ff9a8c" : t === "PM" ? "#8fbaf0" : t === "SB" ? "#ecc76a" : "#aaa";
-      x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, CW - 30), X + 20, Y + 59);
-      if (why) { font(400, 15); x.fillStyle = "#c9c4b6"; x.fillText(fit(why, CW - 30), X + 20, Y + 83); } });
-    y += Math.ceil(g.L.length / NC) * (CH + 10) + 14; }
-  if (downL.length) { font(800, 22); x.fillStyle = "#d4a12a"; x.fillText("OUT OF SERVICE – RECOVERY PLAN", P, y + 30); y += 50;
+    font(800, 18); x.fillStyle = "#e9e5d8"; x.fillText(g.g.toUpperCase(), P, y + 22); font(600, 15); x.fillStyle = wk < on.length ? "#ff9a8c" : "#7fd6a0"; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, P + NW + 60, y + 22);
+    if (g === groups[0]) { font(600, 12); x.fillStyle = "#7d8581"; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
+    x.fillStyle = "#2b2f2d"; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
+    g.L.forEach((m, i) => { const Y = y + i * RH, t = offNow(m) ? "OFF" : st(m), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = ["BD", "PM"].includes(t) ? sinceOf(m, t) : null;
+      rr(P, Y + 6, 5, RH - 12, 2, COL[t] || "#555"); font(800, 18); x.fillStyle = "#fff"; x.fillText(m, P + 14, Y + 26);
+      font(600, 15); x.fillStyle = t === "OP" ? "#7fd6a0" : t === "BD" ? "#ff9a8c" : t === "PM" ? "#8fbaf0" : t === "SB" ? "#ecc76a" : "#aaa";
+      x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, SW - 12), P + NW, why ? Y + 18 : Y + 26);
+      if (why) { font(400, 13); x.fillStyle = "#c9c4b6"; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
+      HRL.forEach((h, k) => block(m, h, HX + k * (HW + HG), Y + 6, HW, RH - 12)); });
+    y += g.L.length * RH + 6; }
+  if (downL.length) { font(800, 18); x.fillStyle = "#d4a12a"; x.fillText("OUT OF SERVICE – RECOVERY PLAN", P, y + 26); y += 40;
     const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
-    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 18); x.fillStyle = "#fff"; x.fillText(fit(r.m, 300), P, y + 22); font(400, 17); x.fillStyle = "#d8d3c4";
+    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 16); x.fillStyle = "#fff"; x.fillText(fit(r.m, 300), P, y + 20); font(400, 15); x.fillStyle = "#d8d3c4";
       const h0 = r.since ? (now - r.since) / 36e5 : 0, dd = r.since ? (h0 >= 48 ? `${Math.floor(h0 / 24)} days` : `${hm(h0)} h`) : "";
-      x.fillText(fit([r.why, dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · "), W - P * 2 - 320), P + 310, y + 22); y += 40; }
+      x.fillText(fit([r.why, dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · "), W - P * 2 - 320), P + 310, y + 20); y += 32; }
     y += 10; }
-  const H2 = Math.min(H, y + 90), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
-  x2.fillStyle = "#d4a12a"; x2.fillRect(0, H2 - 70, W, 3); x2.font = `500 18px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#9aa39e"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 30);
-  const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 30); }
+  const H2 = Math.min(H, y + 70), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
+  x2.fillStyle = "#d4a12a"; x2.fillRect(0, H2 - 54, W, 3); x2.font = `500 16px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#9aa39e"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
+  const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 20); }
   return c2; }
 async function showPicture(text) {
   document.querySelector(".ccdone")?.remove(); const c = await statusPicture(), url = c.toDataURL("image/jpeg", 0.9), d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
@@ -1154,7 +1165,11 @@ document.addEventListener("click", async ev => {
     openEv(evForm({ machine: mc, type: ["BD", "PM", "SB"].includes(cur) ? cur : "PM", start: iso(a), end: iso(Math.min(a + 36e5, Date.now())) }, "").replace('<input type="hidden" name="eid" value="">', `<input type="hidden" name="eid" value=""><input type="hidden" name="hourcell" value="${d}|${mc}|${h}">`), `${mc} · ${hLabel(h)} – part of the hour`);
     toast("Change Started and Ended to the real times. The rest of the hour stays working (green)."); return; }
   if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick; pop.remove();
-    if (val === cur && pk.dataset.hpick !== "") return; await setCell($("fDay").dataset.date, mc, +h, val); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render(); return; }
+    if (val === cur && pk.dataset.hpick !== "") return; const d = $("fDay").dataset.date, a = hStart(d, +h); await setCell(d, mc, +h, val); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
+    if ((val === "BD" || val === "PM") && a + 36e5 <= Date.now()) {   // an hour already gone: ask the real times straight away so the box shows green / blue or red / green
+      const e = downEvs(mc).find(x => x.type === val && x.grid && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a);
+      if (e) { openEv(evForm(e), `${mc} · ${TYPES[val].toLowerCase()} – type the times`); toast("Type when it stopped and when it was back. The rest of the hour stays green."); } }
+    return; }
   if (pop && !ev.target.closest("#hpop") && !ev.target.closest("[data-hcell]")) pop.remove();
 }, true);
 async function clickH(ev) {
