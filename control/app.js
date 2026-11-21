@@ -1392,7 +1392,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1425,7 +1425,7 @@ async function seedFleetReports() {
   await put({ id: KEY, kind: "seed", ym: "setup", at: now }, `Rockbreaker openings and closings 01/11/2026 to 20/11/2026 captured from the Rompad supervisor reports (${n} machine shifts)`);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: boxes that were filled before their hour had started (20 and 21/11/2026) are emptied */
-async function clearAhead() {
+async function clearAhead() { return;   // done on 21/11; never again (a PC that missed the marker was emptying boxes)
   const KEY = "seed_clear_ahead_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), logs = R("log"); let n = 0;
   for (const r of R("hr").filter(r => r.date >= "2026-11-20" && r.date <= "2026-11-21")) {
@@ -1437,13 +1437,13 @@ async function clearAhead() {
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, n ? `${n} hour boxes that were filled before their hour started were emptied` : "");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* every sync: a box saved for an hour that hasn't started yet is removed (nothing may be filled ahead of time) */
-async function purgeFuture() { const now = Date.now(), keep = undo.slice(); let n = 0;
+async function purgeFuture() { if (new Date().getTimezoneOffset() !== -120) return; const now = Date.now(), keep = undo.slice(); let n = 0;
   for (const r of R("hr").filter(r => r.date >= today() || r.date === addDays(today(), -1))) { const cells = { ...(r.cells || {}) }; let ch = false;
     for (const k of Object.keys(cells)) if (hStart(r.date, +k) > now) { delete cells[k]; ch = true; n++; }
     if (ch) await put({ ...r, cells }); }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 /* once: put back the first hour (06-07) of 21/11/2026 that the undo below took out in v204 – the boxes from the update log, the breakdown times it had removed */
-async function restoreDay21() {
+async function restoreDay21() { return;   // done on 21/11; never again (a PC that missed the marker was emptying boxes)
   const KEY = "seed_restore_day_2026-11-21"; if (recs.some(r => r.id === KEY) || !recs.some(r => r.id === "seed_undo_day_2026-11-21" || r.id === "seed_undo_day_2026-11-21b")) return;
   const d = "2026-11-21", keep = undo.slice(), a = toMs(d + "T06:00"), b = toMs(d + "T07:00"), logs = R("log").filter(l => l.date === d); let n = 0;
   for (const mc of fleet().flatMap(([, L]) => L)) { const tag = `${mc} ${hLabel(6)}:`, L = logs.filter(l => (l.what || "").startsWith(tag) && l.at >= a).sort((x, y) => y.at - x.at)[0]; if (!L) continue;
@@ -1454,7 +1454,7 @@ async function restoreDay21() {
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, n ? `Day shift 21/11/2026: the first hour (06–07) put back – ${n} entries` : "");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once, as Muneer asked at 09:21 on 21/11/2026: the day shift boxes and breakdown times put in on 21/11 up to 09:21 are taken out */
-async function undoDay21() {
+async function undoDay21() { return;   // done on 21/11; never again (a PC that missed the marker was emptying boxes)
   const KEY = "seed_undo_day_2026-11-21b"; if (recs.some(r => r.id === KEY)) return;
   const d = "2026-11-21", cut = toMs("2026-11-21T09:35"), keep = undo.slice(); let n = 0;
   for (const r of R("hr").filter(r => r.date === d)) { const cells = { ...(r.cells || {}) }; let ch = false;
@@ -1483,6 +1483,18 @@ async function cof22() {
     await put({ id: "ev_" + uid(), kind: "ev", ym: "2026-11", machine: mc, group: groupOf(mc), type: "NU", start: "2026-11-21T06:00", end: "", reason: "COF" });
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, "TKRH022 not in use: COF");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
+/* every sync: an hour box that disappeared without anyone clearing it is put back from the update log (today and yesterday) */
+async function healCells() {
+  const keep = undo.slice(), now = Date.now(); let n = 0;
+  for (const d of [today(), addDays(today(), -1)]) { const logs = R("log").filter(l => l.date === d && l.what).sort((x, y) => x.at - y.at);
+    for (const mc of fleet().flatMap(([, L]) => L)) { const last = {};
+      for (const l of logs) for (let h = 6; h < 30; h++) { const tag = `${mc} ${hLabel(h)}: `; if (l.what.startsWith(tag)) last[h] = l; }
+      const id = `hr_${d}_${mc}`, r = recs.find(x => x.id === id && !x.deleted), cells = { ...(r?.cells || {}) }; let ch = false;
+      for (const [h0, l] of Object.entries(last)) { const h = +h0, v = l.what.split(": ").pop().trim(); if (!["OP", "SB", "BD", "PM"].includes(v)) continue;
+        if (hStart(d, h) > now || l.at < hStart(d, h) - 5 * 6e4) continue;   // never put back a box for an hour that hasn't started, or one filled ahead of time
+        if (cells[h] == null) { cells[h] = v; ch = true; n++; } }   // missing (not cleared: a cleared box is "-")
+      if (ch) await put(r ? { ...r, cells } : { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells }); } }
+  if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), AT = "2026-11-21T06:00";
