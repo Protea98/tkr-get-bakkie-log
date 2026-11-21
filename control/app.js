@@ -103,6 +103,8 @@ async function discardChanges() {
 async function put(r, log) {
   if (me && r.kind !== "duty" && r.kind !== "log") { const x = dutyLive(); if (x && x.sid !== me.sid) { dutyCheck(); throw new Error("not on duty"); } }   // only the person on duty can change anything
   const old = recs.find(x => x.id === r.id); journal(r.id, old);
+  if (r.kind === "hr") { const a0 = old?.cells || {}, b0 = r.cells || {}, ct = { ...(old?.ct || {}), ...(r.ct || {}) }, t0 = Date.now();   // when each hour box last changed (also when it was emptied), so PCs merge box by box
+    for (const k of new Set([...Object.keys(a0), ...Object.keys(b0)])) if ((a0[k] || "") !== (b0[k] || "")) ct[k] = t0; r = { ...r, ct }; }
   const rec = { ...stamp(r, old), editedAt: Date.now(), by: me?.name || r.by || "", synced: 0 };
   const L = log ? { id: "log_" + uid(), kind: "log", ym: (r.date || r.start || today()).slice(0, 7), date: (r.date || r.start || today()).slice(0, 10), at: Date.now(), by: me?.name || "", what: log, editedAt: Date.now(), synced: 0 } : null;
   if (L) journal(L.id, null);
@@ -628,11 +630,11 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
   const pcAll = () => { const t = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh)).reduce((t2, mc) => { const x = shiftSum(mc, d, sh); t2.a += x.avail; t2.d += x.down; return t2; }, { a: 0, d: 0 }); return t.a + t.d ? Math.round(t.a / (t.a + t.d) * 100) + "%" : ""; };
   const allMonth = groups.reduce((t, x) => t + x.lostM, 0), allShift = groups.reduce((t, x) => t + x.lostS, 0);
   const decide = down.filter(x => x.since && T - x.since > 48 * 36e5 && !x.e?.eta);
-  const head = [`*Bottom line:* ${avail} of ${total} machines available${pcAll() ? ` · ${pcAll()} this shift` : ""}`,
-    ...(hurt.length ? ["", "*Where it hurts*", ...hurt.map(x => `${x.g}: ${x.up} of ${x.n} working${x.lostS ? ` · ${hl(x.lostS)} lost this shift` : ""}${x.lostM ? ` · ${hl(x.lostM)} lost this month${x.pcM != null ? ` (${x.pcM}% available)` : ""}` : ""}`)] : []),
-    `Hours lost: ${hl(allShift)} this shift · ${hl(allMonth)} this month`,
-    ...(down.length ? ["", "*Down now – plan*", ...down.map(x => `${x.mc} – ${x.st === "BD" ? "Breakdown" : "Maintenance"}${x.why ? ": " + x.why : ""}${x.since ? ` · down ${dur(x.since)}` : ""} · ${x.e?.action ? "action: " + x.e.action : "no action logged"}${x.e?.owner ? " · " + x.e.owner : ""} · ${x.e?.eta ? "ETA " + fmt(x.e.eta) : "no ETA"}`)] : []),
-    ...(decide.length ? ["", "*Needs a decision* (down over 48 h with no ETA)", ...decide.map(x => `${x.mc}${x.why ? " – " + x.why : ""} · down ${dur(x.since)}`)] : [])];
+  const head = [`*Summary:* ${avail} of ${total} machines available${pcAll() ? ` · ${pcAll()} availability this shift` : ""}`,
+    ...(hurt.length ? ["", "*Areas affected*", ...hurt.map(x => `${x.g}: ${x.up} of ${x.n} available${x.lostS ? ` · ${hl(x.lostS)} downtime this shift` : ""}${x.lostM ? ` · ${hl(x.lostM)} downtime this month${x.pcM != null ? ` (${x.pcM}% availability)` : ""}` : ""}`)] : []),
+    `Total downtime: ${hl(allShift)} this shift · ${hl(allMonth)} this month`,
+    ...(down.length ? ["", "*Machines down – recovery plan*", ...down.map(x => `${x.mc} – ${x.st === "BD" ? "Breakdown" : "Maintenance"}${x.why ? ": " + x.why : ""}${x.since ? ` · out of service ${dur(x.since)}` : ""} · ${x.e?.action ? x.e.action : "action to be confirmed"}${x.e?.owner ? " (" + x.e.owner + ")" : ""} · ${x.e?.eta ? "expected back " + fmt(x.e.eta) : "ETA to be confirmed"}`)] : []),
+    ...(decide.length ? ["", "*For management attention* (out of service over 48 h, ETA still to be confirmed)", ...decide.map(x => `${x.mc}${x.why ? " – " + x.why : ""} · out of service ${dur(x.since)}`)] : [])];
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 function showMessage(text) {
@@ -1185,7 +1187,13 @@ async function syncNow(manual) {
       for (let i = 0; i < (r.parts || 1); i++) { const data = await fileGet(`${r.fid}_${i}`); if (!data) { ok = false; break; } await setDoc(doc(db, "ctrl", `file_${r.fid}_${i}`), { kind: "file", ym: "files", data, v: 206 }); }
       if (ok) { r.up = 1; r.editedAt = Date.now(); r.synced = 0; await tx("readwrite", t => t.objectStore("rec").put(r)); } }
     for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { const { synced, pin, ...out } = r;
-      try { const cur = await fb.getDoc(doc(db, "ctrl", r.id)); if (cur.exists() && (cur.data().editedAt || 0) > (r.editedAt || 0)) continue; } catch {}   // a newer copy is already in the TKR app: don't write an older one over it
+      let mergedHr = null;
+      try { const cur = await fb.getDoc(doc(db, "ctrl", r.id)); if (cur.exists()) { const sv = cur.data();
+        if (r.kind === "hr" && !r.deleted && !sv.deleted) { const cells = {}, ct = {}, A = r.cells || {}, B = sv.cells || {}, ta = r.ct || {}, tb = sv.ct || {};   // box by box: the newest change wins, an emptied box stays empty
+          for (const k of new Set([...Object.keys(A), ...Object.keys(B), ...Object.keys(ta), ...Object.keys(tb)])) { const useA = (ta[k] || 0) >= (tb[k] || 0); const v = useA ? A[k] : B[k]; if (v) cells[k] = v; ct[k] = Math.max(ta[k] || 0, tb[k] || 0); }
+          mergedHr = { ...sv, ...r, cells, ct, meter: { ...(sv.meter || {}), ...(r.meter || {}) }, notes: { ...(sv.notes || {}), ...(r.notes || {}) }, editedAt: Math.max(r.editedAt || 0, sv.editedAt || 0) }; }
+        else if ((sv.editedAt || 0) > (r.editedAt || 0)) continue; } } catch {}   // a newer copy is already in the TKR app: don't write an older one over it
+      if (mergedHr) { const { synced: _s, pin: _p, ...mo } = mergedHr; await setDoc(doc(db, "ctrl", r.id), { ...mo, v: 206 }); Object.assign(r, mergedHr); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); continue; }
       await setDoc(doc(db, "ctrl", r.id), { ...(r.kind === "user" ? { ...out, pin } : out), v: 206 }); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
     const yms = ["setup", shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]; if (!yms.includes(month)) yms.push(month);
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
@@ -1470,3 +1478,4 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("../sw.js", {
 /* keep this PC on the newest version: check for an update each time the Control Room opens, and reload once when it arrives */
 if ("serviceWorker" in navigator) { if (navigator.serviceWorker.controller) { let r = false; navigator.serviceWorker.addEventListener("controllerchange", () => { if (r) return; r = true; location.reload(); }); }
   navigator.serviceWorker.register("../sw.js", { scope: "../", updateViaCache: "none" }).then(r => r.update()).catch(() => {}); }
+setInterval(() => { navigator.serviceWorker?.getRegistration?.("../").then(r => r?.update()).catch(() => {}); }, 5 * 6e4);
