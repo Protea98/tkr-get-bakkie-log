@@ -609,11 +609,16 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
   for (const [g, M] of fleet()) { body.push(`*${g}*`);
     for (const mc of M) { const st = stateAt(mc), w = why(mc);
       if (st === "OFF") { body.push(`${mc} – Not on site`); continue; } total++;
-      if (st === "OP" || st === "?") { avail++; body.push(`${mc} – Operational – available`); }   // nothing captured and no comment: operational   // only OP and SB count as available – the same as the dashboard
+      const E = evsIn(mc, d, sh).filter(e => ["BD", "PM"].includes(e.type) && toMs(e.start) <= T), R2 = [];   // breakdown / maintenance times this shift, joined where one runs straight into the next
+      for (const e of E) { const s0 = toMs(e.start), e0 = e.end ? toMs(e.end) : null, last = R2.at(-1); if (last && last.t === e.type && last.e !== null && s0 <= last.e + 6e4) last.e = e0 === null ? null : Math.max(last.e, e0); else R2.push({ t: e.type, s: s0, e: e0 }); }
+      const tt = z => (ymd(new Date(z)) === ymd(new Date(a)) || z >= a ? "" : fmt(ymd(new Date(z))).slice(0, 5) + " ") + tOf(z);
+      const span = x => x.e === null || x.e > T ? `since ${tt(x.s)}` : `${tt(x.s)}–${tOf(x.e)}`;
+      const times = t0 => R2.filter(x => x.t === t0).map(span).join(", ");
+      if (st === "OP" || st === "?") { avail++; const bt = R2.filter(x => x.e !== null && x.e <= T).map(x => `${x.t === "BD" ? "breakdown" : "maintenance"} ${span(x)}`).join(", "); body.push(`${mc} – Operational – available${bt ? ` (${bt})` : ""}`); }   // nothing captured and no comment: operational   // only OP and SB count as available – the same as the dashboard
       else if (st === "SB") { avail++; body.push(`${mc} – Refuelling${w ? ": " + w : ""}`); }
-      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : "Not in use"}${w ? ": " + w : ""} – not available`); }
+      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : "Not in use"}${times(st) ? " " + times(st) : ""}${w ? ": " + w : ""} – not available`); }
     body.push(""); }
-  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && (stateAt(mc) === "OP" || stateAt(mc) === "?")).length; return ` (${n} operational)`; })()}`, "", ...body].join("\n").trim();
+  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && (stateAt(mc) === "OP" || stateAt(mc) === "?")).length; return ` (${n} operational)`; })()}`, "", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 function showMessage(text) {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
