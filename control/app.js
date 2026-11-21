@@ -57,9 +57,11 @@ const fileGet = async id => { const d = await idb(); return (await req(d.transac
 const fileSet = async (id, data) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction("files", "readwrite"); t.objectStore("files").put({ id, data }); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
 
 /* Every record: { id, kind, ym, editedAt, by, deleted?, ... } — kinds: user, ev, chk, day, log, inv, add, fleet */
-let cvMemo = new Map(); const bump = () => cvMemo.clear();
+let cvMemo = new Map(), idx = null, kindIdx = null, lkMemo = new Map(); const bump = () => { cvMemo.clear(); idx = null; kindIdx = null; lkMemo.clear(); };
+/* quick look-ups (rebuilt after every change) so the dashboard doesn't search every record again for each box */
+const byId = id => { if (!idx) { idx = new Map(); for (const r of recs) if (!r.deleted) idx.set(r.id, r); } return idx.get(id); };
 let recs = [], me = null, tab = "now", date = today(), month = today().slice(0, 7), pinFor = null, addingMe = false;
-const R = k => recs.filter(r => r.kind === k && !r.deleted);
+const R = k => { if (!kindIdx) { kindIdx = new Map(); for (const r of recs) if (!r.deleted) { if (!kindIdx.has(r.kind)) kindIdx.set(r.kind, []); kindIdx.get(r.kind).push(r); } } return (kindIdx.get(k) || []).slice(); };
 /* Locking: every filled box remembers the shift (session) that filled it. Once that controller logs out,
    the box is grey and locked for everyone else; empty boxes stay open. Locked boxes change only with admin approval. */
 const CTRL_ADMIN = ["muneer@tkroperations.com"];
@@ -139,6 +141,8 @@ function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = 
   return lastKnown(m) || "?"; }
 /* nothing marked yet this shift: the machine's last marked status (up to 2 days back), so the dashboard and the message keep showing it */
 function lastKnown(m, from = Date.now()) {
+  const key = m + "|" + Math.floor(from / 6e4); if (lkMemo.has(key)) return lkMemo.get(key); const v = lastKnown0(m, from); lkMemo.set(key, v); return v; }
+function lastKnown0(m, from) {
   const E = evs().filter(e => e.machine === m && ["BD", "PM", "SB", "NU"].includes(e.type));
   for (let t = from - 36e5, i = 0; i < 24 * 14; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), d = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
     const v = cellsOf(d, m)[h]; if (v && v !== "-") return v;
@@ -452,7 +456,7 @@ const HRS = sh => sh === "Day" ? [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] : 
 const hStart = (d, h) => toMs(d + "T06:00") + (h - 6) * 36e5;
 const hLabel = h => `${pad(h % 24)}–${pad((h + 1) % 24)}`;
 const isoOf = ms => { const x = new Date(ms); return `${ymd(x)}T${pad(x.getHours())}:${pad(x.getMinutes())}`; };
-const cellsOf = (d, mc) => recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.cells || {};
+const cellsOf = (d, mc) => byId(`hr_${d}_${mc}`)?.cells || {};
 const downEvs = mc => evs().filter(e => e.machine === mc && (e.type === "BD" || e.type === "PM"));
 /* a shift the control room worked in: every hour that has passed and has no BD or PM counts as OP (clean slate: machines are working unless marked) */
 const usedCache = new Map();
@@ -1153,7 +1157,9 @@ async function syncNow(manual) {
     for (const r of recs.filter(r => r.kind === "doc" && !r.up && !r.deleted)) { let ok = true;
       for (let i = 0; i < (r.parts || 1); i++) { const data = await fileGet(`${r.fid}_${i}`); if (!data) { ok = false; break; } await setDoc(doc(db, "ctrl", `file_${r.fid}_${i}`), { kind: "file", ym: "files", data }); }
       if (ok) { r.up = 1; r.editedAt = Date.now(); r.synced = 0; await tx("readwrite", t => t.objectStore("rec").put(r)); } }
-    for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { const { synced, pin, ...out } = r; await setDoc(doc(db, "ctrl", r.id), r.kind === "user" ? { ...out, pin } : out); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
+    for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { const { synced, pin, ...out } = r;
+      try { const cur = await fb.getDoc(doc(db, "ctrl", r.id)); if (cur.exists() && (cur.data().editedAt || 0) > (r.editedAt || 0)) continue; } catch {}   // a newer copy is already in the TKR app: don't write an older one over it
+      await setDoc(doc(db, "ctrl", r.id), r.kind === "user" ? { ...out, pin } : out); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
     const yms = ["setup", shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]; if (!yms.includes(month)) yms.push(month);
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
@@ -1210,7 +1216,7 @@ async function purgeFuture() { const now = Date.now(), keep = undo.slice(); let 
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 /* once: put back the first hour (06-07) of 21/11/2026 that the undo below took out in v204 – the boxes from the update log, the breakdown times it had removed */
 async function restoreDay21() {
-  const KEY = "seed_restore_day_2026-11-21"; if (recs.some(r => r.id === KEY) || !recs.some(r => r.id === "seed_undo_day_2026-11-21")) return;
+  const KEY = "seed_restore_day_2026-11-21"; if (recs.some(r => r.id === KEY) || !recs.some(r => r.id === "seed_undo_day_2026-11-21" || r.id === "seed_undo_day_2026-11-21b")) return;
   const d = "2026-11-21", keep = undo.slice(), a = toMs(d + "T06:00"), b = toMs(d + "T07:00"), logs = R("log").filter(l => l.date === d); let n = 0;
   for (const mc of fleet().flatMap(([, L]) => L)) { const tag = `${mc} ${hLabel(6)}:`, L = logs.filter(l => (l.what || "").startsWith(tag) && l.at >= a).sort((x, y) => y.at - x.at)[0]; if (!L) continue;
     const v = (L.what.split(":").pop() || "").trim(); if (!["OP", "SB", "BD", "PM"].includes(v)) continue;
@@ -1221,13 +1227,13 @@ async function restoreDay21() {
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once, as Muneer asked at 09:21 on 21/11/2026: the day shift boxes and breakdown times put in on 21/11 up to 09:21 are taken out */
 async function undoDay21() {
-  const KEY = "seed_undo_day_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
-  const d = "2026-11-21", cut = toMs("2026-11-21T09:21"), keep = undo.slice(); let n = 0;
+  const KEY = "seed_undo_day_2026-11-21b"; if (recs.some(r => r.id === KEY)) return;
+  const d = "2026-11-21", cut = toMs("2026-11-21T09:35"), keep = undo.slice(); let n = 0;
   for (const r of R("hr").filter(r => r.date === d)) { const cells = { ...(r.cells || {}) }; let ch = false;
-    for (const k of Object.keys(cells)) if (+k >= 7 && +k < 18) { delete cells[k]; ch = true; n++; }   // the first hour (06-07) is kept
+    for (const k of Object.keys(cells)) if (+k >= 7 && +k <= 9) { delete cells[k]; ch = true; n++; }   // the first hour (06-07) is kept
     if (ch) await put({ ...r, cells }); }
   for (const e of evs().filter(e => toMs(e.start) >= toMs(d + "T07:00") && toMs(e.start) < cut)) { await put({ ...e, deleted: true }); n++; }
-  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, `Day shift 21/11/2026: ${n} boxes and breakdown times put in before 09:21 taken out, as the admin asked`);
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, `Day shift 21/11/2026: ${n} boxes and breakdown times from 07:00 to 09:35 taken out, as the admin asked`);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
 async function busUpdate() {
