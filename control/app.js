@@ -159,8 +159,8 @@ function lastKnown(m, from = Date.now()) {
 function lastKnown0(m, from) {
   const E = evs().filter(e => e.machine === m && ["BD", "PM", "SB", "NU"].includes(e.type));
   for (let t = from - 36e5, i = 0; i < 24 * 14; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), d = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
-    const v = cellsOf(d, m)[h]; if (v && v !== "-") return v;
-    const e = E.filter(e => toMs(e.start) < t + 36e5 && evEnd(e) > t).sort((x, y) => toMs(y.start) - toMs(x.start))[0]; if (e) return e.type; }   // up to 14 days back
+    const v = cellsOf(d, m)[h]; if (v && v !== "-") return v === "SB" ? "" : v;   // refuelling (old standby boxes too) does not carry into a later shift: it was available
+    const e = E.filter(e => toMs(e.start) < t + 36e5 && evEnd(e) > t).sort((x, y) => toMs(y.start) - toMs(x.start))[0]; if (e) return e.type === "SB" ? "" : e.type; }   // up to 14 days back
   return ""; }   // nothing filled in this shift yet   // nothing marked this shift: working (clean slate)
 /* when a machine went down: dates on or before 11/11 are not the real start (long-term breakdowns, real dates not given yet), so they are left out unless the metres show the last shift it drilled */
 const BACKSTART = toMs("2026-11-12T00:00");
