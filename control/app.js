@@ -280,7 +280,10 @@ function hourBoard() {
   const cell = (mc, h, prev) => { const a = hStart(d, h), v = a <= now ? cellVal(d, mc, h) : "", cur = a <= now && now < a + 36e5;
     if (!v || v === "OFF") return `<div class="hb ${v || "fut"}${cur ? " now" : ""}"><i>${lab(h)}</i><b>${v || ""}</b></div>`;
     const q = hourParts(mc, d, h, v, prev), dn = q.BD + q.PM, t = dn >= q.len - 1 / 120 ? (q.BD >= q.PM ? "BD" : "PM") : dn > 0 ? "MIX" : v === "SB" ? "SB" : "OP";
-    const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", lbl = t === "MIX" ? `${dt} ${hm(dn)}` : t === "OP" ? t : t === "SB" ? "RF" : dn < 1 - 1 / 120 && cur ? `${dt} ${hm(dn)}` : t;
+    const x0 = hStart(d, h), y0 = x0 + 36e5, EV = downEvs(mc).filter(e => toMs(e.start) < y0 && evEnd(e) > x0);   // the clock time it changed inside this hour: went down at, or came back at
+    const st0 = EV.map(e => toMs(e.start)).filter(z => z > x0).sort((p2, q2) => p2 - q2)[0], en0 = EV.map(e => e.end ? toMs(e.end) : 0).filter(z => z > x0 && z < y0).sort((p2, q2) => q2 - p2)[0];
+    const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", at = st0 ? `${dt} ${tOf(st0)}` : en0 ? `OP ${tOf(en0)}` : dt;
+    const lbl = t === "MIX" ? at : t === "OP" ? t : t === "SB" ? "RF" : dn < 1 - 1 / 120 && cur ? at : t;
     const base = v === "SB" ? "#4d4116" : "#1f4d33", dc = dt === "BD" ? "#9b2c22" : "#2a4f8a", pas = Math.round(q.len * 100), up = cur ? pas : 100;   // filled as far as the hour has gone: down part first, then working
     const fill = dn > 0 && pct >= up ? dc : base, bg = cur || t === "MIX" ? `style="background:linear-gradient(to right,${dc} 0 ${Math.min(pct, up)}%,${fill === dc ? dc : base} ${Math.min(pct, up)}% ${up}%,#202220 ${up}% 100%)"` : "";
     return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
