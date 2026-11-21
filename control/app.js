@@ -774,7 +774,7 @@ async function statusPicture() {
   let y = 228;
   const wrap = (t, w, max) => { const out = []; let ln = ""; for (const wd of String(t).split(/\s+/)) { const t2 = ln ? ln + " " + wd : wd; if (x.measureText(t2).width > w && ln) { out.push(ln); ln = wd; } else ln = t2; } if (ln) out.push(ln);
     if (out.length > max) { out.length = max; out[max - 1] = fit(out[max - 1] + " …", w); } return out; };
-  const rowInfo = m => { const t = offNow(m) ? "OFF" : st(m), dn = ["BD", "PM"].includes(t), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = dn ? sinceOf(m, t) : null, e = dn ? statusNow(m) : null;   // everything about the machine on its own row
+  const rowInfo = m => { const t = offNow(m) ? "OFF" : st(m), dn = ["BD", "PM"].includes(t), why = t !== "OP" ? whyOf(m) : "", sc = dn ? sinceOf(m, t) : null, e = dn ? statusNow(m) : null;   // everything about the machine on its own row
     const h0 = sc ? (now - sc) / 36e5 : 0, out = sc ? (h0 >= 48 ? `out ${Math.floor(h0 / 24)} days` : `out ${hm(h0)} h`) : "";
     const head = `${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}${out ? " · " + out : ""}`;
     font(400, 13); const WL = why ? wrap(why, SW - 12, 3) : [], plan = dn ? [e?.action, e?.owner && "by " + e.owner, e?.eta ? "back " + fmt(e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ") : "";
@@ -1392,7 +1392,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1475,6 +1475,14 @@ async function joinRuns() {
       if (cellsOf(pd, e.machine)[ph] === e.type && ![ "OP", "SB"].includes(cellsOf(d0, e.machine)[h0])) { await put({ ...e, start: isoOf(hs) }); n++; } continue; }
     await put({ ...f, end: e.end || "", endBy: e.endBy || "", reason: f.reason || e.reason, action: f.action || e.action, owner: f.owner || e.owner, eta: f.eta || e.eta }); await put({ ...e, deleted: true }); n++; }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
+/* once: TKRH022 not running – no COF (Muneer, 21/11 14:01) */
+async function cof22() {
+  const KEY = "seed_tkrh022_cof_2026-11-21"; if (recs.some(r => r.id === KEY)) return; const mc = "TKRH022";
+  if (!fleet().some(([, L]) => L.includes(mc))) return;
+  const keep = undo.slice(); if (!evs().some(e => e.machine === mc && !e.end && ["BD", "PM", "NU"].includes(e.type)))
+    await put({ id: "ev_" + uid(), kind: "ev", ym: "2026-11", machine: mc, group: groupOf(mc), type: "NU", start: "2026-11-21T06:00", end: "", reason: "COF" });
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, "TKRH022 not in use: COF");
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), AT = "2026-11-21T06:00";
