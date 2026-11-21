@@ -147,7 +147,9 @@ function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = 
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
   if (h != null) { if (C[h] === "-") return "?";
     if (C[h] === "BD" || C[h] === "PM") { const x0 = hStart(d, h), ex = evs().filter(e => e.machine === m && !e.grid && toMs(e.start) < x0 + 36e5 && evEnd(e) > x0);   // exact times typed for that hour: back up when the last one ended
-      if (ex.length && ex.every(e => e.end && toMs(e.end) <= now)) return "OP"; }
+      if (ex.length && ex.every(e => e.end && toMs(e.end) <= now)) return "OP";
+      const lastUp = evs().filter(e => e.machine === m && !e.grid && e.end && toMs(e.end) <= now && toMs(e.end) > x0).map(e => toMs(e.end)).sort((p2, q2) => q2 - p2)[0];   // logged back up after that box
+      if (lastUp && !statusNow(m)) return "OP"; }
     return C[h]; } if (s) return s.type;
   return lastKnown(m) || "?"; }
 /* nothing marked yet this shift: the machine's last marked status (up to 2 days back), so the dashboard and the message keep showing it */
@@ -293,7 +295,8 @@ function hourBoard() {
     const SG = evSegs(mc, x0, Math.min(y0, Date.now())), stops = []; let pos = 0;   // the hour drawn left to right: working, then the down part at the time it happened, then working, the rest not yet passed
     if (t === "MIX" || cur) { if (SG.length) { for (const g of SG) { const a1 = Math.round((g.a - x0) / 36e3), b1 = Math.round((g.b - x0) / 36e3); if (a1 > pos) stops.push(`${base} ${pos}% ${a1}%`); stops.push(`${g.t === "BD" ? "#9b2c22" : "#2a4f8a"} ${a1}% ${b1}%`); pos = b1; } }
       else if (dn > 0) { stops.push(`${dc} 0% ${Math.min(pct, up)}%`); pos = Math.min(pct, up); }
-      if (pos < up) stops.push(`${base} ${pos}% ${up}%`); if (up < 100) stops.push(`#202220 ${up}% 100%`); }
+      const backUp = SG.length && SG.at(-1).b < Date.now() - 3e4;   // the breakdown has ended: the rest of the hour is working (green)
+      if (backUp) { if (pos < 100) stops.push(`${base} ${pos}% 100%`); } else { if (pos < up) stops.push(`${base} ${pos}% ${up}%`); if (up < 100) stops.push(`#202220 ${up}% 100%`); } }
     const bg = stops.length ? `style="background:linear-gradient(to right,${stops.join(",")})"` : "";
     return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
