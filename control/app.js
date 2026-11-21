@@ -636,10 +636,14 @@ async function setCell(d, mc, h, val) {
     else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
   const open = downEvs(mc).filter(e => !e.end && toMs(e.start) <= now).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (val === "BD" || val === "PM") {
-    if (current) { if (open && open.type === val) return; if (open) await put({ ...open, end: nowLocal(), endBy: me.name });
+    if (current) { if (open && open.type === val) return;
+      const prevH = prevHour(d, h), cont = downEvs(mc).filter(e => e.type === val && e.end && Math.abs(toMs(e.end) - a) <= 3e4).sort((x, y) => toMs(y.start) - toMs(x.start))[0];   // it was already down at the end of the last hour: it carries on from there, not from now
+      if (cont && !open) { await put({ ...cont, end: "", endBy: "" }, `${mc}: ${TYPES[val].toLowerCase()} still going from ${hhmm(cont.start)}`); toast(`${mc}: still on ${TYPES[val].toLowerCase()} from ${hhmm(cont.start)}.`); return; }
+      if (!open && cellsOf(prevH[0], mc)[prevH[1]] === val) { await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: isoOf(a), end: "", reason: "" }, `${mc}: ${TYPES[val]} from ${tOf(a)}`); toast(`${mc}: still on ${TYPES[val].toLowerCase()} from ${tOf(a)}.`); return; }
+      if (open) await put({ ...open, end: nowLocal(), endBy: me.name });
       await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: nowLocal(), end: "", reason: "" }, `${mc}: ${TYPES[val]} from ${hhmm(nowLocal())}`);
       toast(`${mc}: ${TYPES[val].toLowerCase()} logged at ${hhmm(nowLocal())}.`);
-      if (val === "BD" && mailList().length) { const ne = evs().filter(x => x.machine === mc && !x.end).sort((x, y) => toMs(y.start) - toMs(x.start))[0]; if (ne) openEv(mailForm(ne), "Email this breakdown"); } return; }
+      return; }
     const E = downEvs(mc).filter(e => e.type === val);
     if (E.some(e => toMs(e.start) < b && evEnd(e) > a)) return;                                   // that hour is already inside a logged time
     const before = E.find(e => e.end && toMs(e.end) === a), after = E.find(e => toMs(e.start) === b);
@@ -1380,7 +1384,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1452,6 +1456,15 @@ async function undoDay21() {
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, `Day shift 21/11/2026: ${n} boxes and breakdown times from 07:00 to 09:35 taken out, as the admin asked`);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: Muneer at 09:57 on 21/11/2026 – only 3 buses are working; TKR020, TKR023 and TKR024 are still on breakdown (reasons from 20/11) */
+/* a breakdown picked in the running hour right after the same breakdown ended with the last hour box: one breakdown, from the earlier start */
+async function joinRuns() {
+  const keep = undo.slice(); let n = 0;
+  for (const e of evs().filter(e => !e.end && (e.type === "BD" || e.type === "PM"))) { const s0 = toMs(e.start), hs = Math.floor((s0 - new Date(s0).getMinutes() * 6e4 - new Date(s0).getSeconds() * 1e3) / 1e3) * 1e3;
+    if (s0 - hs < 6e4) continue;   // started on the hour already
+    const f = evs().find(q => q.id !== e.id && q.machine === e.machine && q.type === e.type && q.end && Math.abs(toMs(q.end) - hs) <= 3e4);
+    if (!f || evs().some(q => q.machine === e.machine && q.id !== f.id && q.id !== e.id && toMs(q.start) >= hs && toMs(q.start) < s0)) continue;
+    await put({ ...f, end: "", endBy: "", reason: f.reason || e.reason, action: f.action || e.action, owner: f.owner || e.owner, eta: f.eta || e.eta }); await put({ ...e, deleted: true }); n++; }
+  if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), AT = "2026-11-21T06:00";
