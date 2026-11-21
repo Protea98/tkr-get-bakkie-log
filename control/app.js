@@ -543,6 +543,7 @@ async function clearRest(d, mc, h) {
     else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
   bump(); }
 async function setCell(d, mc, h, val) {
+  if (val && hStart(d, h) > Date.now()) { toast("That hour hasn't started yet. Fill it in when it starts."); return; }   // no boxes filled ahead of time
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else if (a > now) delete cells[h]; else cells[h] = "-";   // a box ahead of time cleared: as if never touched
   await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
@@ -1133,7 +1134,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1144,6 +1145,7 @@ async function backfillRigs() {
   const RIGS = ["TDR013", "TDR014", "TDR015"], now = Date.now(), keep = undo.slice(); let n = 0;
   for (let d = "2026-11-01"; d <= today(); d = addDays(d, 1)) for (const mc of RIGS) {
     const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), cells = { ...(old?.cells || {}) }; let ch = false;
+    if (d > "2026-11-20") break;   // only up to 20/11, when this was asked for
     for (let h = 6; h <= 29; h++) { if (hStart(d, h) > now) break; if (cells[h] !== "BD" && cells[h] !== "PM") { cells[h] = "BD"; ch = true; } }
     if (!ch) continue; n++;
     await put(old ? { ...old, cells } : { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells, seed: 1 }); }
@@ -1163,6 +1165,18 @@ async function seedFleetReports() {
     if (!ch) continue; n++;
     await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc }), deleted: false, cells, meter: { ...(old?.meter || {}), [sh]: m } }); }
   await put({ id: KEY, kind: "seed", ym: "setup", at: now }, `Rockbreaker openings and closings 01/11/2026 to 20/11/2026 captured from the Rompad supervisor reports (${n} machine shifts)`);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
+/* once: boxes that were filled before their hour had started (20 and 21/11/2026) are emptied */
+async function clearAhead() {
+  const KEY = "seed_clear_ahead_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
+  const keep = undo.slice(), logs = R("log"); let n = 0;
+  for (const r of R("hr").filter(r => r.date >= "2026-11-20" && r.date <= "2026-11-21")) {
+    const cells = { ...(r.cells || {}) }; let ch = false;
+    for (const k of Object.keys(cells)) { const h = +k, a = hStart(r.date, h), tag = `${r.machine} ${hLabel(h)}:`;
+      const L = logs.filter(l => l.date === r.date && (l.what || "").startsWith(tag)).sort((x, y) => y.at - x.at)[0];
+      if (L ? L.at < a - 5 * 6e4 : (r.date === "2026-11-21" && !r.seed)) { delete cells[k]; ch = true; n++; } }
+    if (ch) await put({ ...r, cells }); }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, n ? `${n} hour boxes that were filled before their hour started were emptied` : "");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
 async function busUpdate() {
