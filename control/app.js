@@ -824,8 +824,10 @@ function evForm(e = {}, machine = "") {
     <input type="hidden" name="eid" value="${esc(e.id || "")}">
     <label>Machine <select name="machine" required>${M.map(m => `<option ${m === (e.machine || machine) ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></label>
     <div style="margin-top:12px"><span class="muted" style="font-size:12px;letter-spacing:1px;text-transform:uppercase;font-weight:600">What happened</span><div class="seg" style="margin-top:6px">${Object.entries(TYPES).filter(([k]) => k !== "SB" || e.type === "SB").map(([k, t]) => `<label><input type="radio" name="type" value="${k}" ${k === (e.type || "BD") ? "checked" : ""}>${t}</label>`).join("")}</div></div>
-    <div class="grid" style="margin-top:12px"><label>Started (exact time) <input type="datetime-local" name="start" value="${st}" max="${nowLocal()}" required></label>
-      <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}" max="${nowLocal()}"></label></div>
+    <div class="grid" style="margin-top:12px"><label>Started (exact time) <input type="datetime-local" name="start" value="${st}" max="${nowLocal()}" required>
+        <span class="row" style="gap:6px;margin-top:6px"><button type="button" class="sm" data-tnow="start">Now</button></span></label>
+      <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}" max="${nowLocal()}">
+        <span class="row" style="gap:6px;margin-top:6px"><button type="button" class="sm" data-tnow="end">Now</button><button type="button" class="sm ghost" data-tnow="clear">Still going (no end time)</button></span></label></div>
     <label style="display:block;margin-top:12px">Reason / what happened <input name="reason" value="${esc(e.reason || "")}" placeholder="e.g. hydraulic pipe burst"></label>
     <div class="grid" style="margin-top:12px"><label>Action being taken <input name="action" value="${esc(e.action || "")}" placeholder="e.g. waiting for part, at OEM, fitter on site"></label>
       <label>Who is responsible <input name="owner" value="${esc(e.owner || "")}" placeholder="e.g. fitter / supplier name"></label>
@@ -1154,6 +1156,8 @@ async function clickH(ev) {
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); await m.sendPasswordResetEmail(m.getAuth(admApp), e); popupMsg("Reset link sent", `Check ${e} for an email from the TKR app (look in junk too). Choose a new password, then sign in here.`); }
     catch (x) { console.warn(x); toast("The reset link couldn't be sent. Check the email and signal."); } return; }
   if (b.dataset.tgtclear) { if (!me?.admin || !confirm("Remove the targets?")) return; await put({ ...tgtRec(), deleted: true }, "Targets removed"); render(); return; }
+  if (b.dataset.tnow) { const f = b.closest("form"), k = b.dataset.tnow; if (!f) return; const n = nowLocal();
+    if (k === "clear") f.elements.end.value = ""; else { f.elements[k].max = n; f.elements[k].value = n; } toast(k === "clear" ? "No end time – it stays open until you log Back up." : `${k === "start" ? "Started" : "Ended"} set to now (${n.slice(11, 16)}).`); return; }
   if (b.dataset.rpin) { if (!me?.admin) return; const u = recs.find(r => r.id === b.dataset.rpin); if (!u || !confirm(`Reset ${u.name}'s PIN? Next time they tap their name they choose a new PIN.`)) return;
     await put({ ...u, pin: "", status: "approved" }, `Admin reset ${u.name}'s PIN`); syncSoon(); render(); toast(`${u.name} chooses a new PIN at the next sign-in. It reaches their PC when it has signal.`); return; }
   if (b.dataset.uok || b.dataset.uno) { if (!me?.admin) return; const u = recs.find(r => r.id === (b.dataset.uok || b.dataset.uno)); if (!u) return; const ok = !!b.dataset.uok;
