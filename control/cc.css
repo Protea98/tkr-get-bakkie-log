@@ -202,3 +202,27 @@ table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:
 .hb.SB{background:#4d4116;border-color:#a8892c;color:#ffeeb0}.hbm small.SB{color:#e6c766}.hpop button.ty{white-space:nowrap}
 .hpop{flex-direction:column;align-items:stretch;max-width:280px}.hpop button{text-align:left;padding:6px 12px}.hpop button.SB{background:#fff2cc;color:#7f6000}
 table.xl td.mt input{width:92px;min-width:80px;text-align:right}
+
+/* compact dashboard: everything on one phone screen */
+.ctiles{grid-template-columns:repeat(4,1fr)!important;gap:8px!important;margin-bottom:10px}
+.ctiles .tile{padding:10px 12px}.ctiles .tile .n{font-size:30px;line-height:1.1}.ctiles .tile .n small{font-size:15px;opacity:.7}.ctiles .tile .l{font-size:11px}.ctiles .tile .s{font-size:11px}
+.fleet{gap:8px;margin-bottom:10px}
+.grp{padding:8px 10px}.grp h3{font-size:12.5px;margin-bottom:6px;gap:8px}.grp h3 span{text-transform:none;letter-spacing:0;font-weight:600}
+.mlist{gap:5px;grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}
+.mach{min-height:44px;padding:5px 8px}.mach b{font-size:14px}.mach small{font-size:11px}
+.mach small.why{-webkit-line-clamp:1;margin-top:1px;font-size:10.5px}
+.grp .row{margin-top:6px!important}.grp .row .sm{min-height:28px;padding:2px 8px;font-size:11.5px}
+@media (max-width:620px){
+  .ctiles{gap:5px!important}.ctiles .tile{padding:7px 6px;border-radius:10px}.ctiles .tile .n{font-size:22px}.ctiles .tile .l{font-size:9.5px;letter-spacing:.5px}.ctiles .tile .s{font-size:9.5px;line-height:1.2}
+  .mlist{grid-template-columns:repeat(3,1fr)}.mach{min-height:38px;padding:4px 6px}.mach b{font-size:12.5px}.mach small{font-size:10px}
+  .grp .row{display:none}
+}
+@media (max-width:620px){
+  #app .ptitle{font-size:22px!important;margin:0}#app .phead .sub,#app .psub{font-size:14px!important}#app .phead{margin-bottom:8px!important;gap:6px!important}
+  .ro .ftabs,#app>.ftabs{margin-bottom:8px}
+}
+@media (max-width:620px){
+  .band .in{padding-top:6px!important;padding-bottom:6px!important}.band h1,.band .t1{font-size:22px!important}.band img{width:44px!important;height:44px!important}.band .sub{font-size:10px!important}
+  .statusbar{padding:6px 10px!important;font-size:12.5px!important;display:flex!important;flex-wrap:wrap;gap:2px 10px!important}
+  .ro .phead .row,.ro [data-tab="files"].primary,.ro .phead button[data-tab]{display:none!important}
+}

@@ -253,18 +253,13 @@ function nowView() {
   const SE = shiftEvents(), logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at);
   const cnt = k => ALL.filter(m => { const s = stateNow(m); return s === k || (k === "OP" && s === "?"); }).length;   // nothing captured: operational
   const seLine = x => x.e ? evLine(x.e) : `<div class="evrow"><span class="tag ${x.sheet.type}">${x.sheet.type}</span><div><b>${esc(x.sheet.machine)}</b> · ${TYPES[x.sheet.type]}<br><span class="t">${x.sheet.hrs.map(hLabel).join(", ")} · ${x.sheet.hrs.length} h, picked in the sheet</span></div></div>`;
-  return pageHead("Control room · live", "Machine status", new Date(Date.now()).toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button> <button data-tab="files">Documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
+  return pageHead("Control room · live", "Machine status", new Date(Date.now()).toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button> <button data-tab="files">Documents</button>`, "")
     + statusBar()
-    + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${hm(shT.avail)} available · ${hm(shT.down)} down so far (hours:minutes)</div></div>
-      <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${hm(dayT.avail)} available · ${hm(dayT.down)} down</div></div>
-      <div class="tile good"><div class="l">Operating now</div><div class="n">${cnt("OP")}</div><div class="s">of ${ALL.length} machines</div></div>
-      <div class="tile"><div class="l">Refuelling</div><div class="n">${cnt("SB")}</div><div class="s">counted as available</div></div>
-      <div class="tile ${cnt("BD") ? "alert" : ""}"><div class="l">Breakdowns now</div><div class="n">${cnt("BD")}</div></div>
-      <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
-      ${nOff ? `<div class="tile"><div class="l">Not on site</div><div class="n">${nOff}</div><div class="s">left out of availability</div></div>` : ""}
-      ${cnt("NU") ? `<div class="tile"><div class="l">Not in use now</div><div class="n">${cnt("NU")}</div></div>` : ""}
-      </div>`
-    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.every(offNow) ? "not on site" : `${L.filter(m => stateNow(m) === "OP").length}/${L.filter(m => !offNow(m)).length} operating${L.some(m => stateNow(m) === "SB") ? ` · ${L.filter(m => stateNow(m) === "SB").length} refuelling` : ""} · ${pcOf(gT)} available this shift`}</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${st === "OFF" ? "Not on site" : s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "?" ? "Operational" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
+    + `<div class="tiles ctiles"><div class="tile good"><div class="l">Available</div><div class="n">${pcOf(shT)}</div><div class="s">this shift · today ${pcOf(dayT)}</div></div>
+      <div class="tile good"><div class="l">Working</div><div class="n">${cnt("OP")}<small>/${ALL.length}</small></div><div class="s">${cnt("SB") ? cnt("SB") + " refuelling" : "machines"}</div></div>
+      <div class="tile ${cnt("BD") ? "alert" : ""}"><div class="l">Breakdown</div><div class="n">${cnt("BD")}</div><div class="s">now</div></div>
+      <div class="tile"><div class="l">Maintenance</div><div class="n">${cnt("PM")}</div><div class="s">${nOff ? nOff + " not on site" : "now"}</div></div></div>`
+    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.every(offNow) ? "not on site" : `${L.filter(m => ["OP", "?"].includes(stateNow(m))).length}/${L.filter(m => !offNow(m)).length} working${L.some(m => stateNow(m) === "SB") ? ` · ${L.filter(m => stateNow(m) === "SB").length} refuelling` : ""} · ${pcOf(gT)}`}</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${st === "OFF" ? "Not on site" : s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "?" ? "Operational" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button><button class="sm ghost" data-sitemg="${F.findIndex(x => x[0] === g)}">On site / not on site</button>` : ""}</div></section>`; }).join("")}</div>`
     + hourBoard()
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
@@ -1173,7 +1168,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1243,6 +1238,15 @@ async function undoDay21() {
     if (ch) await put({ ...r, cells }); }
   for (const e of evs().filter(e => toMs(e.start) >= toMs(d + "T07:00") && toMs(e.start) < cut)) { await put({ ...e, deleted: true }); n++; }
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, `Day shift 21/11/2026: ${n} boxes and breakdown times from 07:00 to 09:35 taken out, as the admin asked`);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
+/* once: Muneer at 09:57 on 21/11/2026 – only 3 buses are working; TKR020, TKR023 and TKR024 are still on breakdown (reasons from 20/11) */
+async function busesDown21() {
+  const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
+  const keep = undo.slice(), AT = "2026-11-21T06:00";
+  for (const [mc, why] of [["TKR020", "Brake lining"], ["TKR023", "Isuzu engine overhaul"], ["TKR024", "Drag link needs to be repaired"]]) {
+    if (downEvs(mc).some(e => e.type === "BD" && !e.end)) continue;
+    await put({ id: "ev_" + uid(), kind: "ev", ym: "2026-11", machine: mc, group: groupOf(mc), type: "BD", start: AT, end: "", reason: why }); }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, "TKR020, TKR023 and TKR024 on breakdown (still not repaired), as the admin said at 09:57");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
 async function busUpdate() {
