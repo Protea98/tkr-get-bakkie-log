@@ -289,14 +289,14 @@ function hourBoard() {
     if (!v || v === "OFF") return `<div class="hb ${v || "fut"}${cur ? " now" : ""}"><i>${lab(h)}</i><b>${v || ""}</b></div>`;
     const q = hourParts(mc, d, h, v, prev), dn = q.BD + q.PM, t = dn >= q.len - 1 / 120 ? (q.BD >= q.PM ? "BD" : "PM") : dn > 0 ? "MIX" : v === "SB" ? "SB" : "OP";
     const x0 = hStart(d, h), y0 = x0 + 36e5, EV = downEvs(mc).filter(e => toMs(e.start) < y0 && evEnd(e) > x0);   // the clock time it changed inside this hour: went down at, or came back at
-    const SGx = evSegs(mc, x0, y0), st0 = SGx.map(g => g.a).filter(z => z > x0)[0], en0 = SGx.map(g => g.b).filter(z => z > x0 && z < y0 && z <= Date.now() - 6e4).at(-1);
+    const SGx = evSegs(mc, x0, y0), st0 = SGx.map(g => g.a).filter(z => z > x0)[0], en0 = SGx.map(g => g.b).filter(z => z > x0 && z < y0 && z <= Date.now() - 1e3).at(-1);
     const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", at = st0 && en0 && en0 > st0 ? `${dt} ${tOf(st0)}–${tOf(en0)}` : st0 ? `${dt} ${tOf(st0)}` : en0 ? `OP ${tOf(en0)}` : dt;
     const lbl = t === "MIX" ? at : t === "OP" ? t : t === "SB" ? "RF" : dn < 1 - 1 / 120 && cur ? at : t;
     const base = v === "SB" ? "#4d4116" : "#1f4d33", dc = dt === "BD" ? "#9b2c22" : "#2a4f8a", pas = Math.round(q.len * 100), up = cur ? pas : 100;   // filled as far as the hour has gone: down part first, then working
     const SG = evSegs(mc, x0, Math.min(y0, Date.now())), stops = []; let pos = 0;   // the hour drawn left to right: working, then the down part at the time it happened, then working, the rest not yet passed
     if (t === "MIX" || cur) { if (SG.length) { for (const g of SG) { const a1 = Math.round((g.a - x0) / 36e3), b1 = Math.round((g.b - x0) / 36e3); if (a1 > pos) stops.push(`${base} ${pos}% ${a1}%`); stops.push(`${g.t === "BD" ? "#9b2c22" : "#2a4f8a"} ${a1}% ${b1}%`); pos = b1; } }
       else if (dn > 0) { stops.push(`${dc} 0% ${Math.min(pct, up)}%`); pos = Math.min(pct, up); }
-      const backUp = SG.length && SG.at(-1).b < Date.now() - 3e4;   // the breakdown has ended: the rest of the hour is working (green)
+      const backUp = SG.length && SG.at(-1).b < Date.now() - 1e3;   // the breakdown has ended: the rest of the hour is working (green)
       if (backUp) { if (pos < 100) stops.push(`${base} ${pos}% 100%`); } else { if (pos < up) stops.push(`${base} ${pos}% ${up}%`); if (up < 100) stops.push(`#202220 ${up}% 100%`); } }
     const bg = stops.length ? `style="background:linear-gradient(to right,${stops.join(",")})"` : "";
     return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
@@ -590,12 +590,12 @@ function shiftTable(d, sh) {
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
         if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv ${v}">${v || "–"} <small>🔒</small></span></td>`;
         const carry = !C[h] && v && v !== "OP", auto = !C[h] && v === "OP";
-        const x0 = hStart(d, h), y0 = x0 + 36e5, SG = v ? evSegs(mc, x0, Math.min(y0, Date.now())).filter(g => !(g.a <= x0 && g.b >= Math.min(y0, Date.now()) - 3e4)) : [];   // part of the hour down: drawn where it happened
+        const x0 = hStart(d, h), y0 = x0 + 36e5, SG = v ? evSegs(mc, x0, Math.min(y0, Date.now())).filter(g => !(g.a <= x0 && g.b >= Math.min(y0, Date.now()) - 1e3)) : [];   // part of the hour down: drawn where it happened
         let st2 = "", lb = v === "SB" ? "RF" : v || "–";
         if (SG.length) { const LC = { BD: "#f4b8b0", PM: "#b9d3f0" }, base = v === "SB" ? "#fff2cc" : "#e2f0d9", stops = []; let pos = 0;
           for (const g of SG) { const a1 = Math.round((g.a - x0) / 36e3), b1 = Math.round((g.b - x0) / 36e3); if (a1 > pos) stops.push(`${base} ${pos}% ${a1}%`); stops.push(`${LC[g.t] || "#ddd"} ${a1}% ${b1}%`); pos = b1; }
-          const ended = SG.at(-1).b < Date.now() - 3e4; if (pos < 100) stops.push(`${ended || y0 <= Date.now() ? base : "#fff"} ${pos}% 100%`);
-          st2 = `style="background:linear-gradient(to right,${stops.join(",")})!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block">${SG.map(g => `<b>${g.t}</b><br>${tOf(g.a)}–${g.b >= Date.now() - 3e4 ? "now" : tOf(g.b)}`).join("<br>")}</span>`; }
+          const ended = SG.at(-1).b < Date.now() - 1e3; if (pos < 100) stops.push(`${ended || y0 <= Date.now() ? base : "#fff"} ${pos}% 100%`);
+          st2 = `style="background:linear-gradient(to right,${stops.join(",")})!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block">${SG.map(g => `<b>${g.t}</b><br>${tOf(g.a)}–${g.b >= Date.now() - 1e3 ? "now" : tOf(g.b)}`).join("<br>")}</span>`; }
         return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" ${st2} class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, RF, BD or PM. Tap the same one again to clear it."}">${lb}</button></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${(() => { const m = meterOf(d, mc, sh), lc = lastClose(d, mc, sh), mh = meterHrs(m);
@@ -754,10 +754,10 @@ async function statusPicture() {
   const block = (m, h, X, Y, w, hh) => {   // one hour box, split by the real times like the hour board
     const a0 = hStart(sd, h), y0 = a0 + 36e5; if (a0 > now) { x.setLineDash([3, 3]); box(X, Y, w, hh, 6, null, "#333a37"); x.setLineDash([]); return; }
     const v = offAt(m, a0) ? "OFF" : cellVal(sd, m, h), lim = Math.min(y0, now); if (!v || v === "OFF") { box(X, Y, w, hh, 6, "#262826", "#333"); return; }
-    const SG = evSegs(m, a0, lim).filter(g => !(g.a <= a0 && g.b >= lim - 3e4)), base = v === "SB" ? "SB" : "OP", main = SG.length ? base : (HC[v] ? v : "OP");
+    const SG = evSegs(m, a0, lim).filter(g => !(g.a <= a0 && g.b >= lim - 1e3)), base = v === "SB" ? "SB" : "OP", main = SG.length ? base : (HC[v] ? v : "OP");
     x.save(); x.beginPath(); x.roundRect(X, Y, w, hh, 6); x.clip(); x.fillStyle = "#262826"; x.fillRect(X, Y, w, hh);
     if (!SG.length) { x.fillStyle = HC[main][0]; x.fillRect(X, Y, w * (lim - a0) / 36e5, hh); }
-    else { const ended = SG.at(-1).b < now - 3e4; x.fillStyle = HC[base][0]; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
+    else { const ended = SG.at(-1).b < now - 1e3; x.fillStyle = HC[base][0]; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
       for (const g of SG) { x.fillStyle = (HC[g.t] || HC.BD)[0]; x.fillRect(X + w * (g.a - a0) / 36e5, Y, w * (g.b - g.a) / 36e5, hh); } }
     x.restore(); box(X, Y, w, hh, 6, null, HC[main][1]); };
   { let lx = P; font(500, 13); for (const [k, l] of [["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"], ["-", "Not filled in"], ["", "Hour not reached"]]) {   // colour key
@@ -860,9 +860,9 @@ function evForm(e = {}, machine = "") {
     <input type="hidden" name="eid" value="${esc(e.id || "")}">
     <label>Machine <select name="machine" required>${M.map(m => `<option ${m === (e.machine || machine) ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></label>
     <div style="margin-top:12px"><span class="muted" style="font-size:12px;letter-spacing:1px;text-transform:uppercase;font-weight:600">What happened</span><div class="seg" style="margin-top:6px">${Object.entries(TYPES).filter(([k]) => k !== "SB" || e.type === "SB").map(([k, t]) => `<label><input type="radio" name="type" value="${k}" ${k === (e.type || "BD") ? "checked" : ""}>${t}</label>`).join("")}</div></div>
-    <div class="grid" style="margin-top:12px"><label>Started (exact time) <input type="datetime-local" name="start" value="${st}" max="${nowLocal()}" required>
+    <div class="grid" style="margin-top:12px"><label>Started (exact time) <input type="datetime-local" name="start" value="${st}" required>
         <span class="row" style="gap:6px;margin-top:6px"><button type="button" class="sm" data-tnow="start">Now</button></span></label>
-      <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}" max="${nowLocal()}">
+      <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}">
         <span class="row" style="gap:6px;margin-top:6px"><button type="button" class="sm" data-tnow="end">Now</button><button type="button" class="sm ghost" data-tnow="clear">Still going (no end time)</button></span></label></div>
     <label style="display:block;margin-top:12px">Reason / what happened <input name="reason" value="${esc(e.reason || "")}" placeholder="e.g. hydraulic pipe burst"></label>
     <div class="grid" style="margin-top:12px"><label>Action being taken <input name="action" value="${esc(e.action || "")}" placeholder="e.g. waiting for part, at OEM, fitter on site"></label>
@@ -1316,6 +1316,7 @@ async function submitH(ev) {
     await keepAchieved(); render(); toast("Targets saved."); return; }
   if (f.id === "fEv") { const v = k => f.elements[k].value, s = v("start"), e = v("end");
     if (e && toMs(e) <= toMs(s)) { toast("The end time must be after the start time."); return; }
+    if (toMs(s) > Date.now() + 6e4 || (e && toMs(e) > Date.now() + 6e4)) { toast("That time hasn't come yet. Check the time typed."); return; }   // checked when saving, not when the form opened
     const old = v("eid") ? recs.find(r => r.id === v("eid")) : null;
     if (old && !me.admin) { const prop = { machine: v("machine"), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim() };
       if (Object.keys(prop).some(k => (old[k] || "") !== (prop[k] || "") && lockedV(old, k))) { const why = f.elements.why?.value.trim();
@@ -1515,7 +1516,7 @@ function syncCardOld() {
 }
 addEventListener("online", () => syncNow(false));
 setInterval(() => { closeCarried().then(n => { if (n && me) render(); }); if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 60000);   // keep every PC up to date
-setInterval(() => { if (me && tab === "now" && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
+setInterval(() => { if (me && (tab === "now" || tab === "day") && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
 async function exportXlsx(from, to) {
