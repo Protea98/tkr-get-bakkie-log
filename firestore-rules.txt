@@ -1,5 +1,5 @@
 rules_version = '2';
-// TKR Operations app – rules updated 20 Nov 2026 (GET Forecast open to view; members sign in with name and PIN)
+// TKR Operations app – rules updated 21 Nov 2026 (GET Forecast open to view; members sign in with name and PIN)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -90,7 +90,8 @@ service cloud.firestore {
       return signedIn() && exists(/databases/$(database)/documents/config/ctrlAccess)
         && myEmail() in get(/databases/$(database)/documents/config/ctrlAccess).data.get('emails', []);
     }
-    match /ctrl/{id} { allow read, write: if signedIn(); }   // the control room PCs sign in by themselves (no email); controllers use their name and PIN in the page
+    // only Control Room app v206 or newer may write (older copies still open on a PC can't change anything)
+    match /ctrl/{id} { allow read: if signedIn(); allow create, update: if signedIn() && request.resource.data.get('v', 0) >= 206; allow delete: if signedIn(); }   // the control room PCs sign in by themselves (no email); controllers use their name and PIN in the page
 
     // GET Forecast: anyone who opens it can see the dashboard; admins change it
     match /fcMetres/{id}   { allow read: if signedIn(); allow write: if isAdmin(); }

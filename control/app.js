@@ -101,6 +101,7 @@ async function discardChanges() {
   const n = undo.filter(u => recs.find(x => x.id === u.id)?.kind !== "log").length; await clearUndo(); syncSoon(); return n;
 }
 async function put(r, log) {
+  if (me && r.kind !== "duty" && r.kind !== "log") { const x = dutyLive(); if (x && x.sid !== me.sid) { dutyCheck(); throw new Error("not on duty"); } }   // only the person on duty can change anything
   const old = recs.find(x => x.id === r.id); journal(r.id, old);
   const rec = { ...stamp(r, old), editedAt: Date.now(), by: me?.name || r.by || "", synced: 0 };
   const L = log ? { id: "log_" + uid(), kind: "log", ym: (r.date || r.start || today()).slice(0, 7), date: (r.date || r.start || today()).slice(0, 10), at: Date.now(), by: me?.name || "", what: log, editedAt: Date.now(), synced: 0 } : null;
@@ -1155,11 +1156,11 @@ async function syncNow(manual) {
   sync.busy = true;
   try { const { db, collection, doc, setDoc, getDocs, query, where } = fb;
     for (const r of recs.filter(r => r.kind === "doc" && !r.up && !r.deleted)) { let ok = true;
-      for (let i = 0; i < (r.parts || 1); i++) { const data = await fileGet(`${r.fid}_${i}`); if (!data) { ok = false; break; } await setDoc(doc(db, "ctrl", `file_${r.fid}_${i}`), { kind: "file", ym: "files", data }); }
+      for (let i = 0; i < (r.parts || 1); i++) { const data = await fileGet(`${r.fid}_${i}`); if (!data) { ok = false; break; } await setDoc(doc(db, "ctrl", `file_${r.fid}_${i}`), { kind: "file", ym: "files", data, v: 206 }); }
       if (ok) { r.up = 1; r.editedAt = Date.now(); r.synced = 0; await tx("readwrite", t => t.objectStore("rec").put(r)); } }
     for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { const { synced, pin, ...out } = r;
       try { const cur = await fb.getDoc(doc(db, "ctrl", r.id)); if (cur.exists() && (cur.data().editedAt || 0) > (r.editedAt || 0)) continue; } catch {}   // a newer copy is already in the TKR app: don't write an older one over it
-      await setDoc(doc(db, "ctrl", r.id), r.kind === "user" ? { ...out, pin } : out); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
+      await setDoc(doc(db, "ctrl", r.id), { ...(r.kind === "user" ? { ...out, pin } : out), v: 206 }); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
     const yms = ["setup", shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]; if (!yms.includes(month)) yms.push(month);
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);

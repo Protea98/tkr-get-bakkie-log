@@ -730,15 +730,15 @@ async function pushMetresCtrl() {
   for (const m of [shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]) {
     const data = [...slotsFor(m + "-01", monthEnd(m)).values()].map(x => ({ date: x.date, shift: x.shift, rig: x.rig, metres: x.metres, status: x.status, block: x.block, delays: x.delays }));
     const key = JSON.stringify(data); if (sent[m] === key) continue;
-    await setDoc(doc(db, "ctrl", "mtr_" + m), { id: "mtr_" + m, kind: "mtr", ym: m, data: key, editedAt: Date.now() }); sent[m] = key; }
+    await setDoc(doc(db, "ctrl", "mtr_" + m), { id: "mtr_" + m, kind: "mtr", ym: m, data: key, editedAt: Date.now(), v: 206 }); sent[m] = key; }
   try { localStorage.setItem("tkr-mtrctrl", JSON.stringify(sent)); } catch {}
 }
 async function pushMdocs() {
   if (!navigator.onLine || !fbUser) return; const from = shiftMonth(today().slice(0, 7), -1) + "-01";
   const L = files.filter(f => !f.cr && /^TDR/.test(f.rig || "") && f.date >= from), sent = JSON.parse(localStorage.getItem("tkr-mdocs") || "{}"), now = {}, { db, doc, setDoc } = fb;
   for (const f of L) { const id = "mdoc_" + String(f.fcId || f.id).replace(/[\/]/g, "_"), key = [f.date, f.shift, f.rig, f.type, f.name].join("|"); now[id] = key;
-    if (sent[id] !== key) await setDoc(doc(db, "ctrl", id), { kind: "mdoc", ym: f.date.slice(0, 7), date: f.date, shift: f.shift, machine: f.rig.replace(/\s+/g, ""), type: f.type === "Supporting document" ? "Other" : f.type, name: f.name, by: "Metres section", editedAt: Date.now() }); }
-  for (const id of Object.keys(sent)) if (!now[id]) await setDoc(doc(db, "ctrl", id), { kind: "mdoc", ym: sent[id].slice(0, 7), deleted: true, editedAt: Date.now() });
+    if (sent[id] !== key) await setDoc(doc(db, "ctrl", id), { kind: "mdoc", ym: f.date.slice(0, 7), date: f.date, shift: f.shift, machine: f.rig.replace(/\s+/g, ""), type: f.type === "Supporting document" ? "Other" : f.type, name: f.name, by: "Metres section", editedAt: Date.now(), v: 206 }); }
+  for (const id of Object.keys(sent)) if (!now[id]) await setDoc(doc(db, "ctrl", id), { kind: "mdoc", ym: sent[id].slice(0, 7), deleted: true, editedAt: Date.now(), v: 206 });
   try { localStorage.setItem("tkr-mdocs", JSON.stringify(now)); } catch {}
 }
 async function readCtrlLocal() {
