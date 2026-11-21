@@ -730,7 +730,7 @@ async function statusPicture() {
     return since; };
   const groups = F.filter(([, L]) => L.length).map(([g, L]) => ({ g, L, T: fleetSum(L.filter(m => !offNow(m)), m => shiftSum(m, sd, ssh)) }));
   const downL = ALL.filter(m => ["BD", "PM"].includes(st(m))).map(m => { const e = statusNow(m); return { m, t: st(m), e, why: whyOf(m), since: sinceOf(m, st(m)) }; }).sort((a, b) => (a.since ?? now) - (b.since ?? now));
-  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * RH + 22; H += 26; H += downL.length ? 50 + downL.length * 32 + 10 : 0; H += 80;
+  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * RH + 22; H += 26; H += downL.length ? 50 + downL.length * 100 + 10 : 0; H += 80;
   const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
   const font = (w, sz) => { x.font = `${w} ${sz}px "Inter","Segoe UI",Arial,sans-serif`; };
   const rr = (X, Y, w, h, r, f) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = f; x.fill(); };
@@ -769,14 +769,16 @@ async function statusPicture() {
       font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26);
       font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted;
       x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, SW - 12), P + NW, why ? Y + 18 : Y + 26);
-      if (why) { font(400, 12.5); x.fillStyle = T.muted; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
+      if (why) { font(400, 12.5); x.fillStyle = "#c9c4b6"; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
       HRL.forEach((h, k) => block(m, h, HX + k * (HW + HG), Y + 6, HW, RH - 12)); });
     y += g.L.length * RH + 14; }
   if (downL.length) { y += 6; font(700, 13); x.fillStyle = T.gold; x.fillText("OUT OF SERVICE – RECOVERY PLAN".split("").join(String.fromCharCode(8202)), P, y + 22); x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 42;
     const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
     H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 15); x.fillStyle = T.fg; x.fillText(fit(r.m, 300), P, y + 20); font(400, 14); x.fillStyle = T.muted;
       const h0 = r.since ? (now - r.since) / 36e5 : 0, dd = r.since ? (h0 >= 48 ? `${Math.floor(h0 / 24)} days` : `${hm(h0)} h`) : "";
-      x.fillText(fit([r.why, dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · "), W - P * 2 - 320), P + 310, y + 20); y += 32; }
+      const LW = W - P * 2 - 320, words = [r.why || "", [dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ")].filter(Boolean), lines = [];   // the reason in full, wrapped over as many lines as it needs
+      for (const part of words) { let ln = ""; for (const w of part.split(/\s+/)) { const t2 = ln ? ln + " " + w : w; if (x.measureText(t2).width > LW && ln) { lines.push(ln); ln = w; } else ln = t2; } if (ln) lines.push(ln); }
+      lines.forEach((ln, k) => { x.fillStyle = k === 0 && r.why ? T.fg : T.muted; x.fillText(ln, P + 310, y + 20 + k * 20); }); y += Math.max(1, lines.length) * 20 + 12; }
     y += 10; }
   const H2 = Math.min(H, y + 70), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
   x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
