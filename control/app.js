@@ -1180,7 +1180,7 @@ document.addEventListener("click", async ev => {
     openEv(evForm({ machine: mc, type: ["BD", "PM", "SB"].includes(cur) ? cur : "PM", start: iso(a), end: iso(Math.min(a + 36e5, Date.now())) }, "").replace('<input type="hidden" name="eid" value="">', `<input type="hidden" name="eid" value=""><input type="hidden" name="hourcell" value="${d}|${mc}|${h}">`), `${mc} · ${hLabel(h)} – part of the hour`);
     toast("Change Started and Ended to the real times. The rest of the hour stays working (green)."); return; }
   if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick; pop.remove();
-    if (val === cur && pk.dataset.hpick !== "") return; const d = $("fDay").dataset.date, a = hStart(d, +h); await setCell(d, mc, +h, val); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
+    if (val === cur && pk.dataset.hpick !== "") return; const d = $("fDay").dataset.date, a = hStart(d, +h); await setCell(d, mc, +h, val); await joinRuns(); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
     if ((val === "BD" || val === "PM") && a + 36e5 <= Date.now()) {   // an hour already gone: ask the real times straight away so the box shows green / blue or red / green
       const e = downEvs(mc).find(x => x.type === val && x.grid && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a);
       if (e) { openEv(evForm(e), `${mc} · ${TYPES[val].toLowerCase()} – type the times`); toast("Type when it stopped and when it was back. The rest of the hour stays green."); } }
@@ -1459,11 +1459,13 @@ async function undoDay21() {
 /* a breakdown picked in the running hour right after the same breakdown ended with the last hour box: one breakdown, from the earlier start */
 async function joinRuns() {
   const keep = undo.slice(); let n = 0;
-  for (const e of evs().filter(e => !e.end && (e.type === "BD" || e.type === "PM"))) { const s0 = toMs(e.start), hs = Math.floor((s0 - new Date(s0).getMinutes() * 6e4 - new Date(s0).getSeconds() * 1e3) / 1e3) * 1e3;
+  for (const e of evs().filter(e => (e.type === "BD" || e.type === "PM") && toMs(e.start) > Date.now() - 2 * 864e5)) { const s0 = toMs(e.start), hs = Math.floor((s0 - new Date(s0).getMinutes() * 6e4 - new Date(s0).getSeconds() * 1e3) / 1e3) * 1e3;
     if (s0 - hs < 6e4) continue;   // started on the hour already
     const f = evs().find(q => q.id !== e.id && q.machine === e.machine && q.type === e.type && q.end && Math.abs(toMs(q.end) - hs) <= 3e4);
-    if (!f || evs().some(q => q.machine === e.machine && q.id !== f.id && q.id !== e.id && toMs(q.start) >= hs && toMs(q.start) < s0)) continue;
-    await put({ ...f, end: "", endBy: "", reason: f.reason || e.reason, action: f.action || e.action, owner: f.owner || e.owner, eta: f.eta || e.eta }); await put({ ...e, deleted: true }); n++; }
+    if (evs().some(q => q.machine === e.machine && q.id !== f?.id && q.id !== e.id && toMs(q.start) >= hs && toMs(q.start) < s0)) continue;
+    if (!f) { const dt = new Date(hs), hh = dt.getHours(), d0 = hh < 6 ? addDays(ymd(dt), -1) : ymd(dt), h0 = hh < 6 ? hh + 24 : hh, [pd, ph] = prevHour(d0, h0);   // the hour before was marked the same in the boxes: it started at the top of this hour at the latest
+      if (cellsOf(pd, e.machine)[ph] === e.type && ![ "OP", "SB"].includes(cellsOf(d0, e.machine)[h0])) { await put({ ...e, start: isoOf(hs) }); n++; } continue; }
+    await put({ ...f, end: e.end || "", endBy: e.endBy || "", reason: f.reason || e.reason, action: f.action || e.action, owner: f.owner || e.owner, eta: f.eta || e.eta }); await put({ ...e, deleted: true }); n++; }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
