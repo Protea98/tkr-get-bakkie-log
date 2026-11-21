@@ -143,9 +143,9 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
   const e = evs().filter(e => e.machine === m && toMs(e.start) <= now && evEnd(e) > a && e.reason).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (e) return e.reason.trim(); return (recs.find(r => r.id === `hr_${d}_${m}`)?.notes?.[sh] || "").trim(); }
 function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
-  const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
+  const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x] && C[x] !== "-").at(-1);   // a blank (cleared) box says nothing: the last box filled in counts
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
-  if (h != null) { if (C[h] === "-") return "?";
+  if (h != null) {
     if (C[h] === "BD" || C[h] === "PM") { const x0 = hStart(d, h), ex = evs().filter(e => e.machine === m && !e.grid && toMs(e.start) < x0 + 36e5 && evEnd(e) > x0);   // exact times typed for that hour: back up when the last one ended
       const realUp = e => e.end && toMs(e.end) <= now && Math.abs(toMs(e.end) - (x0 + 36e5)) > 3e4;   // a time that only ends with the box (end of the hour) is not "back up"
       if (ex.length && ex.every(realUp)) return "OP";
@@ -723,7 +723,8 @@ async function statusPicture() {
   const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
   const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
   const W = 1080, P = 28, NW = 132, SW = 240, HX = P + NW + SW, HRL = HRS(ssh), HG = 4, HW = (W - P - HX - HG * (HRL.length - 1)) / HRL.length, RH = 40;
-  const whyOf = m => { const r0 = reasonNow(m); if (r0) return r0; let [d2, s2] = [sd, ssh]; for (let i = 0; i < 4; i++) { const n = (byId(`hr_${d2}_${m}`)?.notes?.[s2] || "").trim(); if (n) return n; [d2, s2] = prevShift(d2, s2); } return ""; };
+  const whyOf = m => { const r0 = reasonNow(m); if (r0) return r0; let [d2, s2] = [sd, ssh]; for (let i = 0; i < 28; i++) { const n = (byId(`hr_${d2}_${m}`)?.notes?.[s2] || "").trim(); if (n) return n; [d2, s2] = prevShift(d2, s2); }   // the comment typed for it, up to 14 days back
+    const e = evs().filter(q => q.machine === m && q.reason && toMs(q.start) <= now && toMs(q.start) > now - 14 * 864e5).sort((p2, q2) => toMs(q2.start) - toMs(p2.start))[0]; return e ? e.reason.trim() : ""; };
   const sinceOf = (m, t0) => { const e = statusNow(m); let since = e ? toMs(e.start) : null;   // walk back through the hour boxes while it stayed down
     for (let t = now, i = 0; i < 24 * 60; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh, v = cellsOf(dd, m)[h];
       const ev = downEvs(m).some(q => q.type === t0 && toMs(q.start) <= t && evEnd(q) > t - 36e5); if (v === t0 || ev) { const hs = hStart(dd, h); since = since == null ? hs : Math.min(since, hs); } else if (v && v !== "-") break; }
