@@ -726,7 +726,7 @@ async function statusPicture() {
   const F = fleet(), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
   const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
   const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
-  const W = 1080, P = 28, NW = 132, SW = 240, HX = P + NW + SW, HRL = HRS(ssh), HG = 4, HW = (W - P - HX - HG * (HRL.length - 1)) / HRL.length, RH = 40;
+  const W = 1080, P = 28, NW = 132, SW = 330, HX = P + NW + SW, HRL = HRS(ssh), HG = 4, HW = (W - P - HX - HG * (HRL.length - 1)) / HRL.length, RH = 40;
   const whyOf = m => { const r0 = reasonNow(m); if (r0) return r0; let [d2, s2] = [sd, ssh]; for (let i = 0; i < 28; i++) { const n = (byId(`hr_${d2}_${m}`)?.notes?.[s2] || "").trim(); if (n) return n; [d2, s2] = prevShift(d2, s2); }   // the comment typed for it, up to 14 days back
     const e = evs().filter(q => q.machine === m && q.reason && toMs(q.start) <= now && toMs(q.start) > now - 14 * 864e5).sort((p2, q2) => toMs(q2.start) - toMs(p2.start))[0]; return e ? e.reason.trim() : ""; };
   const sinceOf = (m, t0) => { const e = statusNow(m); let since = e ? toMs(e.start) : null;   // walk back through the hour boxes while it stayed down
@@ -735,7 +735,7 @@ async function statusPicture() {
     return since; };
   const groups = F.filter(([, L]) => L.length).map(([g, L]) => ({ g, L, T: fleetSum(L.filter(m => !offNow(m)), m => shiftSum(m, sd, ssh)) }));
   const downL = ALL.filter(m => ["BD", "PM"].includes(st(m))).map(m => { const e = statusNow(m); return { m, t: st(m), e, why: whyOf(m), since: sinceOf(m, st(m)) }; }).sort((a, b) => (a.since ?? now) - (b.since ?? now));
-  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * RH + 22; H += 26; H += downL.length ? 50 + downL.length * 100 + 10 : 0; H += 80;
+  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * 110 + 22; H += 26; H += 80;
   const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
   const font = (w, sz) => { x.font = `${w} ${sz}px "Inter","Segoe UI",Arial,sans-serif`; };
   const rr = (X, Y, w, h, r, f) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = f; x.fill(); };
@@ -764,27 +764,26 @@ async function statusPicture() {
       if (HC[k]) box(lx, 196, 24, 15, 4, HC[k][0], HC[k][1]); else if (k === "-") box(lx, 196, 24, 15, 4, "#262826", "#333"); else { x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#4a524e"); x.setLineDash([]); }
       x.fillStyle = T.muted; x.fillText(l, lx + 30, 208); lx += 30 + x.measureText(l).width + 20; } }
   let y = 228;
-  for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length;
-    box(P - 14, y, W - (P - 14) * 2, 40 + g.L.length * RH + 2, 12, T.panel, T.line); y += 4;   // each group in its own box: heading and its machines together
+  const wrap = (t, w, max) => { const out = []; let ln = ""; for (const wd of String(t).split(/\s+/)) { const t2 = ln ? ln + " " + wd : wd; if (x.measureText(t2).width > w && ln) { out.push(ln); ln = wd; } else ln = t2; } if (ln) out.push(ln);
+    if (out.length > max) { out.length = max; out[max - 1] = fit(out[max - 1] + " …", w); } return out; };
+  const rowInfo = m => { const t = offNow(m) ? "OFF" : st(m), dn = ["BD", "PM"].includes(t), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = dn ? sinceOf(m, t) : null, e = dn ? statusNow(m) : null;   // everything about the machine on its own row
+    const h0 = sc ? (now - sc) / 36e5 : 0, out = sc ? (h0 >= 48 ? `out ${Math.floor(h0 / 24)} days` : `out ${hm(h0)} h`) : "";
+    const head = `${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}${out ? " · " + out : ""}`;
+    font(400, 13); const WL = why ? wrap(why, SW - 12, 3) : [], plan = dn ? [e?.action, e?.owner && "by " + e.owner, e?.eta ? "back " + fmt(e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ") : "";
+    const PL = plan ? wrap(plan, SW - 12, 2) : []; return { t, head, WL, PL, h: Math.max(RH, 30 + (WL.length + PL.length) * 17 + 6) }; };
+  for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length, RI = g.L.map(rowInfo), gh = RI.reduce((a2, r) => a2 + r.h, 0);
+    box(P - 14, y, W - (P - 14) * 2, 40 + gh + 2, 12, T.panel, T.line); y += 4;   // each group in its own box: heading and its machines together
     font(700, 13); x.fillStyle = T.gold; x.fillText(g.g.toUpperCase().split("").join(String.fromCharCode(8202)), P, y + 22); const gw = x.measureText(g.g.toUpperCase().split("").join(String.fromCharCode(8202))).width;
     font(500, 13); x.fillStyle = T.muted; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
     if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
     x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
-    g.L.forEach((m, i) => { const Y = y + i * RH, t = offNow(m) ? "OFF" : st(m), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = ["BD", "PM"].includes(t) ? sinceOf(m, t) : null;
+    g.L.forEach((m, i) => { const r = RI[i], Y = y, t = r.t; if (i) { x.fillStyle = "#222826"; x.fillRect(P, Y, W - P * 2, 1); }
       font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26);
-      font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted;
-      x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, SW - 12), P + NW, why ? Y + 18 : Y + 26);
-      if (why) { font(400, 12.5); x.fillStyle = "#c9c4b6"; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
-      HRL.forEach((h, k) => block(m, h, HX + k * (HW + HG), Y + 6, HW, RH - 12)); });
-    y += g.L.length * RH + 14; }
-  if (downL.length) { y += 6; font(700, 13); x.fillStyle = T.gold; x.fillText("OUT OF SERVICE – RECOVERY PLAN".split("").join(String.fromCharCode(8202)), P, y + 22); x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 42;
-    const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
-    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 15); x.fillStyle = T.fg; const NL = []; for (const nm of ms) { const t3 = NL.length ? NL.at(-1) + ", " + nm : nm; if (NL.length && x.measureText(t3).width <= NW - 12) NL[NL.length - 1] = t3; else NL.push(nm); } NL.forEach((ln, k) => x.fillText(ln, P, y + 20 + k * 20)); font(400, 14); x.fillStyle = T.muted;   // machine names wrapped inside the name column
-      const h0 = r.since ? (now - r.since) / 36e5 : 0, dd = r.since ? (h0 >= 48 ? `${Math.floor(h0 / 24)} days` : `${hm(h0)} h`) : "";
-      const LW = W - P - (P + NW), words = [r.why || "", [dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ")].filter(Boolean), lines = [];   // the reason in full, wrapped over as many lines as it needs
-      for (const part of words) { let ln = ""; for (const w of part.split(/\s+/)) { const t2 = ln ? ln + " " + w : w; if (x.measureText(t2).width > LW && ln) { lines.push(ln); ln = w; } else ln = t2; } if (ln) lines.push(ln); }
-      lines.forEach((ln, k) => { x.fillStyle = k === 0 && r.why ? T.fg : T.muted; x.fillText(ln, P + NW, y + 20 + k * 20); }); y += Math.max(1, lines.length, NL.length) * 20 + 12; }
-    y += 10; }
+      font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted; x.fillText(fit(r.head, SW - 12), P + NW, Y + 24);
+      let ly = Y + 24; font(400, 13); x.fillStyle = "#d8d3c4"; for (const ln of r.WL) { ly += 17; x.fillText(ln, P + NW, ly); }
+      x.fillStyle = T.muted; for (const ln of r.PL) { ly += 17; x.fillText(ln, P + NW, ly); }
+      HRL.forEach((h, k) => block(m, h, HX + k * (HW + HG), Y + 6, HW, RH - 12)); y += r.h; });
+    y += 14; }
   const H2 = Math.min(H, y + 70), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
   x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
   const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 20); }
