@@ -601,11 +601,11 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
   for (const [g, M] of fleet()) { body.push(`*${g}*`);
     for (const mc of M) { const st = stateAt(mc), w = why(mc);
       if (st === "OFF") { body.push(`${mc} – Not on site`); continue; } total++;
-      if (st === "OP" || (st === "?" && !w)) { avail++; body.push(`${mc} – Operational – available${w ? " – " + w : ""}`); }   // nothing captured and no comment: operational   // only OP and SB count as available – the same as the dashboard
+      if (st === "OP" || st === "?") { avail++; body.push(`${mc} – Operational – available${w ? " – " + w : ""}`); }   // nothing captured and no comment: operational   // only OP and SB count as available – the same as the dashboard
       else if (st === "SB") { avail++; body.push(`${mc} – Standby – available, not operating${w ? ": " + w : ""}`); }
-      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : st === "NU" ? "Not in use" : "Comment"}${w ? ": " + w : ""}${st === "?" ? "" : " – not available"}`); }
+      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : "Not in use"}${w ? ": " + w : ""} – not available`); }
     body.push(""); }
-  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && (stateAt(mc) === "OP" || (stateAt(mc) === "?" && !why(mc)))).length; return ` (${n} operational)`; })()}`, "", ...body].join("\n").trim();
+  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && (stateAt(mc) === "OP" || stateAt(mc) === "?")).length; return ` (${n} operational)`; })()}`, "", ...body].join("\n").trim();
 }
 function showMessage(text) {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
