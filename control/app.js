@@ -136,7 +136,12 @@ function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = 
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
   if (h != null) return C[h] === "-" ? "?" : C[h]; if (s) return s.type;
-  return "?"; }   // nothing filled in this shift yet   // nothing marked this shift: working (clean slate)
+  return lastKnown(m) || "?"; }
+/* nothing marked yet this shift: the machine's last marked status (up to 2 days back), so the dashboard and the message keep showing it */
+function lastKnown(m, from = Date.now()) {
+  for (let t = from - 36e5, i = 0; i < 48; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), d = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
+    const v = cellsOf(d, m)[h]; if (v && v !== "-") return v; }
+  return ""; }   // nothing filled in this shift yet   // nothing marked this shift: working (clean slate)
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
 /* ---------- controllers on this device ---------- */
@@ -584,16 +589,19 @@ async function setReason(mc, d, sh, reason) {
 function shiftMessage(d, sh) {   // simple: every machine, its status, available or not
   const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me?.name || "", now = Date.now();
   const cur = now >= a && now < b, T = cur ? now : Math.min(b, now) - 1, hr = HRS(sh).filter(h => hStart(d, h) <= T).at(-1);
-  const stateAt = mc => cur ? stateNow(mc) : offAt(mc, T) ? "OFF" : hr != null ? cellVal(d, mc, hr) || "?" : "?";
-  const why = mc => { const e = evs().filter(e => e.machine === mc && toMs(e.start) <= T && evEnd(e) > Math.max(a, T - 1) && e.reason).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
-    return (e?.reason || recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.notes?.[sh] || "").trim(); };
+  const stateAt = mc => cur ? stateNow(mc) : offAt(mc, T) ? "OFF" : (hr != null && cellVal(d, mc, hr)) || lastKnown(mc, T + 1) || "?";
+  const why = mc => { const n = (recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.notes?.[sh] || "").trim();   // the comment typed for this shift, else the reason on its latest breakdown
+    const e = evs().filter(e => e.machine === mc && e.reason && toMs(e.start) <= T && (evEnd(e) > a || !e.end)).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
+    if (n || e?.reason) return n || e.reason.trim();
+    let [d2, s2] = [d, sh]; for (let i = 0; i < 4; i++) { [d2, s2] = prevShift(d2, s2); const [x2, y2] = shiftWin(d2, s2), c = (recs.find(r => r.id === `hr_${d2}_${mc}` && !r.deleted)?.notes?.[s2] || "").trim() || (evs().filter(e => e.machine === mc && e.reason && toMs(e.start) < y2 && evEnd(e) > x2).sort((p, q) => toMs(q.start) - toMs(p.start))[0]?.reason || "").trim(); if (c) return c; }   // nothing yet this shift: the last comment
+    return ""; };
   let avail = 0, total = 0; const body = [];
   for (const [g, M] of fleet()) { body.push(`*${g}*`);
     for (const mc of M) { const st = stateAt(mc), w = why(mc);
       if (st === "OFF") { body.push(`${mc} – Not on site`); continue; } total++;
-      if (st === "OP") { avail++; body.push(`${mc} – Operating – available`); }   // only OP and SB count as available – the same as the dashboard
+      if (st === "OP") { avail++; body.push(`${mc} – Operating – available${w ? " – " + w : ""}`); }   // only OP and SB count as available – the same as the dashboard
       else if (st === "SB") { avail++; body.push(`${mc} – Standby – available, not operating${w ? ": " + w : ""}`); }
-      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : st === "NU" ? "Not in use" : "Not updated this shift"}${w ? ": " + w : ""} – not available`); }
+      else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : st === "NU" ? "Not in use" : "Status not captured yet"}${w ? ": " + w : ""}${st === "?" ? "" : " – not available"}`); }
     body.push(""); }
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => stateAt(mc) === "OP").length; return ` (${n} operating)`; })()}`, "", ...body].join("\n").trim();
 }
