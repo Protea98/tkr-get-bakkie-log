@@ -691,12 +691,26 @@ async function backUp(id) {
 
 /* ---------- sessions: log in, log out ---------- */
 let admApp = null;
-async function startSession(u) { const sid = "s_" + uid(), start = Date.now(); me = { ...u, sid, start }; await metaSet("me", { id: u.id, admin: !!u.admin, sid, start, until: start + (u.admin ? 12 : 14) * 36e5 }); }
+/* one person on duty at a time: the "duty" record says who is signed in and on which PC. A controller can't sign in while someone else is on duty;
+   the admin can, and then everyone else is signed out. The PC on duty confirms it every 2 minutes; after 15 minutes without that, the duty is free. */
+let devId = ""; try { devId = localStorage.getItem("tkr-ctl-dev") || ""; if (!devId) { devId = "d_" + uid(); localStorage.setItem("tkr-ctl-dev", devId); } } catch { devId = "d_" + uid(); }
+const dutyRec = () => recs.find(r => r.id === "duty" && !r.deleted);
+const dutyLive = () => { const x = dutyRec(); return x && x.sid && Date.now() - (x.at || 0) < 15 * 6e4 ? x : null; };
+async function setDuty(on) { const old = dutyRec(); if (on) await put({ ...(old || {}), id: "duty", kind: "duty", ym: "setup", user: me.id, name: me.name, sid: me.sid, dev: devId, admin: !!me.admin, at: Date.now(), deleted: false });
+  else if (old && old.sid === me?.sid) await put({ ...old, sid: "", at: 0 }); syncSoon(); }
+function dutyCheck() { const x = dutyLive(); if (!me || !x || x.sid === me.sid) return;
+  const who = x.name; me = null; metaSet("me", null).catch(() => {}); clearUndo().catch(() => {}); pinFor = null; tab = "now"; closeEv(); render();
+  popupMsg("Signed out", `${esc(who)} is now on duty in the Control Room${x.admin ? " (admin)" : ""}. Only one person can be signed in at a time, so this PC was signed out.`); }
+setInterval(() => { if (me && dutyRec()?.sid === me.sid) setDuty(true); }, 2 * 6e4);
+async function startSession(u) {
+  const x = dutyLive(); if (x && x.user !== u.id && !u.admin) { popupMsg("Someone is on duty", `${esc(x.name)} is signed in to the Control Room on another PC. Only one person can be signed in at a time – they must log out first.`); return false; }
+  const sid = "s_" + uid(), start = Date.now(); me = { ...u, sid, start }; await metaSet("me", { id: u.id, admin: !!u.admin, sid, start, until: start + (u.admin ? 12 : 14) * 36e5 });
+  await setDuty(true); return true; }
 async function logout(swap) {
   if (!me) return;
   if (!me.admin && !confirm(`${swap ? "Change controller: l" : "L"}og out ${me.name} and end your shift?\n\nYour entries are saved and turn grey (locked). Hour boxes you left empty stay open for the next controller. To change a locked entry later, ask the admin.`)) return;
   await put({ id: "log_" + uid(), kind: "log", ym: today().slice(0, 7), date: today(), at: Date.now(), what: `${me.name} logged out${me.admin ? "" : " – end of shift"}` });
-  me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); await clearUndo(); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
+  await setDuty(false); me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); await clearUndo(); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
   toast(swap ? "Logged out. The next controller taps their name, or Add yourself." : "Logged out. Everything is saved on this PC."); syncNow(false);
 }
 
@@ -1057,12 +1071,12 @@ async function submitH(ev) {
     addingMe = false; render(); syncSoon(); popupMsg("Sent to the admin", `${name}, the admin must approve you first. Once approved, tap your name and type your PIN.${navigator.onLine ? "" : " The request sends when this PC has signal."}`); return; }
   if (f.id === "fNewPin") { const u = recs.find(r => r.id === pinFor), p = f.elements.pin.value.trim(), p2 = f.elements.pin2.value.trim();
     if (!/^\d{4}$/.test(p)) { $("pinErr").textContent = "The PIN must be 4 numbers."; return; } if (p !== p2) { $("pinErr").textContent = "The two PINs are not the same."; return; }
-    if (!u || u.pin) return; await startSession(u); await put({ ...u, pin: await pinHash(u.name, p) }, `${u.name} chose a new PIN`); pinFor = null; askMail = true; render(); toast("New PIN saved."); return; }
+    if (!u || u.pin) return; if (!await startSession(u)) return; await put({ ...u, pin: await pinHash(u.name, p) }, `${u.name} chose a new PIN`); pinFor = null; askMail = true; render(); toast("New PIN saved."); return; }
   if (f.id === "fPin") { const u = recs.find(r => r.id === pinFor); if (u && !okUser(u)) { $("pinErr").textContent = "The admin hasn't approved you yet."; return; }
     const pv = f.elements.pin.value.replace(/\D/g, "").slice(-4), same = x => R("user").filter(y => y.name.trim().toLowerCase() === x.name.trim().toLowerCase() && okUser(y));
     let hit = null; if (u) for (const y of same(u)) if (y.pin && y.pin === await pinHash(y.name, pv)) { hit = y; break; }   // the same name added on two PCs: either PIN works
     if (u && !hit && navigator.onLine) { $("pinErr").textContent = "Checking with the TKR app…"; try { await syncNow(false); } catch {} for (const y of same(u)) if (y.pin && y.pin === await pinHash(y.name, pv)) { hit = y; break; } }   // this PC may have an old copy
-    if (hit) { await startSession(hit); pinFor = null; askMail = true; render(); }
+    if (hit) { if (!await startSession(hit)) return; pinFor = null; askMail = true; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
   if (f.id === "fAdm") { if (!navigator.onLine) { toast("The first admin sign-in needs signal."); return; } const p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; }
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); const auth = m.getAuth(admApp);
@@ -1144,7 +1158,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1194,14 +1208,25 @@ async function purgeFuture() { const now = Date.now(), keep = undo.slice(); let 
     for (const k of Object.keys(cells)) if (hStart(r.date, +k) > now) { delete cells[k]; ch = true; n++; }
     if (ch) await put({ ...r, cells }); }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
+/* once: put back the first hour (06-07) of 21/11/2026 that the undo below took out in v204 – the boxes from the update log, the breakdown times it had removed */
+async function restoreDay21() {
+  const KEY = "seed_restore_day_2026-11-21"; if (recs.some(r => r.id === KEY) || !recs.some(r => r.id === "seed_undo_day_2026-11-21")) return;
+  const d = "2026-11-21", keep = undo.slice(), a = toMs(d + "T06:00"), b = toMs(d + "T07:00"), logs = R("log").filter(l => l.date === d); let n = 0;
+  for (const mc of fleet().flatMap(([, L]) => L)) { const tag = `${mc} ${hLabel(6)}:`, L = logs.filter(l => (l.what || "").startsWith(tag) && l.at >= a).sort((x, y) => y.at - x.at)[0]; if (!L) continue;
+    const v = (L.what.split(":").pop() || "").trim(); if (!["OP", "SB", "BD", "PM"].includes(v)) continue;
+    const id = `hr_${d}_${mc}`, r = recs.find(x => x.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
+    if (r.cells?.[6] === v) continue; await put({ ...r, deleted: false, cells: { ...(r.cells || {}), 6: v } }); n++; }
+  for (const e of recs.filter(e => e.kind === "ev" && e.deleted && toMs(e.start) >= a && toMs(e.start) < b)) { await put({ ...e, deleted: false }); n++; }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, n ? `Day shift 21/11/2026: the first hour (06–07) put back – ${n} entries` : "");
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once, as Muneer asked at 09:21 on 21/11/2026: the day shift boxes and breakdown times put in on 21/11 up to 09:21 are taken out */
 async function undoDay21() {
   const KEY = "seed_undo_day_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const d = "2026-11-21", cut = toMs("2026-11-21T09:21"), keep = undo.slice(); let n = 0;
   for (const r of R("hr").filter(r => r.date === d)) { const cells = { ...(r.cells || {}) }; let ch = false;
-    for (const k of Object.keys(cells)) if (+k < 18) { delete cells[k]; ch = true; n++; }
+    for (const k of Object.keys(cells)) if (+k >= 7 && +k < 18) { delete cells[k]; ch = true; n++; }   // the first hour (06-07) is kept
     if (ch) await put({ ...r, cells }); }
-  for (const e of evs().filter(e => toMs(e.start) >= toMs(d + "T06:00") && toMs(e.start) < cut)) { await put({ ...e, deleted: true }); n++; }
+  for (const e of evs().filter(e => toMs(e.start) >= toMs(d + "T07:00") && toMs(e.start) < cut)) { await put({ ...e, deleted: true }); n++; }
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, `Day shift 21/11/2026: ${n} boxes and breakdown times put in before 09:21 taken out, as the admin asked`);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
@@ -1231,7 +1256,7 @@ function liveWatch(yms) {
     let n = 0; const docs = snap.docChanges ? snap.docChanges().filter(c => c.type !== "removed").map(c => c.doc) : snap.docs;
     for (const d of docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (r.id && (!have || (r.editedAt || 0) > (have.editedAt || 0))) { await tx("readwrite", t => t.objectStore("rec").put({ ...r, synced: r.editedAt })); n++; } }
-    if (!n) return; recs = await all(); bump();
+    if (!n) return; recs = await all(); bump(); dutyCheck();
     const go = () => { if (canRedraw()) render(); else { clearTimeout(liveT); liveT = setTimeout(go, 3000); } }; go();
   }, e => { console.warn("live updates stopped", e); liveOff = null; liveKey = ""; });
 }
@@ -1394,7 +1419,8 @@ async function checkClock() { try { const r = await fetch(location.href.split("#
   try { undo = (await metaGet("undo")) || []; } catch { undo = []; }
   const s = await metaGet("me");
   if (s && s.until > Date.now()) { const u = s.admin ? R("admin").find(a => a.id === s.id) : R("user").find(u => u.id === s.id);
-    if (u) { me = { ...u, admin: !!s.admin, sid: s.sid || "s_" + uid(), start: s.start || s.until - 14 * 36e5 }; if (!s.sid) await metaSet("me", { ...s, sid: me.sid, start: me.start }); } }
+    if (u) { me = { ...u, admin: !!s.admin, sid: s.sid || "s_" + uid(), start: s.start || s.until - 14 * 36e5 }; if (!s.sid) await metaSet("me", { ...s, sid: me.sid, start: me.start });
+      const x = dutyLive(); if (x && x.sid !== me.sid) dutyCheck(); else await setDuty(true); } }
   try { navigator.storage?.persist?.(); } catch {}
   render(); if (navigator.onLine) fire().catch(() => {});
 })();
