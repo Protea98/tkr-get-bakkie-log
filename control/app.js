@@ -18,12 +18,12 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const monthName = m => MONTHS[+m.slice(5, 7) - 1] + " " + m.slice(0, 4);
 const monthEnd = m => ymd(new Date(+m.slice(0, 4), +m.slice(5, 7), 0));
 const shiftMonth = (m, n) => ymd(new Date(+m.slice(0, 4), +m.slice(5, 7) - 1 + n, 1)).slice(0, 7);
-const nowLocal = () => { const d = new Date(); return `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const nowLocal = () => { const d = new Date(Date.now()); return `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const toMs = s => { if (!s) return 0; const [d, t] = s.split("T"), [y, m, dd] = d.split("-").map(Number), [h, mi] = (t || "00:00").split(":").map(Number); return new Date(y, m - 1, dd, h, mi).getTime(); };
 const hhmm = s => s ? s.slice(11, 16) : "";
 const hm = h => { const t = Math.round(h * 60); return `${Math.floor(t / 60)}:${pad(t % 60)}`; };
 const h2 = h => hm(h || 0);   // hours always shown as hours:minutes
-const today = () => ymd(new Date());
+const today = () => ymd(new Date(Date.now()));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 function toast(m) { const t = $("toast"); t.textContent = m; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 3200); }
 
@@ -211,7 +211,7 @@ function statusBar() {
     <button class="danger" data-logout style="margin-left:auto;min-height:44px">Log out · end shift</button></div>`;
 }
 /* Breakdowns still open from an earlier shift: the new controller confirms each one at the start of the shift */
-function curShift() { const n = new Date(), h = n.getHours(), d = ymd(n);
+function curShift() { const n = new Date(Date.now()), h = n.getHours(), d = ymd(n);
   if (h >= 6 && h < 18) return { key: d + "|Day", start: toMs(d + "T06:00"), label: "06:00" };
   const dd = h >= 18 ? d : addDays(d, -1); return { key: dd + "|Night", start: toMs(dd + "T18:00"), label: "18:00" }; }
 /* Clean slate: every new shift starts with all machines working. Anything still open from the shift before is closed
@@ -241,7 +241,7 @@ function nowView() {
   const SE = shiftEvents(), logs = R("log").filter(l => l.date === today()).sort((a, b) => b.at - a.at);
   const cnt = k => ALL.filter(m => stateNow(m) === k).length;
   const seLine = x => x.e ? evLine(x.e) : `<div class="evrow"><span class="tag ${x.sheet.type}">${x.sheet.type}</span><div><b>${esc(x.sheet.machine)}</b> · ${TYPES[x.sheet.type]}<br><span class="t">${x.sheet.hrs.map(hLabel).join(", ")} · ${x.sheet.hrs.length} h, picked in the sheet</span></div></div>`;
-  return pageHead("Control room · live", "Machine status", new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button> <button data-tab="files">Documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
+  return pageHead("Control room · live", "Machine status", new Date(Date.now()).toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" }) + ` · ${ssh} shift`, `<button class="primary" data-log="">+ Log breakdown</button> <button data-upload="">Upload documents</button> <button data-tab="files">Documents</button>`, "Tap a machine to log a breakdown, standby, maintenance or not in use, with the exact time. Tap it again when it is back.")
     + statusBar()
     + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${hm(shT.avail)} available · ${hm(shT.down)} down so far (hours:minutes)</div></div>
       <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${hm(dayT.avail)} available · ${hm(dayT.down)} down</div></div>
@@ -662,7 +662,7 @@ function evForm(e = {}, machine = "") {
       <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}" max="${nowLocal()}"></label></div>
     <label style="display:block;margin-top:12px">Reason / what happened <input name="reason" value="${esc(e.reason || "")}" placeholder="e.g. hydraulic pipe burst"></label>
     ${lk ? `<label style="display:block;margin-top:12px">Why must it change? (for the admin) <input name="why" placeholder="e.g. wrong time typed"></label>` : ""}
-    <div class="formbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">${e.id && !e.end ? `<button type="button" class="primary" data-up="${e.id}" style="flex:1 1 200px;min-height:52px">Back up now (${new Date().toTimeString().slice(0, 5)})</button>` : ""}
+    <div class="formbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">${e.id && !e.end ? `<button type="button" class="primary" data-up="${e.id}" style="flex:1 1 200px;min-height:52px">Back up now (${new Date(Date.now()).toTimeString().slice(0, 5)})</button>` : ""}
       <button class="${e.id && !e.end ? "" : "primary"}" style="flex:1 1 200px;min-height:52px">Save</button>${e.id ? `<button type="button" class="danger" data-delev="${e.id}">${lk && evLocked(e) ? "Ask admin to delete" : "Delete"}</button>` : ""}</div></form>`;
 }
 function openEv(html, title) {
@@ -676,7 +676,7 @@ const closeEv = () => { document.getElementById("evPanel")?.remove(); if (!docum
 async function backUp(id) {
   const e = recs.find(r => r.id === id); if (!e) return;
   await put({ ...e, end: nowLocal(), endBy: me.name }, `${e.machine} back up (${TYPES[e.type]} from ${hhmm(e.start)})`);
-  closeEv(); render(); toast(`${e.machine} is back up at ${new Date().toTimeString().slice(0, 5)}. Saved.`);
+  closeEv(); render(); toast(`${e.machine} is back up at ${new Date(Date.now()).toTimeString().slice(0, 5)}. Saved.`);
 }
 
 /* ---------- sessions: log in, log out ---------- */
@@ -1134,7 +1134,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date().toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1336,7 +1336,15 @@ async function exportXlsx(from, to) {
 }
 
 /* ---------- start ---------- */
+/* this PC's clock: if it is wrong, the app uses the real time from the TKR app's server instead and says so */
+let clockSkew = 0; const realNow = Date.now.bind(Date);
+async function checkClock() { try { const r = await fetch(location.href.split("#")[0] + (location.href.includes("?") ? "&" : "?") + "t=" + realNow(), { method: "HEAD", cache: "no-store" }), h = r.headers.get("date"); if (!h) return;
+  const sk = new Date(h).getTime() + 500 - realNow(); if (Math.abs(sk) < 3 * 6e4) { clockSkew = 0; Date.now = realNow; document.getElementById("clockWarn")?.remove(); return; }
+  clockSkew = sk; Date.now = () => realNow() + clockSkew;
+  if (!document.getElementById("clockWarn")) { const w = document.createElement("div"); w.id = "clockWarn"; w.className = "notice warn"; w.style.cssText = "margin:8px auto;max-width:1100px";
+    w.innerHTML = `<b class="t">This PC's clock is wrong by ${hm(Math.abs(sk) / 36e5)} (${sk > 0 ? "behind" : "ahead"})</b>The Control Room is using the correct time from the TKR app. Fix the date and time in Windows: Settings → Time & language → Set time automatically.`; app.before(w); } } catch {} }
 (async () => {
+  await checkClock(); setInterval(checkClock, 10 * 6e4);
   try { recs = await all(); bump(); } catch (e) { app.innerHTML = '<div class="notice warn"><b class="t">This browser can\'t store the control room data</b>Open the app in a normal (not private) window.</div>'; return; }
   sync.last = await metaGet("syncLast") || 0;
   if (!(await metaGet("fix113"))) {               // once: drill rigs are TDR013, TDR014, TDR015 only; Muneer's example controller login removed
