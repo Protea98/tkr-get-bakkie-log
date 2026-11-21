@@ -672,8 +672,8 @@ function shiftMessage(d, sh, short = false) {   // simple: every machine, its st
   const allMonth = groups.reduce((t, x) => t + x.lostM, 0), allShift = groups.reduce((t, x) => t + x.lostS, 0);
   const decide = down.filter(x => x.since && T - x.since > 48 * 36e5 && !x.e?.eta);
   const head = [`*Summary:* ${avail} of ${total} machines available${pcAll() ? ` · ${pcAll()} availability this shift` : ""}`,
-    ...(hurt.length ? ["", "*Areas affected*", ...hurt.map(x => `${x.g}: ${x.up} of ${x.n} available${x.lostS ? ` · ${hl(x.lostS)} downtime this shift` : ""}${x.lostM ? ` · ${hl(x.lostM)} downtime this month${x.pcM != null ? ` (${x.pcM}% availability)` : ""}` : ""}`)] : []),
-    `Total downtime: ${hl(allShift)} this shift · ${hl(allMonth)} this month`,
+    ...(hurt.length ? ["", "*Areas affected*", ...hurt.map(x => `${x.g}: ${x.up} of ${x.n} available${x.lostS ? ` · ${hl(x.lostS)} downtime this shift${x.n > 1 ? ` (${x.n} machines together)` : ""}` : ""}${x.lostM ? ` · ${hl(x.lostM)} downtime this month${x.pcM != null ? ` (${x.pcM}% availability)` : ""}` : ""}`)] : []),
+    `Downtime, all machines added together: ${hl(allShift)} this shift · ${hl(allMonth)} this month (machine hours)`,
     ...(down.length ? ["", "*Machines down – recovery plan*", ...down.map(x => `${x.mc} – ${x.st === "BD" ? "Breakdown" : "Maintenance"}${x.why ? ": " + x.why : ""}${x.since ? ` · out of service ${dur(x.since)}` : ""} · ${x.e?.action ? x.e.action : "action to be confirmed"}${x.e?.owner ? " (" + x.e.owner + ")" : ""} · ${x.e?.eta ? "expected back " + fmt(x.e.eta) : "ETA to be confirmed"}`)] : []),
     ...(decide.length ? ["", "*For management attention* (out of service over 48 h, ETA still to be confirmed)", ...decide.map(x => `${x.mc}${x.why ? " – " + x.why : ""} · out of service ${dur(x.since)}`)] : [])];
   const TL = cur ? targetLines() : [];
