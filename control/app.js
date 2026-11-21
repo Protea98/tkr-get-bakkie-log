@@ -524,7 +524,9 @@ function shiftUsed(d, sh) { if (curShift().key === d + "|" + sh) return true;
   usedCache.set(k, u); return u; }
 function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (offAt(mc, hStart(d, h))) return hStart(d, h) <= Date.now() ? "OFF" : "";
-  if (C[h] === "-" || hStart(d, h) > Date.now()) return "";   // cleared, or an hour that hasn't started: blank
+  if (hStart(d, h) > Date.now()) return "";   // an hour that hasn't started: blank
+  if (C[h] === "-") { const a0 = hStart(d, h), ex = downEvs(mc).filter(e => !e.grid && toMs(e.start) < a0 + 36e5 && evEnd(e) > a0);   // cleared box, but exact times were typed in that hour: they show
+    return ex.length ? (ex.some(x => x.type === "BD") ? "BD" : "PM") : ""; }
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, s0 = shiftWin(d, h < 18 ? "Day" : "Night")[0];
   if (a > Date.now()) return "";
