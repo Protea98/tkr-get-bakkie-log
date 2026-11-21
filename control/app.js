@@ -585,7 +585,7 @@ function shiftTable(d, sh) {
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
   return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operating · RF = Refuelling · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th><th>Opening hrs</th><th>Closing hrs</th><th>Machine hrs</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
+    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><button type="button" data-mgr="${sh}">Manager message (short)</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
 /* Clear: the box goes blank (stored as "-"), the grid time in it is taken away and nothing carries into it */
@@ -634,7 +634,7 @@ async function setReason(mc, d, sh, reason) {
   if (!E.length) { const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };   // no breakdown on this shift: keep it as a comment
     if ((rec.notes?.[sh] || "") !== reason) await put({ ...rec, deleted: false, notes: { ...(rec.notes || {}), [sh]: reason } }, `${mc} ${sh.toLowerCase()} shift comment: ${reason || "cleared"}`); }
 }
-function shiftMessage(d, sh) {   // simple: every machine, its status, available or not
+function shiftMessage(d, sh, short = false) {   // simple: every machine, its status, available or not
   const [a, b] = shiftWin(d, sh), day = recs.find(r => r.id === "day_" + d) || {}, ctl = (sh === "Day" ? day.dayCtl : day.nightCtl) || me?.name || "", now = Date.now();
   const cur = now >= a && now < b, T = cur ? now : Math.min(b, now) - 1, hr = HRS(sh).filter(h => hStart(d, h) <= T).at(-1);
   const stateAt = mc => cur ? stateNow(mc) : offAt(mc, T) ? "OFF" : (hr != null && cellVal(d, mc, hr)) || lastKnown(mc, T + 1) || "?";
@@ -680,6 +680,17 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
   if (cur && !TL.some(x => x === "*Action plan*") && down.some(x => !x.e?.eta)) TL.push("", "*Action plan*");
   if (cur) down.filter(x => !x.e?.eta).forEach(x => TL.push(`${TL.filter(y => /^\d+\. /.test(y)).length + 1}. ${x.mc}: confirm the repair plan and ETA`));
   head.push(...TL);
+  if (short) {   // manager version: about ten lines – where we stand, what is worst, what needs a decision, the plan, the link
+    const grpd = []; for (const x of down) { const k = `${groupOf(x.mc)}|${x.why}|${x.since ? dur(x.since) : ""}|${x.e?.eta || ""}`, g0 = grpd.find(y => y.k === k); if (g0) g0.ms.push(x.mc); else grpd.push({ k, ms: [x.mc], x }); }   // machines down for the same reason and time go on one line
+    const top = grpd.slice(0, 3), noEta = [...new Set(down.filter(x => !x.e?.eta).map(x => x.mc))];
+    const ap = [...TL.filter(y => /^\d+\. /.test(y) && !/confirm the repair plan and ETA/.test(y)).map(y => y.replace(/^\d+\. /, "")), ...(noEta.length ? [`Confirm the repair plan and ETA for ${noEta.join(", ")}`] : [])].slice(0, 4).map((y, i) => `${i + 1}. ${y}`), tm = TL.filter(y => /^Drilling metres:|^Needed:/.test(y));
+    return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)} · ${tOf(cur ? now : Math.min(b, now))}*`, "", head[0],
+      ...(hurt.length ? hurt.slice(0, 3).map(x => `• ${x.g}: ${x.up} of ${x.n} available${x.pcM != null ? ` (${x.pcM}% this month)` : ""}`) : ["• All machines available"]),
+      ...(top.length ? ["", "*Longest out of service*", ...top.map(({ ms, x }) => `• ${ms.join(", ")}${x.why ? " – " + x.why : ""} · ${x.since ? dur(x.since) : ""} · ${x.e?.eta ? "back " + fmt(x.e.eta) : "ETA to be confirmed"}`), ...(grpd.length > 3 ? [`and ${grpd.slice(3).reduce((t, y) => t + y.ms.length, 0)} more on the dashboard`] : [])] : []),
+      ...(decide.length ? ["", `*For your attention:* ${decide.map(x => x.mc).join(", ")} – out of service over 48 h, ETA still to be confirmed`] : []),
+      ...(tm.length ? ["", "*Target*", ...tm] : []),
+      ...(ap.length ? ["", "*Action plan*", ...ap] : []),
+      "", "Full detail: https://protea98.github.io/tkr-operations/control/"].join("\n").trim(); }
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 function showMessage(text) {
@@ -1113,6 +1124,7 @@ async function clickH(ev) {
   if (b.dataset.mnav) { month = shiftMonth(month, +b.dataset.mnav); render(); return; }
   if (b.dataset.sh) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; sheetSel = b.dataset.sh; if (sheetSel !== "month") date = sheetSel; render(); document.querySelector(".xltabs")?.scrollIntoView({ block: "start" }); return; }
   if (b.dataset.wbm) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; const m = shiftMonth((sheetSel === "month" ? date : sheetSel).slice(0, 7), +b.dataset.wbm), last = monthEnd(m) < today() ? monthEnd(m) : today(); date = last; sheetSel = sheetSel === "month" ? "month" : last; render(); return; }
+  if (b.dataset.mgr) { showMessage(shiftMessage($("fDay").dataset.date, b.dataset.mgr, true)); return; }
   if (b.dataset.msg) { showMessage(shiftMessage($("fDay").dataset.date, b.dataset.msg)); return; }
   if (b.dataset.saveonly) { b.disabled = true; try { await saveShift(b.dataset.saveonly, false); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
   if (b.dataset.saveshift) { b.disabled = true; b.textContent = "Saving…"; try { await saveShift(b.dataset.saveshift); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
