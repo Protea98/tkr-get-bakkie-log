@@ -147,8 +147,9 @@ function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = 
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
   if (h != null) { if (C[h] === "-") return "?";
     if (C[h] === "BD" || C[h] === "PM") { const x0 = hStart(d, h), ex = evs().filter(e => e.machine === m && !e.grid && toMs(e.start) < x0 + 36e5 && evEnd(e) > x0);   // exact times typed for that hour: back up when the last one ended
-      if (ex.length && ex.every(e => e.end && toMs(e.end) <= now)) return "OP";
-      const lastUp = evs().filter(e => e.machine === m && !e.grid && e.end && toMs(e.end) <= now && toMs(e.end) > x0).map(e => toMs(e.end)).sort((p2, q2) => q2 - p2)[0];   // logged back up after that box
+      const realUp = e => e.end && toMs(e.end) <= now && Math.abs(toMs(e.end) - (x0 + 36e5)) > 3e4;   // a time that only ends with the box (end of the hour) is not "back up"
+      if (ex.length && ex.every(realUp)) return "OP";
+      const lastUp = evs().filter(e => e.machine === m && !e.grid && realUp(e) && toMs(e.end) > x0).map(e => toMs(e.end)).sort((p2, q2) => q2 - p2)[0];   // logged back up after that box
       if (lastUp && !statusNow(m)) return "OP"; }
     return C[h]; } if (s) return s.type;
   return lastKnown(m) || "?"; }
@@ -729,7 +730,7 @@ async function statusPicture() {
     return since; };
   const groups = F.filter(([, L]) => L.length).map(([g, L]) => ({ g, L, T: fleetSum(L.filter(m => !offNow(m)), m => shiftSum(m, sd, ssh)) }));
   const downL = ALL.filter(m => ["BD", "PM"].includes(st(m))).map(m => { const e = statusNow(m); return { m, t: st(m), e, why: whyOf(m), since: sinceOf(m, st(m)) }; }).sort((a, b) => (a.since ?? now) - (b.since ?? now));
-  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * RH + 6; H += 26; H += downL.length ? 50 + downL.length * 32 + 10 : 0; H += 80;
+  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * RH + 22; H += 26; H += downL.length ? 50 + downL.length * 32 + 10 : 0; H += 80;
   const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
   const font = (w, sz) => { x.font = `${w} ${sz}px "Inter","Segoe UI",Arial,sans-serif`; };
   const rr = (X, Y, w, h, r, f) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = f; x.fill(); };
@@ -759,6 +760,7 @@ async function statusPicture() {
       x.fillStyle = T.muted; x.fillText(l, lx + 30, 208); lx += 30 + x.measureText(l).width + 20; } }
   let y = 228;
   for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length;
+    box(P - 14, y, W - (P - 14) * 2, 40 + g.L.length * RH + 2, 12, T.panel, T.line); y += 4;   // each group in its own box: heading and its machines together
     font(700, 13); x.fillStyle = T.gold; x.fillText(g.g.toUpperCase().split("").join(String.fromCharCode(8202)), P, y + 22); const gw = x.measureText(g.g.toUpperCase().split("").join(String.fromCharCode(8202))).width;
     font(500, 13); x.fillStyle = T.muted; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
     if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
@@ -769,7 +771,7 @@ async function statusPicture() {
       x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, SW - 12), P + NW, why ? Y + 18 : Y + 26);
       if (why) { font(400, 12.5); x.fillStyle = T.muted; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
       HRL.forEach((h, k) => block(m, h, HX + k * (HW + HG), Y + 6, HW, RH - 12)); });
-    y += g.L.length * RH + 6; }
+    y += g.L.length * RH + 14; }
   if (downL.length) { y += 6; font(700, 13); x.fillStyle = T.gold; x.fillText("OUT OF SERVICE – RECOVERY PLAN".split("").join(String.fromCharCode(8202)), P, y + 22); x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 42;
     const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
     H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 15); x.fillStyle = T.fg; x.fillText(fit(r.m, 300), P, y + 20); font(400, 14); x.fillStyle = T.muted;
