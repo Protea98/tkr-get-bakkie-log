@@ -779,11 +779,11 @@ async function statusPicture() {
     y += g.L.length * RH + 14; }
   if (downL.length) { y += 6; font(700, 13); x.fillStyle = T.gold; x.fillText("OUT OF SERVICE – RECOVERY PLAN".split("").join(String.fromCharCode(8202)), P, y + 22); x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 42;
     const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
-    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 15); x.fillStyle = T.fg; x.fillText(fit(r.m, 300), P, y + 20); font(400, 14); x.fillStyle = T.muted;
+    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 15); x.fillStyle = T.fg; const NL = []; for (const nm of ms) { const t3 = NL.length ? NL.at(-1) + ", " + nm : nm; if (NL.length && x.measureText(t3).width <= NW - 12) NL[NL.length - 1] = t3; else NL.push(nm); } NL.forEach((ln, k) => x.fillText(ln, P, y + 20 + k * 20)); font(400, 14); x.fillStyle = T.muted;   // machine names wrapped inside the name column
       const h0 = r.since ? (now - r.since) / 36e5 : 0, dd = r.since ? (h0 >= 48 ? `${Math.floor(h0 / 24)} days` : `${hm(h0)} h`) : "";
-      const LW = W - P * 2 - 320, words = [r.why || "", [dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ")].filter(Boolean), lines = [];   // the reason in full, wrapped over as many lines as it needs
+      const LW = W - P - (P + NW), words = [r.why || "", [dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ")].filter(Boolean), lines = [];   // the reason in full, wrapped over as many lines as it needs
       for (const part of words) { let ln = ""; for (const w of part.split(/\s+/)) { const t2 = ln ? ln + " " + w : w; if (x.measureText(t2).width > LW && ln) { lines.push(ln); ln = w; } else ln = t2; } if (ln) lines.push(ln); }
-      lines.forEach((ln, k) => { x.fillStyle = k === 0 && r.why ? T.fg : T.muted; x.fillText(ln, P + 310, y + 20 + k * 20); }); y += Math.max(1, lines.length) * 20 + 12; }
+      lines.forEach((ln, k) => { x.fillStyle = k === 0 && r.why ? T.fg : T.muted; x.fillText(ln, P + NW, y + 20 + k * 20); }); y += Math.max(1, lines.length, NL.length) * 20 + 12; }
     y += 10; }
   const H2 = Math.min(H, y + 70), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
   x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
