@@ -289,7 +289,7 @@ function hourBoard() {
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
-  return `<div class="evrow"><span class="tag ${e.type}">${e.type}</span><div><b>${esc(e.machine)}</b> · ${TYPES[e.type]}<br><span class="t">${fmt(e.start.slice(0, 10)).slice(0, 5)} ${hhmm(e.start)} → ${e.end ? `${e.end.slice(0, 10) !== e.start.slice(0, 10) ? fmt(e.end.slice(0, 10)).slice(0, 5) + " " : ""}${hhmm(e.end)}` : "still going"} · ${hm(dur)} h</span>${e.reason ? `<br><small class="muted">${esc(e.reason)}</small>` : ""}<br><small class="muted">by ${esc(e.by)}${e.endBy && e.endBy !== e.by ? `, closed by ${esc(e.endBy)}` : ""}</small></div>
+  return `<div class="evrow"><span class="tag ${e.type}">${e.type}</span><div><b>${esc(e.machine)}</b> · ${TYPES[e.type]}<br><span class="t">${fmt(e.start.slice(0, 10)).slice(0, 5)} ${hhmm(e.start)} → ${e.end ? `${e.end.slice(0, 10) !== e.start.slice(0, 10) ? fmt(e.end.slice(0, 10)).slice(0, 5) + " " : ""}${hhmm(e.end)}` : "still going"} · ${hm(dur)} h</span>${e.action || e.owner || e.eta ? `<br><small class="t">${[e.action && "Action: " + esc(e.action), e.owner && "Who: " + esc(e.owner), e.eta && "ETA " + fmt(e.eta)].filter(Boolean).join(" · ")}</small>` : e.end ? "" : `<br><small class="t" style="color:var(--gold)">No action or ETA logged – tap Change to add</small>`}${e.reason ? `<br><small class="muted">${esc(e.reason)}</small>` : ""}<br><small class="muted">by ${esc(e.by)}${e.endBy && e.endBy !== e.by ? `, closed by ${esc(e.endBy)}` : ""}</small></div>
     <div class="row" style="flex-direction:column;gap:6px">${e.end ? "" : `<button class="sm primary" data-up="${e.id}">Back up now</button>`}<button class="sm" data-edit="${e.id}">Change</button><button class="sm ghost" data-mail="${e.id}">Email</button></div></div>`;
 }
 const chkKey = (d, item) => `chk_${d}_${item.replace(/\W+/g, "")}`;
@@ -613,7 +613,27 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
       else if (st === "SB") { avail++; body.push(`${mc} – Refuelling${w ? ": " + w : ""}`); }
       else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : "Not in use"}${times(st) ? " " + times(st) : ""}${w ? ": " + w : ""} – not available`); }
     body.push(""); }
-  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && (stateAt(mc) === "OP" || stateAt(mc) === "?")).length; return ` (${n} operational)`; })()}`, "", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
+  // management summary: bottom line, where it hurts, hours lost, what is down and the plan, decisions needed
+  const groups = fleet().map(([g, M]) => { const on = M.filter(mc => !offShift(mc, d, sh)), up = on.filter(mc => ["OP", "?", "SB"].includes(stateAt(mc))).length, S = on.reduce((t, mc) => { const x = shiftSum(mc, d, sh); t.a += x.avail; t.d += x.down; return t; }, { a: 0, d: 0 });
+    const mt = on.reduce((t, mc) => { for (let x = d.slice(0, 7) + "-01"; x <= d; x = addDays(x, 1)) { const y = daySum(mc, x); if (y) { t.a += y.avail; t.d += y.down; } } return t; }, { a: 0, d: 0 });
+    return { g, n: on.length, up, lostS: S.d, lostM: mt.d, pcM: mt.a + mt.d ? Math.round(mt.a / (mt.a + mt.d) * 100) : null }; }).filter(x => x.n);
+  const hurt = groups.filter(x => x.up < x.n).sort((p2, q2) => p2.up / p2.n - q2.up / q2.n);
+  const down = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && ["BD", "PM"].includes(stateAt(mc))).map(mc => {
+    const e = downEvs(mc).filter(x => toMs(x.start) <= T && (!x.end || toMs(x.end) > T)).sort((p2, q2) => toMs(p2.start) - toMs(q2.start))[0];
+    let since = e ? toMs(e.start) : null; const stx = stateAt(mc);
+    for (let t = T, i = 0; i < 24 * 60; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh, v = cellsOf(dd, mc)[h];   // walk back through the hour boxes while it stayed down
+      const ev = downEvs(mc).some(x => x.type === stx && toMs(x.start) <= t && evEnd(x) > t - 36e5); if (v === stx || ev) { const hs = hStart(dd, h); since = since == null ? hs : Math.min(since, hs); } else if (v && v !== "-") break; }   // empty boxes are skipped; another status ends it
+    return { mc, st: stx, e, since, why: why(mc) }; }).sort((p2, q2) => (p2.since ?? T) - (q2.since ?? T));
+  const dur = z => { const h = (T - z) / 36e5; return h >= 48 ? `${Math.floor(h / 24)} days` : `${hm(h)} h`; }, hl = h => h >= 100 ? `${Math.round(h).toLocaleString("en-ZA")} h` : `${hm(h)} h`;
+  const pcAll = () => { const t = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh)).reduce((t2, mc) => { const x = shiftSum(mc, d, sh); t2.a += x.avail; t2.d += x.down; return t2; }, { a: 0, d: 0 }); return t.a + t.d ? Math.round(t.a / (t.a + t.d) * 100) + "%" : ""; };
+  const allMonth = groups.reduce((t, x) => t + x.lostM, 0), allShift = groups.reduce((t, x) => t + x.lostS, 0);
+  const decide = down.filter(x => x.since && T - x.since > 48 * 36e5 && !x.e?.eta);
+  const head = [`*Bottom line:* ${avail} of ${total} machines available${pcAll() ? ` · ${pcAll()} this shift` : ""}`,
+    ...(hurt.length ? ["", "*Where it hurts*", ...hurt.map(x => `${x.g}: ${x.up} of ${x.n} working${x.lostS ? ` · ${hl(x.lostS)} lost this shift` : ""}${x.lostM ? ` · ${hl(x.lostM)} lost this month${x.pcM != null ? ` (${x.pcM}% available)` : ""}` : ""}`)] : []),
+    `Hours lost: ${hl(allShift)} this shift · ${hl(allMonth)} this month`,
+    ...(down.length ? ["", "*Down now – plan*", ...down.map(x => `${x.mc} – ${x.st === "BD" ? "Breakdown" : "Maintenance"}${x.why ? ": " + x.why : ""}${x.since ? ` · down ${dur(x.since)}` : ""} · ${x.e?.action ? "action: " + x.e.action : "no action logged"}${x.e?.owner ? " · " + x.e.owner : ""} · ${x.e?.eta ? "ETA " + fmt(x.e.eta) : "no ETA"}`)] : []),
+    ...(decide.length ? ["", "*Needs a decision* (down over 48 h with no ETA)", ...decide.map(x => `${x.mc}${x.why ? " – " + x.why : ""} · down ${dur(x.since)}`)] : [])];
+  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 function showMessage(text) {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
@@ -679,6 +699,9 @@ function evForm(e = {}, machine = "") {
     <div class="grid" style="margin-top:12px"><label>Started (exact time) <input type="datetime-local" name="start" value="${st}" max="${nowLocal()}" required></label>
       <label>Ended (empty = still going) <input type="datetime-local" name="end" value="${en}" max="${nowLocal()}"></label></div>
     <label style="display:block;margin-top:12px">Reason / what happened <input name="reason" value="${esc(e.reason || "")}" placeholder="e.g. hydraulic pipe burst"></label>
+    <div class="grid" style="margin-top:12px"><label>Action being taken <input name="action" value="${esc(e.action || "")}" placeholder="e.g. waiting for part, at OEM, fitter on site"></label>
+      <label>Who is responsible <input name="owner" value="${esc(e.owner || "")}" placeholder="e.g. fitter / supplier name"></label>
+      <label>Expected back (ETA) <input type="date" name="eta" value="${esc(e.eta || "")}"></label></div>
     ${lk ? `<label style="display:block;margin-top:12px">Why must it change? (for the admin) <input name="why" placeholder="e.g. wrong time typed"></label>` : ""}
     <div class="formbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">${e.id && !e.end ? `<button type="button" class="primary" data-up="${e.id}" style="flex:1 1 200px;min-height:52px">Back up now (${new Date(Date.now()).toTimeString().slice(0, 5)})</button>` : ""}
       <button class="${e.id && !e.end ? "" : "primary"}" style="flex:1 1 200px;min-height:52px">Save</button>${e.id ? `<button type="button" class="danger" data-delev="${e.id}">${lk && evLocked(e) ? "Ask admin to delete" : "Delete"}</button>` : ""}</div></form>`;
@@ -1113,8 +1136,8 @@ async function submitH(ev) {
       if (Object.keys(prop).some(k => (old[k] || "") !== (prop[k] || "") && lockedV(old, k))) { const why = f.elements.why?.value.trim();
         if (!why) { toast("Say why it must change, for the admin."); f.elements.why?.focus(); return; }
         await addReq({ target: { type: "ev", id: old.id }, what: evTxt(old), fromTxt: evTxt(old), toTxt: evTxt(prop), to: prop, why }); return; } }
-    const rec = { ...(old || {}), id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), endBy: e && !old?.end ? me.name : old?.endBy || "" };
-    await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}`);
+    const rec = { ...(old || {}), id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), action: (f.elements.action?.value || "").trim(), owner: (f.elements.owner?.value || "").trim(), eta: f.elements.eta?.value || "", endBy: e && !old?.end ? me.name : old?.endBy || "" };
+    await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}${rec.action ? " · action: " + rec.action : ""}${rec.owner ? " · " + rec.owner : ""}${rec.eta ? " · ETA " + fmt(rec.eta) : ""}`);
     closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`);
     if (!old && rec.type === "BD" && mailList().length) openEv(mailForm(recs.find(x => x.id === rec.id) || rec), "Email this breakdown"); return; }
   if (f.id === "fSync") { if (!navigator.onLine) { toast("Signing in needs signal."); return; } try { await fire(); await fb.signInWithEmailAndPassword(fb.auth, toLogin(f.elements.e.value), f.elements.p.value); toast("Signed in. The control room now sends to the TKR app by itself."); } catch { toast("Email or password is wrong."); } return; }
