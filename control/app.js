@@ -139,8 +139,10 @@ function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = 
   return lastKnown(m) || "?"; }
 /* nothing marked yet this shift: the machine's last marked status (up to 2 days back), so the dashboard and the message keep showing it */
 function lastKnown(m, from = Date.now()) {
-  for (let t = from - 36e5, i = 0; i < 48; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), d = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
-    const v = cellsOf(d, m)[h]; if (v && v !== "-") return v; }
+  const E = evs().filter(e => e.machine === m && ["BD", "PM", "SB", "NU"].includes(e.type));
+  for (let t = from - 36e5, i = 0; i < 24 * 14; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), d = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
+    const v = cellsOf(d, m)[h]; if (v && v !== "-") return v;
+    const e = E.filter(e => toMs(e.start) < t + 36e5 && evEnd(e) > t).sort((x, y) => toMs(y.start) - toMs(x.start))[0]; if (e) return e.type; }   // up to 14 days back
   return ""; }   // nothing filled in this shift yet   // nothing marked this shift: working (clean slate)
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
