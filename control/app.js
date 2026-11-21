@@ -162,13 +162,13 @@ function lastKnown0(m, from) {
     const v = cellsOf(d, m)[h]; if (v && v !== "-") return v;
     const e = E.filter(e => toMs(e.start) < t + 36e5 && evEnd(e) > t).sort((x, y) => toMs(y.start) - toMs(x.start))[0]; if (e) return e.type; }   // up to 14 days back
   return ""; }   // nothing filled in this shift yet   // nothing marked this shift: working (clean slate)
-/* when a machine went down: the backdating starts 01/11, so a time from then only counts if the metres show the last shift it drilled; otherwise it is left out */
-const BACKSTART = toMs("2026-11-01T06:00");
+/* when a machine went down: dates on or before 11/11 are not the real start (long-term breakdowns, real dates not given yet), so they are left out unless the metres show the last shift it drilled */
+const BACKSTART = toMs("2026-11-12T00:00");
 function metresLast(m, before) { const rig = m.replace(/\s+/g, ""); let best = null;
   for (const r of R("mtr")) { let L = []; try { L = JSON.parse(r.data || "[]"); } catch {} for (const x of L) { if (String(x.rig || "").replace(/\s+/g, "") !== rig || !(+x.metres > 0)) continue;
       const end = x.shift === "Night" ? toMs(addDays(x.date, 1) + "T06:00") : toMs(x.date + "T18:00"); if (end <= before + 6e4 && (best == null || end > best)) best = end; } }
   return best; }
-function knownSince(m, t) { if (t == null) return null; if (t > BACKSTART + 6e4) return t; return metresLast(m, t); }
+function knownSince(m, t) { if (t == null) return null; if (t >= BACKSTART) return t; return metresLast(m, t); }
 function downSince(m, t0 = stateNow(m)) { const now = Date.now(), e = statusNow(m); let since = e && e.type === t0 ? toMs(e.start) : null;   // walk back through the hour boxes while it stayed down
   for (let t = now, i = 0; i < 24 * 60; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh, v = cellsOf(dd, m)[h];
     const ev = downEvs(m).some(q => q.type === t0 && toMs(q.start) <= t && evEnd(q) > t - 36e5); if (v === t0 || ev) { const hs = hStart(dd, h); since = since == null ? hs : Math.min(since, hs); } else if (v && v !== "-") break; }
