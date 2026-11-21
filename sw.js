@@ -1,7 +1,7 @@
 // Opens the app straight from the phone (fast, works with no signal) and fetches any update in the
 // background; the update shows the next time the app is opened. Bump VERSION when the app files change.
 // Firebase traffic (other websites) is never touched here; Firebase keeps its own offline copy.
-const VERSION = "v197";
+const VERSION = "v198";
 const FILES = ["./", "index.html", "install.html", "style.css", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-192.png", "icons/maskable-512.png", "icons/logo-96.png",
   "lib/xlsx.full.min.js", "lib/jszip.min.js", "lib/firebase.js", "lib/exceljs.min.js", "lib/deliver.js", "lib/oct2026.js", "lib/jspdf.umd.min.js", "lib/jspdf.plugin.autotable.min.js", "lib/nav.js", "lib/ui.js", "lib/fleet.css",
@@ -22,10 +22,12 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET" || new URL(e.request.url).origin !== self.location.origin) return;
   if (new URL(e.request.url).pathname.endsWith(".bin")) return; // encrypted evidence: never kept in the phone cache
+  // with signal: the newest files first (so an update shows at once); no signal or slow (over 4 s): the saved copy
   e.respondWith(caches.open(VERSION).then(async c => {
     const hit = await c.match(e.request, { ignoreSearch: true });
     const fresh = fetch(e.request, { cache: "no-cache" }).then(r => { if (r.ok) c.put(e.request, r.clone()); return r; });
-    if (hit) { e.waitUntil(fresh.catch(() => {})); return hit; }
-    return fresh.catch(() => c.match("index.html"));
+    if (!hit) return fresh.catch(() => c.match("index.html"));
+    e.waitUntil(fresh.catch(() => {}));
+    return Promise.race([fresh.then(r => r.ok ? r : hit).catch(() => hit), new Promise(res => setTimeout(() => res(hit), 4000))]);
   }));
 });

@@ -456,7 +456,7 @@ function shiftUsed(d, sh) { if (curShift().key === d + "|" + sh) return true;
   usedCache.set(k, u); return u; }
 function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (offAt(mc, hStart(d, h))) return hStart(d, h) <= Date.now() ? "OFF" : "";
-  if (C[h] === "-") return "";   // cleared: blank, as if never filled
+  if (C[h] === "-" || hStart(d, h) > Date.now()) return "";   // cleared, or an hour that hasn't started: blank
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, s0 = shiftWin(d, h < 18 ? "Day" : "Night")[0];
   if (a > Date.now()) return "";
@@ -1134,7 +1134,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1178,6 +1178,12 @@ async function clearAhead() {
     if (ch) await put({ ...r, cells }); }
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, n ? `${n} hour boxes that were filled before their hour started were emptied` : "");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
+/* every sync: a box saved for an hour that hasn't started yet is removed (nothing may be filled ahead of time) */
+async function purgeFuture() { const now = Date.now(), keep = undo.slice(); let n = 0;
+  for (const r of R("hr").filter(r => r.date >= today() || r.date === addDays(today(), -1))) { const cells = { ...(r.cells || {}) }; let ch = false;
+    for (const k of Object.keys(cells)) if (hStart(r.date, +k) > now) { delete cells[k]; ch = true; n++; }
+    if (ch) await put({ ...r, cells }); }
+  if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 /* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
 async function busUpdate() {
   const KEY = "seed_bus_2026-11-20_1142"; if (recs.some(r => r.id === KEY)) return;
@@ -1373,3 +1379,6 @@ async function checkClock() { try { const r = await fetch(location.href.split("#
   render(); if (navigator.onLine) fire().catch(() => {});
 })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("../sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});
+/* keep this PC on the newest version: check for an update each time the Control Room opens, and reload once when it arrives */
+if ("serviceWorker" in navigator) { if (navigator.serviceWorker.controller) { let r = false; navigator.serviceWorker.addEventListener("controllerchange", () => { if (r) return; r = true; location.reload(); }); }
+  navigator.serviceWorker.register("../sw.js", { scope: "../", updateViaCache: "none" }).then(r => r.update()).catch(() => {}); }
