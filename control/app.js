@@ -323,6 +323,38 @@ function causeOf(e) { const t = String(e.reason || "").toLowerCase().trim(); if 
   for (const [n, rx] of CAUSES) if (rx.test(t)) return n; return e.reason.trim().replace(/^./, c => c.toUpperCase()); }
 /* metres and tally-sheet delays per drill rig, shared by the Metres section (same figures as its Delay summary) */
 const rigKey = r => String(r || "").replace(/\s+/g, "").toUpperCase();
+/* targets set by the admin over a period of months: drilling metres for the period, and machine hours per machine for the period.
+   What was achieved each month is kept in the targets record, so months older than the ones on this PC still count. */
+const tgtRec = () => recs.find(r => r.id === "targets" && !r.deleted) || null;
+const monthsIn = (a, b) => { const L = []; for (let m = a; m <= b; m = shiftMonth(m, 1)) L.push(m); return L; };
+function metresIn(ym) { let t = 0, any = false; for (const r of R("mtr").filter(r => r.ym === ym)) { let L = []; try { L = JSON.parse(r.data || "[]"); } catch {} for (const x of L) { const v = +x.metres; if (v) { t += v; any = true; } else if (x.metres !== undefined && x.metres !== "") any = true; } } return any ? t : null; }
+function machHrsIn(ym, mc) { let t = 0, any = false; const end = ym === today().slice(0, 7) ? today() : monthEnd(ym);   // hour meter (closing – opening) where captured, otherwise the OP boxes
+  for (let d = ym + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { const m = meterHrs(meterOf(d, mc, sh)); if (m != null) { t += m; any = true; continue; }
+    const C = cellsOf(d, mc), n = HRS(sh).filter(h => C[h] === "OP").length; if (n) { t += n; any = true; } }
+  return any ? t : null; }
+async function keepAchieved() { const T0 = tgtRec(); if (!T0 || !me) return; const A = { ...(T0.ach || {}) }; let ch = false;
+  for (const ym of monthsIn(T0.from, T0.to).filter(m => m <= today().slice(0, 7))) { const have = R("mtr").some(r => r.ym === ym) || R("hr").some(r => r.ym === ym); if (!have) continue;
+    const mt = metresIn(ym), hrs = {}; for (const mc of Object.keys(T0.hrs || {})) { const v = machHrsIn(ym, mc); if (v != null) hrs[mc] = Math.round(v * 100) / 100; }
+    const nx = { metres: mt, hrs }; if (JSON.stringify(A[ym] || {}) !== JSON.stringify(nx)) { A[ym] = nx; ch = true; } }
+  if (ch) await put({ ...T0, ach: A }); }
+function shiftsLeft(to) { const now = Date.now(); let n = 0; for (let d = today(); d <= monthEnd(to); d = addDays(d, 1)) for (const sh of ["Day", "Night"]) if (shiftWin(d, sh)[1] > now) n++; return n; }
+function targetLines() { const T0 = tgtRec(); if (!T0 || T0.to < today().slice(0, 7)) return [];
+  const months = monthsIn(T0.from, T0.to), cur = today().slice(0, 7), done = months.filter(m => m <= cur), left = months.filter(m => m >= cur).length, sl = shiftsLeft(T0.to), A = T0.ach || {};
+  const per = `${fmtM(T0.from)} to ${fmtM(T0.to)} (${months.length} month${months.length === 1 ? "" : "s"}, ${left} to go incl. this one, ${sl} shifts left)`;
+  const L = ["", `*Targets – ${per}*`], plan = [];
+  if (+T0.metres > 0) { const got = done.reduce((t, m) => t + ((m === cur ? metresIn(m) : A[m]?.metres ?? metresIn(m)) || 0), 0), need = Math.max(0, +T0.metres - got);
+    const rigs = fleet().flatMap(([, M]) => M).filter(mc => /^TDR/.test(mc) && ["OP", "?", "SB"].includes(stateNow(mc))).length;
+    L.push(`Drilling metres: ${Math.round(got).toLocaleString("en-ZA")} m of ${Math.round(+T0.metres).toLocaleString("en-ZA")} m (${Math.round(got / +T0.metres * 100)}%) · ${Math.round(need).toLocaleString("en-ZA")} m still needed`);
+    if (need > 0) { L.push(`Needed: ${Math.ceil(need / Math.max(1, left)).toLocaleString("en-ZA")} m per month · ${sl ? Math.ceil(need / sl).toLocaleString("en-ZA") : "–"} m per shift${rigs ? ` · ${sl ? Math.ceil(need / sl / rigs).toLocaleString("en-ZA") : "–"} m per rig per shift with ${rigs} rig${rigs === 1 ? "" : "s"} available` : ""}`);
+      plan.push(rigs ? `Drilling: ${sl ? Math.ceil(need / sl).toLocaleString("en-ZA") : "–"} m per shift from now to reach the metres target` : `Drilling: no rig available – a rig must be back on site to start closing the ${Math.round(need).toLocaleString("en-ZA")} m gap`); } }
+  const H = Object.entries(T0.hrs || {}).filter(([, v]) => +v > 0);
+  if (H.length) { L.push("Machine hours (target for the period):");
+    for (const [mc, tg] of H) { const got = done.reduce((t, m) => t + ((m === cur ? machHrsIn(m, mc) : A[m]?.hrs?.[mc] ?? machHrsIn(m, mc)) || 0), 0), need = Math.max(0, +tg - got), ps = sl ? need / sl : 0;
+      L.push(`${mc}: ${hm(got)} of ${hm(+tg)} h${need > 0 ? ` · ${hm(ps)} h per shift needed${ps > 12 ? " – not reachable in the time left" : ""}` : " · target reached"}`);
+      if (need > 0 && ["BD", "PM"].includes(stateNow(mc))) plan.push(`${mc}: back in service needed – ${hm(need)} h still to work`); else if (ps > 10) plan.push(`${mc}: ${hm(ps)} h per shift needed – keep downtime to a minimum`); } }
+  if (plan.length) L.push("", "*Action plan*", ...plan.map((x, i) => `${i + 1}. ${x}`));
+  return L; }
+const fmtM = ym => monthName(ym).replace(/ (\d{4})$/, " $1");
 function mtrSlots(from, to) { const S = new Map();
   for (const r of R("mtr")) { if (r.ym < from.slice(0, 7) || r.ym > to.slice(0, 7)) continue; let L = []; try { L = JSON.parse(r.data || "[]"); } catch {}
     for (const x of L) if (x.date >= from && x.date <= to) S.set(`${x.date}|${x.shift}|${x.rig}`, x); }
@@ -408,11 +440,20 @@ function exportView() {
     + syncCard()
     + `<section class="card"><h2>Backup</h2><p class="muted" style="margin-top:0">Only needed if this PC never gets signal: save a backup file and load it on another PC.</p><div class="row"><button id="bk">Save a backup file</button><label class="btn" style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer">Load a backup <input type="file" id="rs" accept=".json" hidden></label></div></section>`;
 }
+function targetsCard() { const T0 = tgtRec() || {}, cur = today().slice(0, 7), M = fleet();
+  return `<section class="card"><h2>Targets</h2><p class="muted" style="margin-top:0">Set by the admin. The shift message shows progress, what is still needed per month and per shift, and an action plan. Leave a box empty for no target.</p>
+    <form id="fTgt" autocomplete="off"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+      <label>From month <input type="month" name="from" value="${T0.from || cur}" required></label><label>To month <input type="month" name="to" value="${T0.to || cur}" required></label>
+      <label>Drilling metres for the whole period <input name="metres" inputmode="numeric" value="${T0.metres || ""}" placeholder="e.g. 12000"></label></div>
+      <p style="margin:14px 0 6px"><b>Machine hours for the whole period</b></p>
+      <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${M.flatMap(([, L]) => L).map(mc => `<label>${esc(mc)} <input name="h_${esc(mc)}" inputmode="decimal" value="${T0.hrs?.[mc] || ""}" placeholder="hours"></label>`).join("")}</div>
+      <div class="row" style="margin-top:12px"><button class="primary">Save targets</button>${T0.id ? '<button type="button" class="ghost" data-tgtclear="1">Remove targets</button>' : ""}</div></form></section>`; }
 function settingsView() {
   const F = fleet(), users = R("user");
   return pageHead("Settings", "Machines and controllers", "", "", "Changes here go to every control room device with the next sync. You can also add or remove a machine on the live board.")
     + `<section class="card"><h2>Machines</h2>${F.map(([g, L], gi) => `<div style="margin-bottom:12px"><b>${esc(g)}</b><div class="row" style="margin-top:6px">${L.map(m => `<span class="tag" style="font-size:13px;padding:4px 10px">${esc(m)} <button class="sm ghost" data-rmm="${gi}|${esc(m)}" style="min-height:28px;padding:0 6px">×</button></span>`).join("")}</div>
       <div class="row" style="margin-top:6px"><input data-newm="${gi}" placeholder="Add a machine to ${esc(g)}" style="max-width:260px"><button class="sm" data-addm="${gi}">+ Add</button></div></div>`).join("")}</section>
+    ${me.admin ? targetsCard() : ""}
     <section class="card"><h2>Controllers</h2><div class="res">${users.filter(u => u.status !== "declined").map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>${u.status === "pending" ? '<span style="color:var(--gold);font-weight:600">waiting for the admin to approve</span>' : "added " + fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div><div class="row" style="gap:6px">${u.status === "pending" && me.admin ? `<button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button>` : `${me.admin && u.id !== me.id ? `<button class="sm" data-rpin="${u.id}">Reset PIN</button>` : ""}${u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}`}</div></div>`).join("")}</div></section>`;
 }
 
@@ -635,6 +676,10 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
     `Total downtime: ${hl(allShift)} this shift · ${hl(allMonth)} this month`,
     ...(down.length ? ["", "*Machines down – recovery plan*", ...down.map(x => `${x.mc} – ${x.st === "BD" ? "Breakdown" : "Maintenance"}${x.why ? ": " + x.why : ""}${x.since ? ` · out of service ${dur(x.since)}` : ""} · ${x.e?.action ? x.e.action : "action to be confirmed"}${x.e?.owner ? " (" + x.e.owner + ")" : ""} · ${x.e?.eta ? "expected back " + fmt(x.e.eta) : "ETA to be confirmed"}`)] : []),
     ...(decide.length ? ["", "*For management attention* (out of service over 48 h, ETA still to be confirmed)", ...decide.map(x => `${x.mc}${x.why ? " – " + x.why : ""} · out of service ${dur(x.since)}`)] : [])];
+  const TL = cur ? targetLines() : [];
+  if (cur && !TL.some(x => x === "*Action plan*") && down.some(x => !x.e?.eta)) TL.push("", "*Action plan*");
+  if (cur) down.filter(x => !x.e?.eta).forEach(x => TL.push(`${TL.filter(y => /^\d+\. /.test(y)).length + 1}. ${x.mc}: confirm the repair plan and ETA`));
+  head.push(...TL);
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 function showMessage(text) {
@@ -1027,6 +1072,7 @@ async function clickH(ev) {
   if (b.id === "admForgot") { const e = document.querySelector("#fAdm [name=e]")?.value.trim() || CTRL_ADMIN[0];
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); await m.sendPasswordResetEmail(m.getAuth(admApp), e); popupMsg("Reset link sent", `Check ${e} for an email from the TKR app (look in junk too). Choose a new password, then sign in here.`); }
     catch (x) { console.warn(x); toast("The reset link couldn't be sent. Check the email and signal."); } return; }
+  if (b.dataset.tgtclear) { if (!me?.admin || !confirm("Remove the targets?")) return; await put({ ...tgtRec(), deleted: true }, "Targets removed"); render(); return; }
   if (b.dataset.rpin) { if (!me?.admin) return; const u = recs.find(r => r.id === b.dataset.rpin); if (!u || !confirm(`Reset ${u.name}'s PIN? Next time they tap their name they choose a new PIN.`)) return;
     await put({ ...u, pin: "", status: "approved" }, `Admin reset ${u.name}'s PIN`); syncSoon(); render(); toast(`${u.name} chooses a new PIN at the next sign-in. It reaches their PC when it has signal.`); return; }
   if (b.dataset.uok || b.dataset.uno) { if (!me?.admin) return; const u = recs.find(r => r.id === (b.dataset.uok || b.dataset.uno)); if (!u) return; const ok = !!b.dataset.uok;
@@ -1131,6 +1177,11 @@ async function submitH(ev) {
     await addReq({ target: t, what: x.what, fromTxt: x.now || "empty", toTxt: to || "empty", to, why }); return; }
   if (f.id === "fMach") { const gi = +f.dataset.gi, v = f.elements.m.value;
     if (f.dataset.mode === "add") { if (await addMachine(gi, v)) { closeEv(); render(); } } else { if (!confirm(`Take ${v} off the list? Its logged times are kept.`)) return; await removeMachine(v); closeEv(); render(); toast(v + " removed."); } return; }
+  if (f.id === "fTgt") { if (!me?.admin) return; const g = k => f.elements[k].value.trim(), from = g("from"), to = g("to"); if (to < from) { toast("The To month must be after the From month."); return; }
+    const hrs = {}; for (const el of f.querySelectorAll("input[name^=h_]")) { const v = parseFloat(el.value.replace(",", ".")); if (v > 0) hrs[el.name.slice(2)] = v; }
+    const old = tgtRec(), metres = parseFloat(g("metres").replace(/\s/g, "").replace(",", ".")) || 0;
+    await put({ ...(old || {}), id: "targets", kind: "targets", ym: "setup", from, to, metres, hrs, ach: old?.ach || {}, deleted: false }, `Targets set: ${fmtM(from)} to ${fmtM(to)}${metres ? ` · ${metres} m` : ""}${Object.keys(hrs).length ? ` · hours for ${Object.keys(hrs).length} machines` : ""}`);
+    await keepAchieved(); render(); toast("Targets saved."); return; }
   if (f.id === "fEv") { const v = k => f.elements[k].value, s = v("start"), e = v("end");
     if (e && toMs(e) <= toMs(s)) { toast("The end time must be after the start time."); return; }
     const old = v("eid") ? recs.find(r => r.id === v("eid")) : null;
@@ -1199,7 +1250,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
