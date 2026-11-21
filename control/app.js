@@ -28,7 +28,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 function toast(m) { const t = $("toast"); t.textContent = m; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 3200); }
 
 /* ---------- what the control room tracks (from the November control room workbook) ---------- */
-const TYPES = { BD: "Breakdown", SB: "Standby (available, not operating)", PM: "Planned maintenance", NU: "Not in use" };
+const TYPES = { BD: "Breakdown", SB: "Refuelling", PM: "Planned maintenance", NU: "Not in use" };
 const DEFAULT_FLEET = [["Drill rigs", ["TDR013", "TDR014", "TDR015"]], ["Rockbreakers", ["TKRH011", "TKRH015", "TKRH017", "TKRH019", "TKRH020"]],
   ["Buses", ["TKR020", "TKR021", "TKR023", "TKR024", "TKR025", "TKR026"]], ["Lowbed", ["TKR06"]], ["Water bowser", ["TKR09"]], ["Bakkies", ["LDV011", "LDV012"]]];
 const CHECK = [["Collect data", ["PTO", "Inspection reports", "SOP", "T Connect attendance", "Risk assessment", "Capture", "Pit licence expiring"]], ["Documents", ["Job cards", "Checklists", "Fleet reports", "Trip summary"]],
@@ -258,13 +258,13 @@ function nowView() {
     + `<div class="tiles"><div class="tile good"><div class="l">Availability this shift</div><div class="n">${pcOf(shT)}</div><div class="s">${hm(shT.avail)} available · ${hm(shT.down)} down so far (hours:minutes)</div></div>
       <div class="tile"><div class="l">Availability today</div><div class="n">${pcOf(dayT)}</div><div class="s">from 06:00 ${fmt(sd).slice(0, 5)} · ${hm(dayT.avail)} available · ${hm(dayT.down)} down</div></div>
       <div class="tile good"><div class="l">Operating now</div><div class="n">${cnt("OP")}</div><div class="s">of ${ALL.length} machines</div></div>
-      <div class="tile"><div class="l">Available, standing</div><div class="n">${cnt("SB")}</div><div class="s">available but not operating</div></div>
+      <div class="tile"><div class="l">Refuelling</div><div class="n">${cnt("SB")}</div><div class="s">counted as available</div></div>
       <div class="tile ${cnt("BD") ? "alert" : ""}"><div class="l">Breakdowns now</div><div class="n">${cnt("BD")}</div></div>
       <div class="tile"><div class="l">In maintenance now</div><div class="n">${cnt("PM")}</div></div>
       ${nOff ? `<div class="tile"><div class="l">Not on site</div><div class="n">${nOff}</div><div class="s">left out of availability</div></div>` : ""}
       ${cnt("NU") ? `<div class="tile"><div class="l">Not in use now</div><div class="n">${cnt("NU")}</div></div>` : ""}
       </div>`
-    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.every(offNow) ? "not on site" : `${L.filter(m => stateNow(m) === "OP").length}/${L.filter(m => !offNow(m)).length} operating${L.some(m => stateNow(m) === "SB") ? ` · ${L.filter(m => stateNow(m) === "SB").length} standing` : ""} · ${pcOf(gT)} available this shift`}</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${st === "OFF" ? "Not on site" : s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Operating" : st === "SB" ? "Available, not operating" : st === "?" ? "Operational" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
+    + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.every(offNow) ? "not on site" : `${L.filter(m => stateNow(m) === "OP").length}/${L.filter(m => !offNow(m)).length} operating${L.some(m => stateNow(m) === "SB") ? ` · ${L.filter(m => stateNow(m) === "SB").length} refuelling` : ""} · ${pcOf(gT)} available this shift`}</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${st === "OFF" ? "Not on site" : s ? `${TYPES[s.type]} since ${hhmm(s.start)}${s.start.slice(0, 10) !== today() ? " " + fmt(s.start.slice(0, 10)).slice(0, 5) : ""}` : st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "?" ? "Operational" : (TYPES[st] || st) + (sheetSince(m, st) ? " since " + sheetSince(m, st) : "")}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button><button class="sm ghost" data-sitemg="${F.findIndex(x => x[0] === g)}">On site / not on site</button>` : ""}</div></section>`; }).join("")}</div>`
     + hourBoard()
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
@@ -280,14 +280,14 @@ function hourBoard() {
   const cell = (mc, h, prev) => { const a = hStart(d, h), v = a <= now ? cellVal(d, mc, h) : "", cur = a <= now && now < a + 36e5;
     if (!v || v === "OFF") return `<div class="hb ${v || "fut"}${cur ? " now" : ""}"><i>${lab(h)}</i><b>${v || ""}</b></div>`;
     const q = hourParts(mc, d, h, v, prev), dn = q.BD + q.PM, t = dn >= q.len - 1 / 120 ? (q.BD >= q.PM ? "BD" : "PM") : dn > 0 ? "MIX" : v === "SB" ? "SB" : "OP";
-    const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", lbl = t === "MIX" ? `${dt} ${hm(dn)}` : t === "OP" || t === "SB" ? t : dn < 1 - 1 / 120 && cur ? `${dt} ${hm(dn)}` : t;
+    const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", lbl = t === "MIX" ? `${dt} ${hm(dn)}` : t === "OP" ? t : t === "SB" ? "RF" : dn < 1 - 1 / 120 && cur ? `${dt} ${hm(dn)}` : t;
     const base = v === "SB" ? "#4d4116" : "#1f4d33", dc = dt === "BD" ? "#9b2c22" : "#2a4f8a", pas = Math.round(q.len * 100), up = cur ? pas : 100;   // filled as far as the hour has gone: down part first, then working
     const fill = dn > 0 && pct >= up ? dc : base, bg = cur || t === "MIX" ? `style="background:linear-gradient(to right,${dc} 0 ${Math.min(pct, up)}%,${fill === dc ? dc : base} ${Math.min(pct, up)}% ${up}%,#202220 ${up}% 100%)"` : "";
-    return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "available, not operating" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
+    return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
-      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb SB"><b>SB</b></span> Available, standing <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
+      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb SB"><b>RF</b></span> Refuelling <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
     ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
-      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Operating" : st === "SB" ? "Available, not operating" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = ""; return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
+      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = ""; return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
@@ -305,10 +305,10 @@ function checklist(d) {
 function availView() {
   const F = fleet(), d = date, rowsFor = L => L.map(m => [m, daySum(m, d)]);
   const pc = v => v == null ? "–" : Math.round(v * 100) + "%";
-  return pageHead("Machine availability", fmt(d), dow(d), "", "From the logged times: a day runs 06:00 to 06:00. Standby counts as available; not in use is left out.")
+  return pageHead("Machine availability", fmt(d), dow(d), "", "From the logged times: a day runs 06:00 to 06:00. Refuelling counts as available; not in use is left out.")
     + `<div class="mhead">${dateBar()}</div>`
     + F.map(([g, L]) => { const rows = rowsFor(L), tot = rows.reduce((a, [, s]) => { if (s) for (const k of ["avail", "BD", "PM", "SB", "NU", "down"]) a[k] = (a[k] || 0) + s[k]; return a; }, {});
-      return `<section class="card"><h2>${esc(g)}</h2><div class="tbl"><table class="avt"><thead><tr><th>Machine</th><th>Available h</th><th>Breakdown h</th><th>Planned maint. h</th><th>Standby h</th><th>Not in use h</th><th>Availability</th></tr></thead><tbody>
+      return `<section class="card"><h2>${esc(g)}</h2><div class="tbl"><table class="avt"><thead><tr><th>Machine</th><th>Available h</th><th>Breakdown h</th><th>Planned maint. h</th><th>Refuelling h</th><th>Not in use h</th><th>Availability</th></tr></thead><tbody>
         ${rows.map(([m, s]) => `<tr><td><b>${esc(m)}</b></td>${s ? `<td class="num">${h2(s.avail)}</td><td class="num ${s.BD ? "hot" : ""}">${h2(s.BD)}</td><td class="num">${h2(s.PM)}</td><td class="num">${h2(s.SB)}</td><td class="num">${h2(s.NU)}</td><td class="num pct">${pc(s.pct)}</td>` : '<td colspan="6" class="muted">not started</td>'}</tr>`).join("")}
         <tr class="tot"><td>Total</td><td class="num">${h2(tot.avail || 0)}</td><td class="num">${h2(tot.BD || 0)}</td><td class="num">${h2(tot.PM || 0)}</td><td class="num">${h2(tot.SB || 0)}</td><td class="num">${h2(tot.NU || 0)}</td><td class="num pct">${pc((tot.avail || 0) + (tot.down || 0) ? tot.avail / (tot.avail + tot.down) : null)}</td></tr></tbody></table></div></section>`; }).join("")
     + delaySummary(d.slice(0, 7))
@@ -524,14 +524,14 @@ async function setMeter(mc, d, sh, k, raw) {
 function shiftTable(d, sh) {
   const [a, b] = shiftWin(d, sh), now = Date.now(), fut = a > now, H = HRS(sh);
   const tot = () => ({ avail: 0, BD: 0, PM: 0, down: 0 }), shT = tot(); let body = "";
-  const opt = v => ["", "OP", "SB", "BD", "PM"].map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("");
+  const opt = v => ["", "OP", "SB", "BD", "PM"].map(o => `<option value="${o}" ${o === v ? "selected" : ""}>${o === "SB" ? "RF" : o}</option>`).join("");
   for (const [g, L] of fleet()) { const gt = tot(), opCount = H.map(() => 0);
     L.forEach((mc, i) => { const hr = recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted), C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
       const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
         if (C[h] && lockedV(hr, "h" + h)) return `<td class="hc lk" data-lockcell="${esc(mc)}|${h}" title="Filled on an earlier shift (${esc(hr.by)}). Tap to ask the admin to change it."><span class="lkv ${v}">${v || "–"} <small>🔒</small></span></td>`;
         const carry = !C[h] && v && v !== "OP", auto = !C[h] && v === "OP";
-        return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, BD or PM. Tap the same one again to clear it."}">${v || "–"}</button></td>`; }).join("");
+        return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, RF, BD or PM. Tap the same one again to clear it."}">${v === "SB" ? "RF" : v || "–"}</button></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${(() => { const m = meterOf(d, mc, sh), lc = lastClose(d, mc, sh), mh = meterHrs(m);
           return `<td class="mt"><input data-meter="${esc(mc)}|open" inputmode="decimal" value="${mtxt(m.open)}" placeholder="${lc != null ? mtxt(lc) : "opening"}" title="Hour meter at the start of the shift${lc != null ? ". Last closing: " + mtxt(lc) : ""}"></td><td class="mt"><input data-meter="${esc(mc)}|close" inputmode="decimal" value="${mtxt(m.close)}" placeholder="closing" title="Hour meter at the end of the shift"></td><td>${mh != null ? hm(mh) : ""}</td>`; })()}${cells}
@@ -542,7 +542,7 @@ function shiftTable(d, sh) {
     for (const k of ["avail", "BD", "PM", "down"]) shT[k] += gt[k]; }
   body += `<tr class="ft"><td colspan="${H.length + 8}">${sh} shift total</td><td>${n2(shT.avail)}</td><td>${n2(shT.BD)}</td><td>${n2(shT.PM)}</td><td>${n2(shT.down)}</td></tr>`;
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
-  return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operating · SB = Available, standing (not operating) · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
+  return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operating · RF = Refuelling · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th><th>Opening hrs</th><th>Closing hrs</th><th>Machine hrs</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
     <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
@@ -606,8 +606,8 @@ function shiftMessage(d, sh) {   // simple: every machine, its status, available
   for (const [g, M] of fleet()) { body.push(`*${g}*`);
     for (const mc of M) { const st = stateAt(mc), w = why(mc);
       if (st === "OFF") { body.push(`${mc} – Not on site`); continue; } total++;
-      if (st === "OP" || st === "?") { avail++; body.push(`${mc} – Operational – available${w ? " – " + w : ""}`); }   // nothing captured and no comment: operational   // only OP and SB count as available – the same as the dashboard
-      else if (st === "SB") { avail++; body.push(`${mc} – Standby – available, not operating${w ? ": " + w : ""}`); }
+      if (st === "OP" || st === "?") { avail++; body.push(`${mc} – Operational – available`); }   // nothing captured and no comment: operational   // only OP and SB count as available – the same as the dashboard
+      else if (st === "SB") { avail++; body.push(`${mc} – Refuelling${w ? ": " + w : ""}`); }
       else body.push(`${mc} – ${st === "BD" ? "Breakdown" : st === "PM" ? "Planned maintenance" : "Not in use"}${w ? ": " + w : ""} – not available`); }
     body.push(""); }
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, `*Available: ${avail} of ${total} machines*${(() => { const n = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh) && (stateAt(mc) === "OP" || stateAt(mc) === "?")).length; return ` (${n} operational)`; })()}`, "", ...body].join("\n").trim();
@@ -972,7 +972,7 @@ async function viewDoc(id) {
 /* ---------- events ---------- */
 function cellMenu(btn) {
   document.getElementById("hpop")?.remove(); const v = btn.classList.contains("auto") || btn.classList.contains("carry") ? "" : btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
-  const LB = { OP: "OP · operating", SB: "SB · available, standing", BD: "BD · breakdown", PM: "PM · maintenance" };
+  const LB = { OP: "OP · operating", SB: "RF · refuelling", BD: "BD · breakdown", PM: "PM · maintenance" };
   pop.innerHTML = ["OP", "SB", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${LB[o]}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
     + (v ? `<small>Tap ${v} again to clear it</small>` : "");
   pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
@@ -1288,7 +1288,7 @@ async function exportXlsx(from, to) {
   let logo = null; try { logo = wb.addImage({ buffer: await (await fetch("../icons/icon-512.png")).arrayBuffer(), extension: "png" }); } catch {}
   const fill = c => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } }), thin = { style: "thin", color: { argb: "FFD9D3C5" } }, box = { top: thin, left: thin, bottom: thin, right: thin };
   const F = (o = {}) => Object.assign({ name: "Arial", size: 10 }, o);
-  const COLR = { OP: ["FFE2F0D9", "FF375623"], BD: ["FFFDE2DF", "FF9C0006"], SB: ["FFFFF2CC", "FF7F6000"], PM: ["FFDDEBF7", "FF1F4E78"], NU: ["FFEDEDED", "FF595959"], "✓": ["FFE2F0D9", "FF375623"], "✗": ["FFFDE2DF", "FF9C0006"] };
+  const COLR = { OP: ["FFE2F0D9", "FF375623"], BD: ["FFFDE2DF", "FF9C0006"], SB: ["FFFFF2CC", "FF7F6000"], RF: ["FFFFF2CC", "FF7F6000"], PM: ["FFDDEBF7", "FF1F4E78"], NU: ["FFEDEDED", "FF595959"], "✓": ["FFE2F0D9", "FF375623"], "✗": ["FFFDE2DF", "FF9C0006"] };
   const top = (ws, n, t1, t2, t3) => { for (let r = 1; r <= 4; r++) { ws.getRow(r).height = [8, 22, 20, 18][r - 1]; for (let c = 1; c <= n; c++) ws.getCell(r, c).fill = fill("FF111111"); }
     for (let c = 1; c <= n; c++) ws.getCell(5, c).fill = fill("FFD4A12A"); ws.getRow(5).height = 4; if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.1 }, ext: { width: 54, height: 54 } });
     ws.getCell(2, 2).value = t1; ws.getCell(2, 2).font = F({ size: 15, bold: true, color: { argb: "FFFFFFFF" } }); ws.getCell(3, 2).value = t2; ws.getCell(3, 2).font = F({ size: 9, bold: true, color: { argb: "FFD4A12A" } });
@@ -1374,12 +1374,12 @@ async function exportXlsx(from, to) {
     r = 10; band(ws, r++, 21, "Data and documents"); head(ws, r++, ["Section", "Item", ...COLS, "Time updated", "Updated by", "Comments"]);
     for (const [sec, items] of CHECK) items.forEach((it, i) => { const c = rec(chkKey(d, it)); row(ws, r++, [i ? "" : sec, it, ...COLS.map(k => c[k] || ""), c.editedAt ? new Date(c.editedAt).toTimeString().slice(0, 5) : "", c.by || "", c.comment || ""], { boldCol: [0], left: [7] }); });
     for (const sh of ["Day", "Night"]) {
-      r++; band(ws, r++, 24, `Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"})   OP = Operating  ·  SB = Available, standing (not operating)  ·  BD = Breakdown  ·  PM = Planned maintenance`);
+      r++; band(ws, r++, 24, `Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"})   OP = Operating  ·  RF = Refuelling  ·  BD = Breakdown  ·  PM = Planned maintenance`);
       head(ws, r++, ["Group", "Machine", "Opening hrs", "Closing hrs", "Machine hrs (h:mm)", ...HRS(sh).map(hLabel), "Down at", "Back up", "Reason / comments", "Avail (h:mm)", "BD (h:mm)", "PM (h:mm)", "Down (h:mm)"]);
       const [a, b] = shiftWin(d, sh);
       for (const [g, L] of fleet()) L.forEach((mc, i) => { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh), C = cellsOf(d, mc);
         const M3 = meterOf(d, mc, sh);
-        row(ws, r++, [i ? "" : g, mc, M3.open === undefined || M3.open === "" ? "" : +M3.open, M3.close === undefined || M3.close === "" ? "" : +M3.close, meterHrs(M3) ?? "", ...HRS(sh).map(h => cellVal(d, mc, h, C)), E.map(e => toMs(e.start) < a ? tOf(a) : hhmm(e.start)).join(", "), E.map(e => e.end && toMs(e.end) <= b ? hhmm(e.end) : "").filter(Boolean).join(", "),
+        row(ws, r++, [i ? "" : g, mc, M3.open === undefined || M3.open === "" ? "" : +M3.open, M3.close === undefined || M3.close === "" ? "" : +M3.close, meterHrs(M3) ?? "", ...HRS(sh).map(h => { const v = cellVal(d, mc, h, C); return v === "SB" ? "RF" : v; }), E.map(e => toMs(e.start) < a ? tOf(a) : hhmm(e.start)).join(", "), E.map(e => e.end && toMs(e.end) <= b ? hhmm(e.end) : "").filter(Boolean).join(", "),
           [...new Set([...E.map(e => e.reason), recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted)?.notes?.[sh]].filter(Boolean))].join("; "),
           s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [19], fmt: { 2: "0.0", 3: "0.0" } }); });
     }
