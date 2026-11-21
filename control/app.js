@@ -585,7 +585,7 @@ function shiftTable(d, sh) {
   const sv = R("log").filter(l => l.date === d && l.shiftSave === sh).sort((x, y) => y.at - x.at)[0];
   return `<div class="xlband">Machine availability – ${sh} shift (${sh === "Day" ? "06:00 to 18:00" : "18:00 to 06:00"}) &nbsp; OP = Operating · RF = Refuelling · BD = Breakdown · PM = Planned maintenance · the exact time is logged when you pick BD or PM, and when you pick OP again · grey = filled on an earlier shift (tap it to ask the admin)</div>
     <div class="xlwrap"><table class="xl av" data-shift="${sh}"><thead><tr><th>Group</th><th>Machine</th><th>Opening hrs</th><th>Closing hrs</th><th>Machine hrs</th>${H.map(h => `<th>${hLabel(h)}</th>`).join("")}<th>Down at</th><th>Back up</th><th>Reason / comments</th><th>Avail hrs</th><th>BD hrs</th><th>PM hrs</th><th>Down hrs</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Generate message</button><button type="button" data-mgr="${sh}">Manager message (short)</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
+    <div class="savebar"><button type="button" data-saveonly="${sh}">Save</button><button type="button" class="primary" data-saveshift="${sh}">Save and upload ${sh.toLowerCase()} shift</button><button type="button" data-msg="${sh}">Status picture</button><button type="button" data-mgr="${sh}">Manager message (short)</button>${undo.length ? `<button type="button" class="danger" data-discard="1" title="Put everything back the way it was at the last Save">Discard changes</button>` : ""}<span class="muted">${sv ? `Saved ${new Date(sv.at).toTimeString().slice(0, 5)}` : ""}</span></div>`;
 }
 /* one hour box changed: keep it, and log the exact time for a breakdown or planned maintenance */
 /* Clear: the box goes blank (stored as "-"), the grid time in it is taken away and nothing carries into it */
@@ -693,6 +693,64 @@ function shiftMessage(d, sh, short = false) {   // simple: every machine, its st
       "", "Full detail: https://protea98.github.io/tkr-operations/control/"].join("\n").trim(); }
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
+/* the status picture: the dashboard summed up in one JPEG for WhatsApp (status right now) */
+async function statusPicture() {
+  const F = fleet(), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
+  const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
+  const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
+  const W = 1080, P = 36, NC = 4, CW = (W - P * 2 - 12 * (NC - 1)) / NC, CH = 92;
+  const whyOf = m => { const r0 = reasonNow(m); if (r0) return r0; let [d2, s2] = [sd, ssh]; for (let i = 0; i < 4; i++) { const n = (byId(`hr_${d2}_${m}`)?.notes?.[s2] || "").trim(); if (n) return n; [d2, s2] = prevShift(d2, s2); } return ""; };
+  const sinceOf = (m, t0) => { const e = statusNow(m); let since = e ? toMs(e.start) : null;   // walk back through the hour boxes while it stayed down
+    for (let t = now, i = 0; i < 24 * 60; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh, v = cellsOf(dd, m)[h];
+      const ev = downEvs(m).some(q => q.type === t0 && toMs(q.start) <= t && evEnd(q) > t - 36e5); if (v === t0 || ev) { const hs = hStart(dd, h); since = since == null ? hs : Math.min(since, hs); } else if (v && v !== "-") break; }
+    return since; };
+  const groups = F.filter(([, L]) => L.length).map(([g, L]) => ({ g, L, T: fleetSum(L.filter(m => !offNow(m)), m => shiftSum(m, sd, ssh)) }));
+  const downL = ALL.filter(m => ["BD", "PM"].includes(st(m))).map(m => { const e = statusNow(m); return { m, t: st(m), e, why: whyOf(m), since: sinceOf(m, st(m)) }; }).sort((a, b) => (a.since ?? now) - (b.since ?? now));
+  let H = 150 + 150 + 30; for (const g of groups) H += 56 + Math.ceil(g.L.length / NC) * (CH + 10) + 14; H += downL.length ? 60 + downL.length * 40 + 20 : 0; H += 90;
+  const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
+  const font = (w, sz) => { x.font = `${w} ${sz}px "Inter","Segoe UI",Arial,sans-serif`; };
+  const rr = (X, Y, w, h, r, f) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = f; x.fill(); };
+  const fit = (t, w) => { if (x.measureText(t).width <= w) return t; while (t.length > 1 && x.measureText(t + "…").width > w) t = t.slice(0, -1); return t + "…"; };
+  x.fillStyle = "#121413"; x.fillRect(0, 0, W, H);
+  x.fillStyle = "#0b0b0b"; x.fillRect(0, 0, W, 130); x.fillStyle = "#d4a12a"; x.fillRect(0, 130, W, 4);
+  try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 42, 65, 42, 0, 7); x.clip(); x.drawImage(img, P, 23, 84, 84); x.restore(); } catch {}
+  font(800, 38); x.fillStyle = "#fff"; x.fillText("Control Room – machine status", P + 104, 60);
+  font(600, 22); x.fillStyle = "#d4a12a"; x.fillText(`TKR OPERATIONS · THARISA · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 104, 98);
+  const tiles = [["AVAILABLE", pcOf(shT), "this shift", "#5fd08a"], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", "#5fd08a"], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? "#ff7b6b" : "#fff"], ["MAINTENANCE", String(cnt("PM")), "now", "#fff"]];
+  const TW = (W - P * 2 - 3 * 14) / 4; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 14), Y = 158; rr(X, Y, TW, 120, 14, "#1d201f"); if (l === "BREAKDOWN" && cnt("BD")) { x.strokeStyle = "#ff7b6b"; x.lineWidth = 2; x.beginPath(); x.roundRect(X, Y, TW, 120, 14); x.stroke(); }
+    font(700, 16); x.fillStyle = "#9aa39e"; x.fillText(l, X + 16, Y + 30); font(800, 44); x.fillStyle = col; x.fillText(n, X + 16, Y + 80); font(500, 16); x.fillStyle = "#9aa39e"; x.fillText(sub, X + 16, Y + 106); });
+  let y = 310;
+  for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length;
+    font(800, 22); x.fillStyle = "#e9e5d8"; x.fillText(g.g.toUpperCase(), P, y + 28); font(600, 19); x.fillStyle = wk < on.length ? "#ff9a8c" : "#7fd6a0"; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, W - P - x.measureText(tt).width, y + 28);
+    y += 44;
+    g.L.forEach((m, i) => { const X = P + (i % NC) * (CW + 12), Y = y + Math.floor(i / NC) * (CH + 10), t = offNow(m) ? "OFF" : st(m), e = statusNow(m), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = ["BD", "PM"].includes(t) ? sinceOf(m, t) : null;
+      rr(X, Y, CW, CH, 12, t === "BD" ? "#3a2421" : t === "PM" ? "#1f2a3a" : "#1d201f"); rr(X, Y, 8, CH, 4, COL[t] || "#555");
+      font(800, 24); x.fillStyle = "#fff"; x.fillText(m, X + 20, Y + 33);
+      font(600, 17); x.fillStyle = COL[t] === "#2f8a55" ? "#7fd6a0" : t === "BD" ? "#ff9a8c" : t === "PM" ? "#8fbaf0" : t === "SB" ? "#ecc76a" : "#aaa";
+      x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, CW - 30), X + 20, Y + 59);
+      if (why) { font(400, 15); x.fillStyle = "#c9c4b6"; x.fillText(fit(why, CW - 30), X + 20, Y + 83); } });
+    y += Math.ceil(g.L.length / NC) * (CH + 10) + 14; }
+  if (downL.length) { font(800, 22); x.fillStyle = "#d4a12a"; x.fillText("OUT OF SERVICE – RECOVERY PLAN", P, y + 30); y += 50;
+    const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
+    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 18); x.fillStyle = "#fff"; x.fillText(fit(r.m, 300), P, y + 22); font(400, 17); x.fillStyle = "#d8d3c4";
+      const h0 = r.since ? (now - r.since) / 36e5 : 0, dd = r.since ? (h0 >= 48 ? `${Math.floor(h0 / 24)} days` : `${hm(h0)} h`) : "";
+      x.fillText(fit([r.why, dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · "), W - P * 2 - 320), P + 310, y + 22); y += 40; }
+    y += 10; }
+  const H2 = Math.min(H, y + 90), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
+  x2.fillStyle = "#d4a12a"; x2.fillRect(0, H2 - 70, W, 3); x2.font = `500 18px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#9aa39e"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 30);
+  const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 30); }
+  return c2; }
+async function showPicture(text) {
+  document.querySelector(".ccdone")?.remove(); const c = await statusPicture(), url = c.toDataURL("image/jpeg", 0.9), d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
+  const name = `TKR_Control_Room_${today()}_${tOf(Date.now()).replace(":", "")}.jpg`;
+  d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Status picture</div><img src="${url}" alt="Machine status picture" style="width:100%;border-radius:10px;border:1px solid #333;max-height:60vh;object-fit:contain;background:#121413">
+    <div class="row" style="margin-top:10px;gap:6px"><button class="primary" data-p="share" style="flex:1">Send to WhatsApp</button><button data-p="dl" style="flex:1">Download picture</button><button data-p="text" style="flex:1">Copy message text</button><button class="ghost" data-p="x" style="flex:1">Close</button></div></div>`;
+  d.onclick = async e => { const b = e.target.closest("button"); if (!b) { if (e.target === d) d.remove(); return; } const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
+    if (b.dataset.p === "share") { const f = new File([blob], name, { type: "image/jpeg" }); if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f], text: "Live dashboard: https://protea98.github.io/tkr-operations/control/" }); } catch {} } else { const { deliver } = await import("../lib/deliver.js"); deliver(blob, name); toast("Picture downloaded. Attach it in WhatsApp."); } }
+    if (b.dataset.p === "dl") { const { deliver } = await import("../lib/deliver.js"); deliver(blob, name); }
+    if (b.dataset.p === "text") { try { await navigator.clipboard.writeText(text); toast("Message text copied."); } catch { toast("Couldn't copy."); } }
+    if (b.dataset.p === "x") d.remove(); };
+  document.body.appendChild(d); }
 function showMessage(text) {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
   d.innerHTML = `<div style="max-width:620px"><div class="big">Shift message</div><textarea class="msg" style="width:100%;min-height:300px;font-size:14px">${esc(text)}</textarea>
@@ -1125,7 +1183,7 @@ async function clickH(ev) {
   if (b.dataset.sh) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; sheetSel = b.dataset.sh; if (sheetSel !== "month") date = sheetSel; render(); document.querySelector(".xltabs")?.scrollIntoView({ block: "start" }); return; }
   if (b.dataset.wbm) { if (sheetDirty && !confirm("This sheet has changes that are not saved. Leave without saving?")) return; sheetDirty = false; const m = shiftMonth((sheetSel === "month" ? date : sheetSel).slice(0, 7), +b.dataset.wbm), last = monthEnd(m) < today() ? monthEnd(m) : today(); date = last; sheetSel = sheetSel === "month" ? "month" : last; render(); return; }
   if (b.dataset.mgr) { showMessage(shiftMessage($("fDay").dataset.date, b.dataset.mgr, true)); return; }
-  if (b.dataset.msg) { showMessage(shiftMessage($("fDay").dataset.date, b.dataset.msg)); return; }
+  if (b.dataset.msg) { await showPicture(shiftMessage($("fDay").dataset.date, b.dataset.msg)); return; }
   if (b.dataset.saveonly) { b.disabled = true; try { await saveShift(b.dataset.saveonly, false); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
   if (b.dataset.saveshift) { b.disabled = true; b.textContent = "Saving…"; try { await saveShift(b.dataset.saveshift); } catch (x) { console.warn(x); toast("It didn't save. Try again."); } finally { b.disabled = false; } return; }
   if (b.dataset.mach !== undefined) { const m = b.dataset.mach, open = statusNow(m); openEv(evForm({}, m), open ? `${m} · ${TYPES[open.type]}` : `${m} · log what happened`); return; }
