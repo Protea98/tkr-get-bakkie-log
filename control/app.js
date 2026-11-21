@@ -1144,7 +1144,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1194,6 +1194,16 @@ async function purgeFuture() { const now = Date.now(), keep = undo.slice(); let 
     for (const k of Object.keys(cells)) if (hStart(r.date, +k) > now) { delete cells[k]; ch = true; n++; }
     if (ch) await put({ ...r, cells }); }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
+/* once, as Muneer asked at 09:21 on 21/11/2026: the day shift boxes and breakdown times put in on 21/11 up to 09:21 are taken out */
+async function undoDay21() {
+  const KEY = "seed_undo_day_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
+  const d = "2026-11-21", cut = toMs("2026-11-21T09:21"), keep = undo.slice(); let n = 0;
+  for (const r of R("hr").filter(r => r.date === d)) { const cells = { ...(r.cells || {}) }; let ch = false;
+    for (const k of Object.keys(cells)) if (+k < 18) { delete cells[k]; ch = true; n++; }
+    if (ch) await put({ ...r, cells }); }
+  for (const e of evs().filter(e => toMs(e.start) >= toMs(d + "T06:00") && toMs(e.start) < cut)) { await put({ ...e, deleted: true }); n++; }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now() }, `Day shift 21/11/2026: ${n} boxes and breakdown times put in before 09:21 taken out, as the admin asked`);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* once: the bus status Muneer gave at 11:42 on 20/11/2026 */
 async function busUpdate() {
   const KEY = "seed_bus_2026-11-20_1142"; if (recs.some(r => r.id === KEY)) return;
