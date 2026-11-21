@@ -729,49 +729,55 @@ async function statusPicture() {
     return since; };
   const groups = F.filter(([, L]) => L.length).map(([g, L]) => ({ g, L, T: fleetSum(L.filter(m => !offNow(m)), m => shiftSum(m, sd, ssh)) }));
   const downL = ALL.filter(m => ["BD", "PM"].includes(st(m))).map(m => { const e = statusNow(m); return { m, t: st(m), e, why: whyOf(m), since: sinceOf(m, st(m)) }; }).sort((a, b) => (a.since ?? now) - (b.since ?? now));
-  let H = 96 + 92 + 20; for (const g of groups) H += 40 + g.L.length * RH + 6; H += 26; H += downL.length ? 50 + downL.length * 32 + 10 : 0; H += 80;
+  let H = 96 + 92 + 20 + 28; for (const g of groups) H += 40 + g.L.length * RH + 6; H += 26; H += downL.length ? 50 + downL.length * 32 + 10 : 0; H += 80;
   const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
   const font = (w, sz) => { x.font = `${w} ${sz}px "Inter","Segoe UI",Arial,sans-serif`; };
   const rr = (X, Y, w, h, r, f) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = f; x.fill(); };
   const fit = (t, w) => { if (x.measureText(t).width <= w) return t; while (t.length > 1 && x.measureText(t + "…").width > w) t = t.slice(0, -1); return t + "…"; };
-  x.fillStyle = "#121413"; x.fillRect(0, 0, W, H);
-  x.fillStyle = "#0b0b0b"; x.fillRect(0, 0, W, 86); x.fillStyle = "#d4a12a"; x.fillRect(0, 86, W, 3);
-  try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 30, 43, 30, 0, 7); x.clip(); x.drawImage(img, P, 13, 60, 60); x.restore(); } catch {}
-  font(800, 28); x.fillStyle = "#fff"; x.fillText("Control Room – machine status", P + 76, 40);
-  font(600, 17); x.fillStyle = "#d4a12a"; x.fillText(`TKR OPERATIONS · THARISA · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 76, 68);
-  const tiles = [["AVAILABLE", pcOf(shT), "this shift", "#5fd08a"], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", "#5fd08a"], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? "#ff7b6b" : "#fff"], ["MAINTENANCE", String(cnt("PM")), "now", "#fff"]];
-  const TW = (W - P * 2 - 3 * 12) / 4; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 12), Y = 102; rr(X, Y, TW, 76, 12, "#1d201f"); if (l === "BREAKDOWN" && cnt("BD")) { x.strokeStyle = "#ff7b6b"; x.lineWidth = 2; x.beginPath(); x.roundRect(X, Y, TW, 76, 12); x.stroke(); }
-    font(700, 14); x.fillStyle = "#9aa39e"; x.fillText(l, X + 14, Y + 24); font(800, 34); x.fillStyle = col; x.fillText(n, X + 14, Y + 63); font(500, 14); x.fillStyle = "#9aa39e"; const sw = x.measureText(sub).width; x.fillText(sub, X + TW - 14 - sw, Y + 63); });
-  const HC = { OP: "#1f6b40", SB: "#8a6d1e", BD: "#9b2c22", PM: "#2a5a9e" };
+  const T = { bg: "#101513", panel: "#191e1c", line: "#2d3431", fg: "#f0eee6", muted: "#a2a8a1", gold: "#efc75e", ok: "#8fd1a6", bad: "#ec8f7b", pm: "#8fb8e8", sb: "#e6c766" };   // the dashboard colours
+  const box = (X, Y, w, h, r, f, s) => { x.beginPath(); x.roundRect(X + .5, Y + .5, w - 1, h - 1, r); if (f) { x.fillStyle = f; x.fill(); } if (s) { x.strokeStyle = s; x.lineWidth = 1; x.stroke(); } };
+  x.fillStyle = T.bg; x.fillRect(0, 0, W, H);
+  try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 26, 44, 26, 0, 7); x.clip(); x.drawImage(img, P, 18, 52, 52); x.restore(); } catch {}
+  font(700, 26); x.fillStyle = T.fg; x.fillText("Control Room – machine status", P + 66, 40);
+  font(500, 15); x.fillStyle = T.muted; x.fillText(`TKR Operations · Tharisa · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 66, 64);
+  x.fillStyle = T.line; x.fillRect(P, 86, W - P * 2, 1);
+  const tiles = [["AVAILABLE", pcOf(shT), "this shift", T.ok], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", T.fg], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? T.bad : T.fg], ["MAINTENANCE", String(cnt("PM")), "now", T.fg]];
+  const TW = (W - P * 2 - 3 * 10) / 4; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 10), Y = 102; box(X, Y, TW, 76, 12, T.panel, T.line);
+    font(600, 12); x.fillStyle = T.muted; x.fillText(l.split("").join(String.fromCharCode(8202)), X + 14, Y + 24); font(700, 32); x.fillStyle = col; x.fillText(n, X + 14, Y + 62); font(400, 13); x.fillStyle = T.muted; const sw = x.measureText(sub).width; x.fillText(sub, X + TW - 14 - sw, Y + 62); });
+  const HC = { OP: ["#1f4d33", "#2e7d4f"], SB: ["#4d4116", "#a8892c"], BD: ["#6b1f19", "#b3402f"], PM: ["#1d3a5f", "#3b6ea8"] };   // same as the hour board
   const block = (m, h, X, Y, w, hh) => {   // one hour box, split by the real times like the hour board
-    const a0 = hStart(sd, h), y0 = a0 + 36e5; if (a0 > now) { x.strokeStyle = "#2b2f2d"; x.lineWidth = 1; x.beginPath(); x.roundRect(X + .5, Y + .5, w - 1, hh - 1, 5); x.stroke(); return; }
-    const v = offAt(m, a0) ? "OFF" : cellVal(sd, m, h), lim = Math.min(y0, now); if (!v || v === "OFF") { rr(X, Y, w, hh, 5, v === "OFF" ? "#3a3a3a" : "#262a28"); return; }
-    const SG = evSegs(m, a0, lim).filter(g => !(g.a <= a0 && g.b >= lim - 3e4)), base = v === "SB" ? HC.SB : HC.OP;
-    x.save(); x.beginPath(); x.roundRect(X, Y, w, hh, 5); x.clip(); x.fillStyle = "#262a28"; x.fillRect(X, Y, w, hh);
-    if (!SG.length) { x.fillStyle = HC[v] || "#555"; x.fillRect(X, Y, w * (lim - a0) / 36e5, hh); }
-    else { const ended = SG.at(-1).b < now - 3e4; x.fillStyle = base; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
-      for (const g of SG) { x.fillStyle = HC[g.t] || "#555"; x.fillRect(X + w * (g.a - a0) / 36e5, Y, w * (g.b - g.a) / 36e5, hh); } }
-    x.restore(); };
-  let y = 200;
+    const a0 = hStart(sd, h), y0 = a0 + 36e5; if (a0 > now) { x.setLineDash([3, 3]); box(X, Y, w, hh, 6, null, "#333a37"); x.setLineDash([]); return; }
+    const v = offAt(m, a0) ? "OFF" : cellVal(sd, m, h), lim = Math.min(y0, now); if (!v || v === "OFF") { box(X, Y, w, hh, 6, "#262826", "#333"); return; }
+    const SG = evSegs(m, a0, lim).filter(g => !(g.a <= a0 && g.b >= lim - 3e4)), base = v === "SB" ? "SB" : "OP", main = SG.length ? base : (HC[v] ? v : "OP");
+    x.save(); x.beginPath(); x.roundRect(X, Y, w, hh, 6); x.clip(); x.fillStyle = "#262826"; x.fillRect(X, Y, w, hh);
+    if (!SG.length) { x.fillStyle = HC[main][0]; x.fillRect(X, Y, w * (lim - a0) / 36e5, hh); }
+    else { const ended = SG.at(-1).b < now - 3e4; x.fillStyle = HC[base][0]; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
+      for (const g of SG) { x.fillStyle = (HC[g.t] || HC.BD)[0]; x.fillRect(X + w * (g.a - a0) / 36e5, Y, w * (g.b - g.a) / 36e5, hh); } }
+    x.restore(); box(X, Y, w, hh, 6, null, HC[main][1]); };
+  { let lx = P; font(500, 13); for (const [k, l] of [["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"], ["-", "Not filled in"], ["", "Hour not reached"]]) {   // colour key
+      if (HC[k]) box(lx, 196, 24, 15, 4, HC[k][0], HC[k][1]); else if (k === "-") box(lx, 196, 24, 15, 4, "#262826", "#333"); else { x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#4a524e"); x.setLineDash([]); }
+      x.fillStyle = T.muted; x.fillText(l, lx + 30, 208); lx += 30 + x.measureText(l).width + 20; } }
+  let y = 228;
   for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length;
-    font(800, 18); x.fillStyle = "#e9e5d8"; x.fillText(g.g.toUpperCase(), P, y + 22); font(600, 15); x.fillStyle = wk < on.length ? "#ff9a8c" : "#7fd6a0"; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, P + NW + 60, y + 22);
-    if (g === groups[0]) { font(600, 12); x.fillStyle = "#7d8581"; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
-    x.fillStyle = "#2b2f2d"; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
+    font(700, 13); x.fillStyle = T.gold; x.fillText(g.g.toUpperCase().split("").join(String.fromCharCode(8202)), P, y + 22); const gw = x.measureText(g.g.toUpperCase().split("").join(String.fromCharCode(8202))).width;
+    font(500, 13); x.fillStyle = T.muted; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
+    if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
+    x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
     g.L.forEach((m, i) => { const Y = y + i * RH, t = offNow(m) ? "OFF" : st(m), why = ["BD", "PM", "SB"].includes(t) ? whyOf(m) : "", sc = ["BD", "PM"].includes(t) ? sinceOf(m, t) : null;
-      rr(P, Y + 6, 5, RH - 12, 2, COL[t] || "#555"); font(800, 18); x.fillStyle = "#fff"; x.fillText(m, P + 14, Y + 26);
-      font(600, 15); x.fillStyle = t === "OP" ? "#7fd6a0" : t === "BD" ? "#ff9a8c" : t === "PM" ? "#8fbaf0" : t === "SB" ? "#ecc76a" : "#aaa";
+      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26);
+      font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted;
       x.fillText(fit(`${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}`, SW - 12), P + NW, why ? Y + 18 : Y + 26);
-      if (why) { font(400, 13); x.fillStyle = "#c9c4b6"; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
+      if (why) { font(400, 12.5); x.fillStyle = T.muted; x.fillText(fit(why, SW - 12), P + NW, Y + 35); }
       HRL.forEach((h, k) => block(m, h, HX + k * (HW + HG), Y + 6, HW, RH - 12)); });
     y += g.L.length * RH + 6; }
-  if (downL.length) { font(800, 18); x.fillStyle = "#d4a12a"; x.fillText("OUT OF SERVICE – RECOVERY PLAN", P, y + 26); y += 40;
+  if (downL.length) { y += 6; font(700, 13); x.fillStyle = T.gold; x.fillText("OUT OF SERVICE – RECOVERY PLAN".split("").join(String.fromCharCode(8202)), P, y + 22); x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 42;
     const G2 = []; for (const r of downL) { const h0 = r.since ? (now - r.since) / 36e5 : 0, k = `${r.why}|${h0 >= 48 ? Math.floor(h0 / 24) : Math.round(h0)}|${r.e?.eta || ""}|${r.e?.action || ""}`, g0 = G2.find(q => q.k === k && groupOf(q.ms[0]) === groupOf(r.m)); if (g0) g0.ms.push(r.m); else G2.push({ k, ms: [r.m], r }); }
-    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 16); x.fillStyle = "#fff"; x.fillText(fit(r.m, 300), P, y + 20); font(400, 15); x.fillStyle = "#d8d3c4";
+    H += 0; for (const { ms, r } of G2) { r.m = ms.join(", "); font(700, 15); x.fillStyle = T.fg; x.fillText(fit(r.m, 300), P, y + 20); font(400, 14); x.fillStyle = T.muted;
       const h0 = r.since ? (now - r.since) / 36e5 : 0, dd = r.since ? (h0 >= 48 ? `${Math.floor(h0 / 24)} days` : `${hm(h0)} h`) : "";
       x.fillText(fit([r.why, dd && "out " + dd, r.e?.action, r.e?.eta ? "back " + fmt(r.e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · "), W - P * 2 - 320), P + 310, y + 20); y += 32; }
     y += 10; }
   const H2 = Math.min(H, y + 70), c2 = document.createElement("canvas"); c2.width = W; c2.height = H2; const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);   // trim to what was drawn
-  x2.fillStyle = "#d4a12a"; x2.fillRect(0, H2 - 54, W, 3); x2.font = `500 16px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#9aa39e"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
+  x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
   const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 20); }
   return c2; }
 async function showPicture(text) {
