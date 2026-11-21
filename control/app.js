@@ -1141,7 +1141,6 @@ function cellMenu(btn) {
   document.getElementById("hpop")?.remove(); const v = btn.classList.contains("auto") || btn.classList.contains("carry") ? "" : btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
   const LB = { OP: "OP · operating", SB: "RF · refuelling", BD: "BD · breakdown", PM: "PM · maintenance" };
   pop.innerHTML = ["OP", "SB", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${LB[o]}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
-    + `<button type="button" class="ty" data-hpart="1" style="background:#2a2f2d;color:#f0d78a">Part of the hour – type the times</button>`
     + (v ? `<small>Tap ${v} again to clear it</small>` : "");
   pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
   const w = pop.offsetWidth, h = pop.offsetHeight; pop.style.left = scrollX + Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) + "px"; pop.style.top = scrollY + (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + "px";
@@ -1293,7 +1292,7 @@ async function submitH(ev) {
       if (Object.keys(prop).some(k => (old[k] || "") !== (prop[k] || "") && lockedV(old, k))) { const why = f.elements.why?.value.trim();
         if (!why) { toast("Say why it must change, for the admin."); f.elements.why?.focus(); return; }
         await addReq({ target: { type: "ev", id: old.id }, what: evTxt(old), fromTxt: evTxt(old), toTxt: evTxt(prop), to: prop, why }); return; } }
-    const rec = { ...(old || {}), id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), action: (f.elements.action?.value || "").trim(), owner: (f.elements.owner?.value || "").trim(), eta: f.elements.eta?.value || "", endBy: e && !old?.end ? me.name : old?.endBy || "" };
+    const rec = { ...(old || {}), grid: undefined, id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), action: (f.elements.action?.value || "").trim(), owner: (f.elements.owner?.value || "").trim(), eta: f.elements.eta?.value || "", endBy: e && !old?.end ? me.name : old?.endBy || "" };
     await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}${rec.action ? " · action: " + rec.action : ""}${rec.owner ? " · " + rec.owner : ""}${rec.eta ? " · ETA " + fmt(rec.eta) : ""}`);
     const hc = f.elements.hourcell?.value; if (hc) { const [hd, hm2, hh] = hc.split("|"); await clearRest(hd, hm2, +hh); }   // the whole-hour entry in that hour is replaced by the typed times
     closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`);
