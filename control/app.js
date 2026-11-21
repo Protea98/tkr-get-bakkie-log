@@ -136,7 +136,7 @@ function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = 
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
   if (h != null) return C[h] === "-" ? "?" : C[h]; if (s) return s.type;
-  const cur = HRS(sh).filter(x => hStart(d, x) <= now).at(-1), v = cur != null ? cellVal(d, m, cur) : ""; return v === "BD" || v === "PM" || v === "SB" ? v : "OP"; }   // nothing marked this shift: working (clean slate)
+  return "?"; }   // nothing filled in this shift yet   // nothing marked this shift: working (clean slate)
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
 /* ---------- controllers on this device ---------- */
@@ -275,7 +275,7 @@ function hourBoard() {
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
       <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb SB"><b>SB</b></span> Available, standing <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
     ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
-      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Operating" : st === "SB" ? "Available, not operating" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = carryFrom(d, mc, H[0]); return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
+      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Operating" : st === "SB" ? "Available, not operating" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = ""; return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
@@ -458,10 +458,11 @@ function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (offAt(mc, hStart(d, h))) return hStart(d, h) <= Date.now() ? "OFF" : "";
   if (C[h] === "-") return "";   // cleared: blank, as if never filled
   if (C[h]) return C[h];
-  const a = hStart(d, h), b = a + 36e5, e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
+  const a = hStart(d, h), b = a + 36e5, s0 = shiftWin(d, h < 18 ? "Day" : "Night")[0];
+  if (a > Date.now()) return "";
+  const e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a && (e.end || toMs(e.start) >= s0));   // a breakdown still open from an earlier shift does not fill the new shift's boxes
   if (e.length) return e.some(x => x.type === "BD") ? "BD" : "PM";
-  if (a > Date.now() || !shiftUsed(d, h < 18 ? "Day" : "Night")) return "";
-  return carryFrom(d, mc, h) || "OP";   // a breakdown, maintenance or standby carries on until someone picks something else
+  return "";   // nothing filled in: the box stays blank until the controller fills it
 }
 /* the hour before: was the machine left on breakdown or maintenance? (a timed breakdown that was closed does not carry on) */
 const prevHour = (d, h) => h === 6 ? [addDays(d, -1), 29] : [d, h - 1];
@@ -487,7 +488,7 @@ function hourParts(mc, d, hr, v, inT) {
 function shiftSum(mc, d, sh) {
   const [, b0] = shiftWin(d, sh), H = HRS(sh), C = cellsOf(d, mc), V = H.map(h => cellVal(d, mc, h, C)), filled = V.filter(v => v && v !== "OFF").length;
   let BD = 0, PM = 0, span = 0;
-  H.forEach((hr, k) => { if (hStart(d, hr) >= b0) return; const q = hourParts(mc, d, hr, V[k], k ? V[k - 1] : carryFrom(d, mc, hr)); span += q.len; BD += q.BD; PM += q.PM; });
+  H.forEach((hr, k) => { if (hStart(d, hr) >= b0) return; const q = hourParts(mc, d, hr, V[k], k ? V[k - 1] : ""); span += q.len; BD += q.BD; PM += q.PM; });
   const down = BD + PM;
   return { filled, BD, PM, down, avail: Math.max(0, span - down), SB: 0, NU: 0 };
 }
