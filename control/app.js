@@ -123,9 +123,14 @@ const offAt = (m, t) => (siteRec().off?.[m] || []).some(p => p.from <= t && (!p.
 const offNow = m => offAt(m, Date.now());
 const offShift = (m, d, sh) => { const [a, b] = shiftWin(d, sh); return offAt(m, a) && offAt(m, b - 1); };
 const evEnd = e => e.end ? toMs(e.end) : Date.now();
+function evSegs(machine, from, to) {   // down time inside [from, to): exact times typed in win over whole-hour boxes in the same hour; overlaps joined
+  const E = evs().filter(e => e.machine === machine && toMs(e.start) < to && evEnd(e) > from), exact = E.filter(e => !e.grid), use = exact.length ? exact : E, S = [];
+  for (const e of use.sort((p2, q2) => toMs(p2.start) - toMs(q2.start))) { const a = Math.max(toMs(e.start), from), b = Math.min(evEnd(e), to); if (b <= a) continue; const l = S.at(-1);
+    if (l && l.t === e.type && a <= l.b) l.b = Math.max(l.b, b); else S.push({ t: e.type, a, b }); }
+  return S; }
 function hoursIn(machine, from, to) {
   const out = { BD: 0, SB: 0, PM: 0, NU: 0 };
-  for (const e of evs()) { if (e.machine !== machine) continue; const a = Math.max(toMs(e.start), from), b = Math.min(evEnd(e), to); if (b > a) out[e.type] = (out[e.type] || 0) + (b - a) / 36e5; }
+  for (const g of evSegs(machine, from, to)) out[g.t] = (out[g.t] || 0) + (g.b - g.a) / 36e5;
   return out;
 }
 /* one machine, one date (06:00 to 06:00 next day), up to now */
@@ -140,7 +145,10 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
 function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x]).at(-1);
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
-  if (h != null) return C[h] === "-" ? "?" : C[h]; if (s) return s.type;
+  if (h != null) { if (C[h] === "-") return "?";
+    if (C[h] === "BD" || C[h] === "PM") { const x0 = hStart(d, h), ex = evs().filter(e => e.machine === m && !e.grid && toMs(e.start) < x0 + 36e5 && evEnd(e) > x0);   // exact times typed for that hour: back up when the last one ended
+      if (ex.length && ex.every(e => e.end && toMs(e.end) <= now)) return "OP"; }
+    return C[h]; } if (s) return s.type;
   return lastKnown(m) || "?"; }
 /* nothing marked yet this shift: the machine's last marked status (up to 2 days back), so the dashboard and the message keep showing it */
 function lastKnown(m, from = Date.now()) {
@@ -278,16 +286,20 @@ function hourBoard() {
     if (!v || v === "OFF") return `<div class="hb ${v || "fut"}${cur ? " now" : ""}"><i>${lab(h)}</i><b>${v || ""}</b></div>`;
     const q = hourParts(mc, d, h, v, prev), dn = q.BD + q.PM, t = dn >= q.len - 1 / 120 ? (q.BD >= q.PM ? "BD" : "PM") : dn > 0 ? "MIX" : v === "SB" ? "SB" : "OP";
     const x0 = hStart(d, h), y0 = x0 + 36e5, EV = downEvs(mc).filter(e => toMs(e.start) < y0 && evEnd(e) > x0);   // the clock time it changed inside this hour: went down at, or came back at
-    const st0 = EV.map(e => toMs(e.start)).filter(z => z > x0).sort((p2, q2) => p2 - q2)[0], en0 = EV.map(e => e.end ? toMs(e.end) : 0).filter(z => z > x0 && z < y0).sort((p2, q2) => q2 - p2)[0];
-    const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", at = st0 ? `${dt} ${tOf(st0)}` : en0 ? `OP ${tOf(en0)}` : dt;
+    const SGx = evSegs(mc, x0, y0), st0 = SGx.map(g => g.a).filter(z => z > x0)[0], en0 = SGx.map(g => g.b).filter(z => z > x0 && z < y0 && z <= Date.now() - 6e4).at(-1);
+    const pct = Math.round(dn / 1 * 100), dt = q.BD >= q.PM ? "BD" : "PM", at = st0 && en0 && en0 > st0 ? `${dt} ${tOf(st0)}–${tOf(en0)}` : st0 ? `${dt} ${tOf(st0)}` : en0 ? `OP ${tOf(en0)}` : dt;
     const lbl = t === "MIX" ? at : t === "OP" ? t : t === "SB" ? "RF" : dn < 1 - 1 / 120 && cur ? at : t;
     const base = v === "SB" ? "#4d4116" : "#1f4d33", dc = dt === "BD" ? "#9b2c22" : "#2a4f8a", pas = Math.round(q.len * 100), up = cur ? pas : 100;   // filled as far as the hour has gone: down part first, then working
-    const fill = dn > 0 && pct >= up ? dc : base, bg = cur || t === "MIX" ? `style="background:linear-gradient(to right,${dc} 0 ${Math.min(pct, up)}%,${fill === dc ? dc : base} ${Math.min(pct, up)}% ${up}%,#202220 ${up}% 100%)"` : "";
+    const SG = evSegs(mc, x0, Math.min(y0, Date.now())), stops = []; let pos = 0;   // the hour drawn left to right: working, then the down part at the time it happened, then working, the rest not yet passed
+    if (t === "MIX" || cur) { if (SG.length) { for (const g of SG) { const a1 = Math.round((g.a - x0) / 36e3), b1 = Math.round((g.b - x0) / 36e3); if (a1 > pos) stops.push(`${base} ${pos}% ${a1}%`); stops.push(`${g.t === "BD" ? "#9b2c22" : "#2a4f8a"} ${a1}% ${b1}%`); pos = b1; } }
+      else if (dn > 0) { stops.push(`${dc} 0% ${Math.min(pct, up)}%`); pos = Math.min(pct, up); }
+      if (pos < up) stops.push(`${base} ${pos}% ${up}%`); if (up < 100) stops.push(`#202220 ${up}% 100%`); }
+    const bg = stops.length ? `style="background:linear-gradient(to right,${stops.join(",")})"` : "";
     return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
       <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb SB"><b>RF</b></span> Refuelling <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
     ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
-      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st}">${st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = ""; return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
+      return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st === "?" ? "OP" : st}">${st === "?" ? "Operational" : st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = ""; return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
 }
 function evLine(e) {
   const dur = (evEnd(e) - toMs(e.start)) / 36e5;
